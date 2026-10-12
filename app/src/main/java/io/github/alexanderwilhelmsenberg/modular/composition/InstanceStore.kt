@@ -108,7 +108,8 @@ class InstanceStore(
         }
 
     fun find(instanceId: String): ModuleInstance? =
-        instances.value.firstOrNull { it.id == instanceId }
+        stateStore.state.value.instances
+            .firstOrNull { it.id == instanceId }
 
     override fun close() {
         scope.cancel()

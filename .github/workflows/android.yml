@@ -30,10 +30,69 @@ jobs:
           gradle-version: "9.6.0"
 
       - name: Unit tests
-        run: gradle :module-api:testDebugUnitTest :app:testDebugUnitTest --stacktrace
+        run: >
+          gradle
+          :module-api:testDebugUnitTest
+          :app:testDebugUnitTest
+          :reference-sort-alphabetical:testDebugUnitTest
+          --stacktrace
 
       - name: Lint
-        run: gradle :module-api:lintDebug :app:lintDebug --stacktrace
+        run: >
+          gradle
+          :module-api:lintDebug
+          :app:lintDebug
+          :reference-sort-alphabetical:lintDebug
+          --stacktrace
 
-      - name: Assemble debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Assemble debug APKs
+        run: >
+          gradle
+          :app:assembleDebug
+          :reference-sort-alphabetical:assembleDebug
+          --stacktrace
+
+  ipc-smoke:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 9.6
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6.0"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Cross-APK Binder smoke test
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: >
+            -no-window
+            -gpu swiftshader_indirect
+            -noaudio
+            -no-boot-anim
+            -camera-back none
+          script: |
+            gradle :reference-sort-alphabetical:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+            adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
+            gradle :app:connectedDebugAndroidTest --stacktrace

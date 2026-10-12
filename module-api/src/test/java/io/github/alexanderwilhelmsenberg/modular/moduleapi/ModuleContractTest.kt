@@ -6,8 +6,15 @@ import org.junit.Test
 
 class ModuleContractTest {
     @Test
-    fun currentProtocolIsSupported() {
-        assertTrue(ModuleContract.isProtocolSupported(ModuleContract.CURRENT_PROTOCOL_VERSION))
+    fun supportedProtocolRangeIncludesDiscoveryAndSessions() {
+        assertTrue(ModuleContract.isProtocolSupported(1))
+        assertTrue(ModuleContract.isProtocolSupported(2))
+    }
+
+    @Test
+    fun onlyV2AndLaterSupportedProtocolsHaveSessions() {
+        assertFalse(ModuleContract.supportsSessions(1))
+        assertTrue(ModuleContract.supportsSessions(2))
     }
 
     @Test

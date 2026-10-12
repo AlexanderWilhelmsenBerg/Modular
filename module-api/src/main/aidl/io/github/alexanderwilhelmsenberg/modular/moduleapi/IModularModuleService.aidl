@@ -1,14 +1,19 @@
 package io.github.alexanderwilhelmsenberg.modular.moduleapi;
 
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularHost;
+
 /**
- * Minimal v1 wire contract between Modular Core and an external module APK.
+ * Root service exposed by an independently installed Modular module APK.
  *
- * Keep this interface deliberately small. Capability-specific protocols belong
- * in separately versioned contracts rather than growing this handshake forever.
+ * v1 methods are the discovery handshake.
+ * v2 adds an explicit Core-host session Binder.
  */
 interface IModularModuleService {
     int getProtocolVersion();
     String getModuleId();
     String getModuleVersion();
     String[] getCapabilities();
+
+    void openSession(String sessionId, IModularHost host);
+    void closeSession(String sessionId);
 }

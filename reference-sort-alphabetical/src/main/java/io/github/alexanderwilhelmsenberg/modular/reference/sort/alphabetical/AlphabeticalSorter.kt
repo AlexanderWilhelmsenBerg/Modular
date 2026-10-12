@@ -18,19 +18,42 @@ object AlphabeticalSorter {
         }
 
         return items.sortedWith { left, right ->
-            val byLabel = collator.compare(left.label, right.label)
+            val byCollation = collator.compare(
+                left.label,
+                right.label,
+            )
 
-            when {
-                byLabel != 0 -> byLabel
-                left.label != right.label ->
-                    left.label.compareTo(right.label, ignoreCase = true)
-                left.key.packageName != right.key.packageName ->
-                    left.key.packageName.compareTo(right.key.packageName)
-                left.key.activityName != right.key.activityName ->
-                    left.key.activityName.compareTo(right.key.activityName)
-                else ->
-                    left.key.profileSerial.compareTo(right.key.profileSerial)
+            if (byCollation != 0) {
+                return@sortedWith byCollation
             }
+
+            val byExactLabel = left.label.compareTo(
+                right.label,
+            )
+
+            if (byExactLabel != 0) {
+                return@sortedWith byExactLabel
+            }
+
+            val byPackage = left.key.packageName.compareTo(
+                right.key.packageName,
+            )
+
+            if (byPackage != 0) {
+                return@sortedWith byPackage
+            }
+
+            val byActivity = left.key.activityName.compareTo(
+                right.key.activityName,
+            )
+
+            if (byActivity != 0) {
+                return@sortedWith byActivity
+            }
+
+            left.key.profileSerial.compareTo(
+                right.key.profileSerial,
+            )
         }
     }
 }

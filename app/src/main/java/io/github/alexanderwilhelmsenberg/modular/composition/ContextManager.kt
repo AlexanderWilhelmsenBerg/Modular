@@ -85,6 +85,23 @@ class ContextManager(
             stateStore.update { state ->
                 validateAgainstState(normalized, state)
 
+                if (state.activeContextId == normalized.id) {
+                    val existing = requireNotNull(
+                        state.contexts.firstOrNull {
+                            it.id == normalized.id
+                        },
+                    ) {
+                        "Active context is missing from persisted contexts"
+                    }
+
+                    require(
+                        existing.bindings == normalized.bindings,
+                    ) {
+                        "Deactivate the active context before changing " +
+                            "its capability bindings"
+                    }
+                }
+
                 state.copy(
                     contexts = (
                         state.contexts.filterNot {

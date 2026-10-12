@@ -1,6 +1,6 @@
 # Phase 1 — Shared App Repository
 
-Status: **Implemented in PR #2, pending CI**
+Status: **Implemented and CI-verified in PR #2**
 
 ## Purpose
 
@@ -97,3 +97,13 @@ Core's recovery/settings screen shows only repository diagnostics:
 - refreshing/error state
 
 It does not render the app catalog as a drawer.
+
+## Verification
+
+The application repository compiled successfully as part of the Phase 1 Android application.
+
+CI passed:
+
+- app and module-api unit tests;
+- app and module-api Android lint;
+- debug APK assembly.

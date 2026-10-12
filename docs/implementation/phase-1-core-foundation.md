@@ -1,8 +1,8 @@
 # Phase 1 — Core Launcher Foundation
 
-Status: **In implementation**
+Status: **Implemented in PR #2**
 
-This slice begins Phase 1 with a bootable Android launcher Core and the smallest useful external-module handshake.
+This Phase 1 branch establishes a bootable Android launcher Core, the first external-module handshake, and the shared Android-facing application repository needed by future modules.
 
 ## Included
 
@@ -16,19 +16,24 @@ This slice begins Phase 1 with a bootable Android launcher Core and the smallest
 - module registry backed by `StateFlow`.
 - module process binding and basic death/failure handling.
 - compatibility check for module protocol v1.
+- shared `LauncherApps` application repository.
+- profile-aware application identity using persistent profile serial numbers.
 - CI build/lint/unit-test workflow.
+
+See [Phase 1 — Shared App Repository](phase-1-app-repository.md) for the application-catalog slice.
 
 ## Deliberately not included yet
 
 - a production Home module;
 - app drawer;
-- app repository / `LauncherApps`;
+- app filtering or sorting implementation;
 - capability invocation protocols beyond the handshake;
 - capability grants;
 - module signing/caller trust policy;
 - persistent instance store;
 - contexts;
-- surface protocol;
+- declarative surface protocol;
+- Private Space UI/support contract;
 - MCP;
 - automation/scripts.
 
@@ -50,9 +55,9 @@ Initial pinned toolchain:
 
 ### Why compileSdk 37 but targetSdk 36?
 
-Stable Compose 1.12.x requires compileSdk 37. Android 17 is still in beta at the start of this implementation, so the initial app compiles against API 37 while continuing to target the stable Android 16 behavior set.
+Stable Compose 1.12.x requires compileSdk 37. Android 17 remains outside the initial target-behavior baseline for this Phase 1 implementation, so the app compiles against API 37 while continuing to target Android 16 behavior.
 
-The target can move to 37 after Android 17 reaches stable and its behavior changes are reviewed.
+The target can move to 37 after its target-behavior changes are explicitly reviewed.
 
 ## Package identity
 
@@ -66,7 +71,7 @@ The public module API namespace is:
 
 ## v1 module discovery
 
-Candidate module APKs expose an exported bound service for action:
+Candidate module APKs expose a bound service for action:
 
 `io.github.alexanderwilhelmsenberg.modular.action.MODULE`
 
@@ -80,3 +85,15 @@ Core discovers matching services, binds explicitly by component, and reads:
 This is only the bootstrap handshake.
 
 Security/caller-verification and capability-specific AIDL contracts must be designed before treating untrusted third-party modules as authorized providers.
+
+## Verification
+
+GitHub Actions verifies:
+
+- `:module-api:testDebugUnitTest`
+- `:app:testDebugUnitTest`
+- `:module-api:lintDebug`
+- `:app:lintDebug`
+- `:app:assembleDebug`
+
+The implementation passed all three CI stages (unit tests, lint, debug APK assembly) on the Phase 1 branch before this documentation update.

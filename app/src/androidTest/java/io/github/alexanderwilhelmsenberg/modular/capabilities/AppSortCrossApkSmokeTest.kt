@@ -57,9 +57,7 @@ class AppSortCrossApkSmokeTest {
                 DataStoreCompositionStateStore(
                     context = context,
                     fileName =
-                        "slice5-" +
-                            UUID.randomUUID() +
-                            ".preferences_pb",
+                        "slice5-" + UUID.randomUUID(),
                 )
             val instances = InstanceStore(stateStore)
             val contexts = ContextManager(

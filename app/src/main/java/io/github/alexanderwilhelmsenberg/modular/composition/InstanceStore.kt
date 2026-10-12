@@ -63,6 +63,18 @@ class InstanceStore(
             val normalized = normalizeAndValidate(instance)
 
             stateStore.update { state ->
+                val existing = state.instances.firstOrNull {
+                    it.id == normalized.id
+                }
+
+                require(
+                    existing == null ||
+                        existing.providerId == normalized.providerId,
+                ) {
+                    "Instance provider identity is immutable; " +
+                        "create a new instance to select a different provider"
+                }
+
                 state.copy(
                     instances = (
                         state.instances.filterNot {

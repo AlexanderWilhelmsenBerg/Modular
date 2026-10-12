@@ -14,11 +14,26 @@ class CoreHostFactory(
     fun create(
         component: ComponentName,
         sessionId: String,
-    ): IModularHost =
-        CoreHostBinder(
+    ): CoreHostSession {
+        val binder = CoreHostBinder(
             context = appContext,
             expectedPackage = component.packageName,
             sessionId = sessionId,
             appRepository = appRepository,
         )
+
+        return CoreHostSession(
+            host = binder,
+            revokeAction = binder::revoke,
+        )
+    }
+}
+
+class CoreHostSession internal constructor(
+    val host: IModularHost,
+    private val revokeAction: () -> Unit,
+) {
+    fun revoke() {
+        revokeAction()
+    }
 }

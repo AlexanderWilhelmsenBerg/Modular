@@ -71,7 +71,7 @@ This keeps the existing discovery ABI stable as the interface grows.
 
 ## Session model
 
-Each connected v2 module receives a dedicated `IModularHost` Binder.
+Each connected v2 module receives a dedicated, revocable `IModularHost` Binder.
 
 Core records:
 
@@ -80,9 +80,12 @@ Core records:
 - protocol version;
 - advertised capabilities;
 - session ID;
-- module process death recipient.
+- module process death recipient;
+- Core-host session revocation handle.
 
-If the module process dies, its session and routes are removed.
+If the module process dies, the binding is removed, or Core closes the session, all Core Binder endpoints issued for that session are revoked.
+
+A module cannot retain an old app-catalog/app-launch Binder and continue using it after its session ends.
 
 A connected protocol-v1 module remains discoverable but is not published as an invokable capability provider because it has no session.
 
@@ -90,9 +93,12 @@ A connected protocol-v1 module remains discoverable but is not published as an i
 
 The per-session host advertises Core capabilities and returns the requested capability Binder.
 
-Each root and capability call verifies that the Binder calling UID belongs to the package for which the session was created.
+Each root and capability call verifies:
 
-Repeating the identity check on the returned capability Binder means leaking a Binder reference does not implicitly grant another package access.
+1. the session is still active;
+2. the Binder calling UID belongs to the package for which the session was created.
+
+Repeating the check on returned capability Binders means leaking a Binder reference does not implicitly grant another package access.
 
 This is the first identity check, not the final grant model. Signature/trust policy and per-capability grants remain future slices.
 
@@ -174,7 +180,8 @@ This slice is accepted when:
 - v2 session exchange compiles;
 - malformed capability IDs are rejected;
 - Core apps catalog/launch use separate capability Binders;
+- stale Core capability Binders fail after session revocation;
 - catalog paging detects stale generations and enforces page bounds;
 - external capability routes can resolve to raw Binder endpoints;
-- module process death removes the active session;
+- module process death removes and revokes the active session;
 - unit tests, Android lint, and debug APK assembly pass.

@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.RemoteException
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
+import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostSession
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularModuleService
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
@@ -29,7 +30,7 @@ import kotlinx.coroutines.withContext
  * Discovers external Modular module services and negotiates their root session.
  *
  * Protocol v1 remains a metadata-only discovery contract.
- * Protocol v2 receives a per-module Core host Binder after the handshake.
+ * Protocol v2 receives a per-module, revocable Core host Binder.
  */
 class ModuleRegistry(
     context: Context,
@@ -151,13 +152,15 @@ class ModuleRegistry(
                         onSuccess = { handshake ->
                             if (handshake.record.status ==
                                 ModuleConnectionStatus.CONNECTED &&
-                                handshake.sessionId != null
+                                handshake.sessionId != null &&
+                                handshake.coreHostSession != null
                             ) {
                                 val sessionEstablished =
                                     establishSessionDeathTracking(
                                         component = name,
                                         remote = remote,
                                         sessionId = handshake.sessionId,
+                                        coreHostSession = handshake.coreHostSession,
                                     )
 
                                 if (!sessionEstablished) {
@@ -281,15 +284,25 @@ class ModuleRegistry(
                     error = "Unsupported protocol version " + protocolVersion,
                 ),
                 sessionId = null,
+                coreHostSession = null,
             )
         }
 
+        var coreHostSession: CoreHostSession? = null
+
         val sessionId = if (ModuleContract.supportsSessions(protocolVersion)) {
             UUID.randomUUID().toString().also { id ->
-                remote.openSession(
-                    id,
-                    hostFactory.create(component, id),
-                )
+                coreHostSession = hostFactory.create(component, id)
+
+                try {
+                    remote.openSession(
+                        id,
+                        requireNotNull(coreHostSession).host,
+                    )
+                } catch (throwable: Throwable) {
+                    coreHostSession?.revoke()
+                    throw throwable
+                }
             }
         } else {
             null
@@ -307,6 +320,7 @@ class ModuleRegistry(
                 error = null,
             ),
             sessionId = sessionId,
+            coreHostSession = coreHostSession,
         )
     }
 
@@ -314,6 +328,7 @@ class ModuleRegistry(
         component: ComponentName,
         remote: IModularModuleService,
         sessionId: String,
+        coreHostSession: CoreHostSession,
     ): Boolean {
         val binder = remote.asBinder()
         val deathRecipient = IBinder.DeathRecipient {
@@ -335,9 +350,11 @@ class ModuleRegistry(
                 remote = remote,
                 sessionId = sessionId,
                 deathRecipient = deathRecipient,
+                coreHostSession = coreHostSession,
             )
             true
         } catch (remoteException: RemoteException) {
+            coreHostSession.revoke()
             runCatching {
                 remote.closeSession(sessionId)
             }
@@ -375,6 +392,8 @@ class ModuleRegistry(
     private fun closeLiveSession(component: ComponentName) {
         val session = sessions.remove(component) ?: return
 
+        session.coreHostSession.revoke()
+
         runCatching {
             session.remote.asBinder().unlinkToDeath(
                 session.deathRecipient,
@@ -388,7 +407,7 @@ class ModuleRegistry(
     }
 
     private fun dropDeadSession(component: ComponentName) {
-        sessions.remove(component)
+        sessions.remove(component)?.coreHostSession?.revoke()
     }
 
     private fun unbind(
@@ -418,11 +437,13 @@ class ModuleRegistry(
     private data class HandshakeResult(
         val record: ModuleRecord,
         val sessionId: String?,
+        val coreHostSession: CoreHostSession?,
     )
 
     private data class SessionBinding(
         val remote: IModularModuleService,
         val sessionId: String,
         val deathRecipient: IBinder.DeathRecipient,
+        val coreHostSession: CoreHostSession,
     )
 }

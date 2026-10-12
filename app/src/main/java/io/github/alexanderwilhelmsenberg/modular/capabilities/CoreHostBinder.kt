@@ -13,6 +13,7 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppCatalogInfoP
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppCatalogPageParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppKeyParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppLaunchResultParcel
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -21,6 +22,9 @@ import kotlinx.coroutines.runBlocking
  * The root Binder only brokers capability Binders. Each capability Binder
  * repeats the session caller check so a leaked Binder reference does not become
  * authority for another package.
+ *
+ * A closed module session revokes this object and every capability Binder
+ * created by it.
  */
 class CoreHostBinder(
     context: Context,
@@ -29,6 +33,7 @@ class CoreHostBinder(
     private val appRepository: AppRepository,
 ) : IModularHost.Stub() {
     private val packageManager = context.packageManager
+    private val active = AtomicBoolean(true)
 
     private val appCatalogCapability =
         object : IAppCatalogCapability.Stub() {
@@ -126,7 +131,17 @@ class CoreHostBinder(
         }
     }
 
+    fun revoke() {
+        active.set(false)
+    }
+
     private fun enforceSessionCaller() {
+        if (!active.get()) {
+            throw SecurityException(
+                "Module session $sessionId is no longer active",
+            )
+        }
+
         val callingUid = Binder.getCallingUid()
         val callerPackages = packageManager.getPackagesForUid(callingUid).orEmpty()
 

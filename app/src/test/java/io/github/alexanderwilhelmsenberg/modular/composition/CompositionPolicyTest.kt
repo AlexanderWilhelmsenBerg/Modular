@@ -1,6 +1,5 @@
 package io.github.alexanderwilhelmsenberg.modular.composition
 
-import android.content.ComponentName
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityProviderKind
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRoute
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
@@ -260,10 +259,6 @@ class CompositionPolicyTest {
             capability = StandardCapabilities.AppsSort,
             providerKind = CapabilityProviderKind.MODULE,
             providerId = PROVIDER_ID,
-            component = ComponentName(
-                "sort.package",
-                "sort.package.SortService",
-            ),
         )
 
     private class FakeCompositionStateStore :

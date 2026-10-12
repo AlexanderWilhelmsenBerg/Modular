@@ -13,10 +13,14 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppLaunchResult
  * session/caller checks and future grant checks at invocation time.
  */
 interface IModularHost {
-    int getHostProtocolVersion();
-    String[] getCapabilities();
+    int getHostProtocolVersion() = 1;
+    String[] getCapabilities() = 2;
 
-    AppCatalogInfoParcel getAppCatalogInfo();
-    AppCatalogPageParcel getAppCatalogPage(long expectedGeneration, int offset, int limit);
-    AppLaunchResultParcel launchApp(in AppKeyParcel key);
+    AppCatalogInfoParcel getAppCatalogInfo() = 3;
+    AppCatalogPageParcel getAppCatalogPage(
+        long expectedGeneration,
+        int offset,
+        int limit
+    ) = 4;
+    AppLaunchResultParcel launchApp(in AppKeyParcel key) = 5;
 }

@@ -1,5 +1,6 @@
 package io.github.alexanderwilhelmsenberg.modular.capabilities
 
+import android.os.IBinder
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CoreCapabilities
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
@@ -17,11 +18,11 @@ import kotlinx.coroutines.launch
  * Resolves exact major-version capability contracts to available providers.
  *
  * Selection policy is intentionally minimal in Slice 3: Core providers are
- * registered first and external providers are then exposed as candidates.
+ * registered first and external providers are exposed as candidates.
  * Instance/context policy will choose among multiple external providers later.
  */
 class CapabilityRouter(
-    moduleRegistry: ModuleRegistry,
+    private val moduleRegistry: ModuleRegistry,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -69,6 +70,26 @@ class CapabilityRouter(
             it.capability == capability &&
                 it.providerKind == CapabilityProviderKind.CORE
         }
+
+    suspend fun acquireModuleBinder(
+        route: CapabilityRoute,
+    ): Result<IBinder> {
+        if (route.providerKind != CapabilityProviderKind.MODULE) {
+            return Result.failure(
+                IllegalArgumentException("Route is not an external module"),
+            )
+        }
+
+        val component = route.component
+            ?: return Result.failure(
+                IllegalStateException("Module route has no component"),
+            )
+
+        return moduleRegistry.acquireCapabilityBinder(
+            component = component,
+            capability = route.capability,
+        )
+    }
 
     override fun close() {
         scope.cancel()

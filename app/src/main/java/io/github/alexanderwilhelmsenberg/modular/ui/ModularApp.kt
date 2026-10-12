@@ -22,6 +22,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
 
@@ -31,8 +32,10 @@ fun ModularApp(
     homeRoleAvailable: Boolean,
     homeRoleHeld: Boolean,
     modules: List<ModuleRecord>,
+    appCatalog: AppCatalog,
     onRequestHomeRole: () -> Unit,
     onRefreshModules: () -> Unit,
+    onRefreshApps: () -> Unit,
 ) {
     MaterialTheme {
         Scaffold(
@@ -80,6 +83,31 @@ fun ModularApp(
                             " connected",
                         actionText = "Refresh",
                         onAction = onRefreshModules,
+                    )
+                }
+
+                item {
+                    val appStatus = buildString {
+                        append(appCatalog.apps.size)
+                        append(" launchable activities · ")
+                        append(appCatalog.profiles.size)
+                        append(" profiles")
+
+                        if (appCatalog.isRefreshing) {
+                            append(" · refreshing")
+                        }
+
+                        appCatalog.lastError?.let { error ->
+                            append("\nError: ")
+                            append(error)
+                        }
+                    }
+
+                    StatusCard(
+                        title = "App repository",
+                        body = appStatus,
+                        actionText = "Refresh",
+                        onAction = onRefreshApps,
                     )
                 }
 

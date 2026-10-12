@@ -23,6 +23,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
+import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
+import io.github.alexanderwilhelmsenberg.modular.composition.LauncherContext
+import io.github.alexanderwilhelmsenberg.modular.composition.ModuleInstance
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
 
@@ -33,9 +36,16 @@ fun ModularApp(
     homeRoleHeld: Boolean,
     modules: List<ModuleRecord>,
     appCatalog: AppCatalog,
+    instances: List<ModuleInstance>,
+    contexts: List<LauncherContext>,
+    activeContext: ActiveContextState,
+    compositionLoadError: String?,
+    contextActivationError: String?,
     onRequestHomeRole: () -> Unit,
     onRefreshModules: () -> Unit,
     onRefreshApps: () -> Unit,
+    onActivateContext: (String) -> Unit,
+    onDeactivateContext: () -> Unit,
 ) {
     MaterialTheme {
         Scaffold(
@@ -48,7 +58,8 @@ fun ModularApp(
                     .fillMaxSize()
                     .padding(padding),
                 contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement =
+                    Arrangement.spacedBy(12.dp),
             ) {
                 item {
                     StatusCard(
@@ -61,18 +72,23 @@ fun ModularApp(
                             else ->
                                 "Modular is not the current HOME application."
                         },
-                        actionText = if (homeRoleAvailable && !homeRoleHeld) {
-                            "Make default"
-                        } else {
-                            null
-                        },
+                        actionText =
+                            if (
+                                homeRoleAvailable &&
+                                !homeRoleHeld
+                            ) {
+                                "Make default"
+                            } else {
+                                null
+                            },
                         onAction = onRequestHomeRole,
                     )
                 }
 
                 item {
                     val connected = modules.count {
-                        it.status == ModuleConnectionStatus.CONNECTED
+                        it.status ==
+                            ModuleConnectionStatus.CONNECTED
                     }
 
                     StatusCard(
@@ -112,37 +128,235 @@ fun ModularApp(
                 }
 
                 item {
+                    CompositionStatusCard(
+                        instances = instances,
+                        contexts = contexts,
+                        activeContext = activeContext,
+                        loadError = compositionLoadError,
+                        activationError = contextActivationError,
+                        onDeactivateContext = onDeactivateContext,
+                    )
+                }
+
+                if (contexts.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "Contexts",
+                            style =
+                                MaterialTheme.typography.titleMedium,
+                        )
+                    }
+
+                    items(
+                        items = contexts,
+                        key = { it.id },
+                    ) { context ->
+                        ContextCard(
+                            context = context,
+                            activeContext = activeContext,
+                            onActivate = onActivateContext,
+                        )
+                    }
+                }
+
+                if (instances.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "Saved module instances",
+                            style =
+                                MaterialTheme.typography.titleMedium,
+                        )
+                    }
+
+                    items(
+                        items = instances,
+                        key = { it.id },
+                    ) { instance ->
+                        InstanceCard(instance)
+                    }
+                }
+
+                item {
                     StatusCard(
                         title = "Recovery surface",
                         body = "No Home surface module is active yet. " +
-                            "This screen is Core's minimal recovery/settings UI, " +
-                            "not the production home screen.",
+                            "This screen is Core's minimal " +
+                            "recovery/settings UI, not the " +
+                            "production home screen.",
                     )
                 }
 
                 if (modules.isEmpty()) {
                     item {
                         Text(
-                            text = "No compatible module services discovered.",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text =
+                                "No compatible module services discovered.",
+                            style =
+                                MaterialTheme.typography.bodyMedium,
                         )
                     }
                 } else {
                     item {
                         Text(
                             text = "Discovered modules",
-                            style = MaterialTheme.typography.titleMedium,
+                            style =
+                                MaterialTheme.typography.titleMedium,
                         )
                     }
 
                     items(
                         items = modules,
-                        key = { it.component.flattenToString() },
+                        key = {
+                            it.component.flattenToString()
+                        },
                     ) { module ->
                         ModuleCard(module)
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CompositionStatusCard(
+    instances: List<ModuleInstance>,
+    contexts: List<LauncherContext>,
+    activeContext: ActiveContextState,
+    loadError: String?,
+    activationError: String?,
+    onDeactivateContext: () -> Unit,
+) {
+    val body = buildString {
+        append(instances.size)
+        append(" instances · ")
+        append(contexts.size)
+        append(" contexts")
+
+        val active = activeContext.context
+        if (active == null) {
+            append("\nNo active context")
+        } else {
+            append("\nActive: ")
+            append(active.name)
+            append(
+                if (activeContext.isReady) {
+                    " · ready"
+                } else {
+                    " · degraded"
+                },
+            )
+
+            activeContext.problems.forEach { problem ->
+                append("\n")
+                append(problem.capability.wireValue)
+                append(": ")
+                append(problem.detail)
+            }
+        }
+
+        loadError?.let {
+            append("\nStorage error: ")
+            append(it)
+        }
+
+        activationError?.let {
+            append("\nActivation error: ")
+            append(it)
+        }
+    }
+
+    StatusCard(
+        title = "Composition",
+        body = body,
+        actionText =
+            if (activeContext.context != null) {
+                "Deactivate"
+            } else {
+                null
+            },
+        onAction = onDeactivateContext,
+    )
+}
+
+@Composable
+private fun ContextCard(
+    context: LauncherContext,
+    activeContext: ActiveContextState,
+    onActivate: (String) -> Unit,
+) {
+    val isActive = activeContext.context?.id == context.id
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement =
+                Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                context.name,
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                context.bindings.size.toString() +
+                    " capability bindings",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            context.bindings.forEach { binding ->
+                Text(
+                    binding.capability.wireValue +
+                        " → " + binding.instanceId,
+                    style =
+                        MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            if (isActive) {
+                Text(
+                    if (activeContext.isReady) {
+                        "Active · ready"
+                    } else {
+                        "Active · degraded"
+                    },
+                    style =
+                        MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                Button(
+                    onClick = {
+                        onActivate(context.id)
+                    },
+                ) {
+                    Text("Activate")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InstanceCard(
+    instance: ModuleInstance,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement =
+                Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                instance.name,
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                "Provider: " + instance.providerId,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "ID: " + instance.id,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
@@ -157,10 +371,17 @@ private fun StatusCard(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement =
+                Arrangement.spacedBy(8.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(body, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                body,
+                style = MaterialTheme.typography.bodyMedium,
+            )
 
             if (actionText != null) {
                 Button(onClick = onAction) {
@@ -176,23 +397,33 @@ private fun ModuleCard(module: ModuleRecord) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement =
+                Arrangement.spacedBy(6.dp),
         ) {
-            Text(module.label, style = MaterialTheme.typography.titleSmall)
+            Text(
+                module.label,
+                style = MaterialTheme.typography.titleSmall,
+            )
             Text(
                 module.component.flattenToShortString(),
                 style = MaterialTheme.typography.bodySmall,
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                horizontalArrangement =
+                    Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
-                    "Status: " + module.status.name.lowercase(),
-                    style = MaterialTheme.typography.bodyMedium,
+                    "Status: " +
+                        module.status.name.lowercase(),
+                    style =
+                        MaterialTheme.typography.bodyMedium,
                 )
                 module.moduleVersion?.let { version ->
                     Text(
                         "Version: " + version,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style =
+                            MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
@@ -208,7 +439,9 @@ private fun ModuleCard(module: ModuleRecord) {
                 Spacer(Modifier.height(2.dp))
                 HorizontalDivider()
                 Text(
-                    module.capabilities.joinToString(separator = "\n"),
+                    module.capabilities.joinToString(
+                        separator = "\n",
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -216,8 +449,10 @@ private fun ModuleCard(module: ModuleRecord) {
             module.error?.let { error ->
                 Text(
                     text = error,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
+                    color =
+                        MaterialTheme.colorScheme.error,
+                    style =
+                        MaterialTheme.typography.bodySmall,
                 )
             }
         }

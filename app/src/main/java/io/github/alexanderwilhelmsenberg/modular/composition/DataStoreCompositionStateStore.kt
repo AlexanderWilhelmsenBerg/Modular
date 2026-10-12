@@ -105,6 +105,6 @@ class DataStoreCompositionStateStore(
 
     companion object {
         const val DEFAULT_FILE_NAME =
-            "modular-composition.preferences_pb"
+            "modular-composition"
     }
 }

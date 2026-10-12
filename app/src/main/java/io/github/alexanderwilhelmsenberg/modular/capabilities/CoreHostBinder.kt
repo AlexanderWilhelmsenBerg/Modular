@@ -2,10 +2,13 @@ package io.github.alexanderwilhelmsenberg.modular.capabilities
 
 import android.content.Context
 import android.os.Binder
+import android.os.IBinder
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CoreCapabilities
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularHost
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.IAppCatalogCapability
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.IAppLaunchCapability
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppCatalogInfoParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppCatalogPageParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppKeyParcel
@@ -15,8 +18,9 @@ import kotlinx.coroutines.runBlocking
 /**
  * Per-session Core Binder exposed to one external module package.
  *
- * Slice 3 enforces session caller identity. Capability grants are a later
- * policy layer and will be enforced here before each capability invocation.
+ * The root Binder only brokers capability Binders. Each capability Binder
+ * repeats the session caller check so a leaked Binder reference does not become
+ * authority for another package.
  */
 class CoreHostBinder(
     context: Context,
@@ -25,6 +29,76 @@ class CoreHostBinder(
     private val appRepository: AppRepository,
 ) : IModularHost.Stub() {
     private val packageManager = context.packageManager
+
+    private val appCatalogCapability =
+        object : IAppCatalogCapability.Stub() {
+            override fun getInfo(): AppCatalogInfoParcel {
+                enforceSessionCaller()
+                return AppCatalogIpcMapper.info(appRepository.catalog.value)
+            }
+
+            override fun getPage(
+                expectedGeneration: Long,
+                offset: Int,
+                limit: Int,
+            ): AppCatalogPageParcel {
+                enforceSessionCaller()
+                return AppCatalogIpcMapper.page(
+                    catalog = appRepository.catalog.value,
+                    expectedGeneration = expectedGeneration,
+                    offset = offset,
+                    limit = limit,
+                )
+            }
+        }
+
+    private val appLaunchCapability =
+        object : IAppLaunchCapability.Stub() {
+            override fun launch(key: AppKeyParcel): AppLaunchResultParcel {
+                enforceSessionCaller()
+
+                if (key.packageName.isBlank() || key.activityName.isBlank()) {
+                    return AppLaunchResultParcel(
+                        status = AppLaunchResultParcel.STATUS_NOT_FOUND,
+                        message = "Invalid app key",
+                    )
+                }
+
+                val appKey = AppCatalogIpcMapper.fromParcel(key)
+                val exists = appRepository.catalog.value.apps.any {
+                    it.key == appKey
+                }
+
+                if (!exists) {
+                    return AppLaunchResultParcel(
+                        status = AppLaunchResultParcel.STATUS_NOT_FOUND,
+                        message = "App is not present in the current catalog",
+                    )
+                }
+
+                return runBlocking {
+                    appRepository.launch(appKey).fold(
+                        onSuccess = {
+                            AppLaunchResultParcel(
+                                status = AppLaunchResultParcel.STATUS_SUCCESS,
+                                message = null,
+                            )
+                        },
+                        onFailure = { throwable ->
+                            AppLaunchResultParcel(
+                                status = if (throwable is SecurityException) {
+                                    AppLaunchResultParcel.STATUS_DENIED
+                                } else {
+                                    AppLaunchResultParcel.STATUS_FAILED
+                                },
+                                message = throwable.message
+                                    ?: throwable::class.java.simpleName,
+                            )
+                        },
+                    )
+                }
+            }
+        }
 
     override fun getHostProtocolVersion(): Int {
         enforceSessionCaller()
@@ -38,65 +112,17 @@ class CoreHostBinder(
             .toTypedArray()
     }
 
-    override fun getAppCatalogInfo(): AppCatalogInfoParcel {
-        enforceSessionCaller()
-        return AppCatalogIpcMapper.info(appRepository.catalog.value)
-    }
-
-    override fun getAppCatalogPage(
-        expectedGeneration: Long,
-        offset: Int,
-        limit: Int,
-    ): AppCatalogPageParcel {
-        enforceSessionCaller()
-        return AppCatalogIpcMapper.page(
-            catalog = appRepository.catalog.value,
-            expectedGeneration = expectedGeneration,
-            offset = offset,
-            limit = limit,
-        )
-    }
-
-    override fun launchApp(key: AppKeyParcel): AppLaunchResultParcel {
+    override fun getCapabilityBinder(capabilityId: String): IBinder? {
         enforceSessionCaller()
 
-        if (key.packageName.isBlank() || key.activityName.isBlank()) {
-            return AppLaunchResultParcel(
-                status = AppLaunchResultParcel.STATUS_NOT_FOUND,
-                message = "Invalid app key",
-            )
-        }
+        return when (capabilityId) {
+            CoreCapabilities.AppsCatalog.wireValue ->
+                appCatalogCapability.asBinder()
 
-        val appKey = AppCatalogIpcMapper.fromParcel(key)
-        val exists = appRepository.catalog.value.apps.any { it.key == appKey }
+            CoreCapabilities.AppsLaunch.wireValue ->
+                appLaunchCapability.asBinder()
 
-        if (!exists) {
-            return AppLaunchResultParcel(
-                status = AppLaunchResultParcel.STATUS_NOT_FOUND,
-                message = "App is not present in the current catalog",
-            )
-        }
-
-        return runBlocking {
-            appRepository.launch(appKey).fold(
-                onSuccess = {
-                    AppLaunchResultParcel(
-                        status = AppLaunchResultParcel.STATUS_SUCCESS,
-                        message = null,
-                    )
-                },
-                onFailure = { throwable ->
-                    AppLaunchResultParcel(
-                        status = if (throwable is SecurityException) {
-                            AppLaunchResultParcel.STATUS_DENIED
-                        } else {
-                            AppLaunchResultParcel.STATUS_FAILED
-                        },
-                        message = throwable.message
-                            ?: throwable::class.java.simpleName,
-                    )
-                },
-            )
+            else -> null
         }
     }
 

@@ -33,6 +33,28 @@ Core rejects malformed capability advertisements during module handshake.
 
 A major version is part of identity. Core never silently treats v2 as v1.
 
+## Root Binder rule
+
+Root Binder interfaces are brokers, not feature APIs.
+
+`IModularModuleService` and `IModularHost` perform:
+
+- version discovery;
+- capability discovery;
+- session establishment;
+- capability-Binder acquisition.
+
+They do **not** accumulate the methods of every future capability.
+
+Each capability has a narrow versioned AIDL contract.
+
+Slice 3 introduces:
+
+- `IAppCatalogCapability` for `modular.apps.catalog/v1`;
+- `IAppLaunchCapability` for `modular.apps.launch/v1`.
+
+Future Sort, Home, Drawer, scripting, or other capabilities receive their own contracts.
+
 ## Module protocol v2
 
 Protocol v1 remains metadata/discovery-only.
@@ -66,23 +88,20 @@ A connected protocol-v1 module remains discoverable but is not published as an i
 
 ## Core host Binder
 
-The per-session Core host exposes:
+The per-session host advertises Core capabilities and returns the requested capability Binder.
 
-- host protocol version;
-- Core capability list;
-- `apps.catalog/v1`;
-- `apps.launch/v1`.
+Each root and capability call verifies that the Binder calling UID belongs to the package for which the session was created.
 
-Each call verifies that the Binder calling UID belongs to the package for which the session was created.
+Repeating the identity check on the returned capability Binder means leaking a Binder reference does not implicitly grant another package access.
 
 This is the first identity check, not the final grant model. Signature/trust policy and per-capability grants remain future slices.
 
 ## App catalog paging
 
-A module reads the catalog in two steps.
+A module acquires `modular.apps.catalog/v1`, converts the returned Binder with `IAppCatalogCapability.Stub.asInterface(...)`, and reads the catalog in two steps:
 
-1. `getAppCatalogInfo()`
-2. `getAppCatalogPage(expectedGeneration, offset, limit)`
+1. `getInfo()`
+2. `getPage(expectedGeneration, offset, limit)`
 
 The info response includes:
 
@@ -101,7 +120,9 @@ This prevents a module from accidentally combining pages from different device s
 
 ## App launch
 
-`apps.launch/v1` accepts the same stable key used by the catalog:
+A module acquires `modular.apps.launch/v1` and invokes `IAppLaunchCapability.launch(...)`.
+
+The request uses the same stable key returned by the catalog:
 
 - package name;
 - exact activity name;
@@ -120,7 +141,7 @@ When Core needs one of those capabilities:
 3. Core calls `getCapabilityBinder(sessionId, capabilityId)`.
 4. The caller converts the returned `IBinder` using the capability-specific AIDL interface.
 
-This lets each capability have a narrow typed contract without growing one giant root module interface.
+The Core and module sides therefore use the same capability-Binder pattern.
 
 ## Capability Router
 
@@ -152,7 +173,7 @@ This slice is accepted when:
 - v1 discovery remains compatible;
 - v2 session exchange compiles;
 - malformed capability IDs are rejected;
-- Core exposes apps catalog/launch through a per-session host Binder;
+- Core apps catalog/launch use separate capability Binders;
 - catalog paging detects stale generations and enforces page bounds;
 - external capability routes can resolve to raw Binder endpoints;
 - module process death removes the active session;

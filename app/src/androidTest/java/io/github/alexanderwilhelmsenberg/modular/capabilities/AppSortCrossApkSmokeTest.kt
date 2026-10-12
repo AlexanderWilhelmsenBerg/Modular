@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.capabilities
 
 import android.content.Context
+import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -24,6 +26,8 @@ class AppSortCrossApkSmokeTest {
     fun discoversExternalModuleAndSortsAcrossBinder() = runBlocking {
         val context =
             ApplicationProvider.getApplicationContext<Context>()
+
+        assertSeparateTrustedApk(context)
 
         val repository = FakeAppRepository(
             listOf(
@@ -81,6 +85,30 @@ class AppSortCrossApkSmokeTest {
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun assertSeparateTrustedApk(context: Context) {
+        val packageManager = context.packageManager
+        val moduleInfo = packageManager.getApplicationInfo(
+            REFERENCE_PACKAGE,
+            0,
+        )
+
+        assertNotEquals(
+            "Reference module must run under a distinct Android UID",
+            context.applicationInfo.uid,
+            moduleInfo.uid,
+        )
+
+        assertEquals(
+            "Reference module must share the trusted debug signer in CI",
+            PackageManager.SIGNATURE_MATCH,
+            packageManager.checkSignatures(
+                context.packageName,
+                REFERENCE_PACKAGE,
+            ),
+        )
+    }
+
     private fun app(
         packageName: String,
         label: String,
@@ -122,5 +150,8 @@ class AppSortCrossApkSmokeTest {
     companion object {
         private const val REFERENCE_MODULE_ID =
             "modular.reference.sort.alphabetical"
+
+        private const val REFERENCE_PACKAGE =
+            "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical"
     }
 }

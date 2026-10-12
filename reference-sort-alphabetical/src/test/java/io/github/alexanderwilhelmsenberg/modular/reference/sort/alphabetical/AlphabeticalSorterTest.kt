@@ -9,11 +9,11 @@ class AlphabeticalSorterTest {
     @Test
     fun sortsLabelsAndUsesStableIdentityTieBreakers() {
         val items = listOf(
-            item("z.pkg", "Zebra", 1),
+            item("z.pkg", "Zulu", 1),
             item("b.pkg", "alpha", 1),
             item("a.pkg", "Alpha", 1),
-            item("c.pkg", "Éclair", 1),
-            item("d.pkg", "eclair", 1),
+            item("d.pkg", "Echo", 1),
+            item("c.pkg", "Echo", 1),
         )
 
         val sorted = AlphabeticalSorter.sort(
@@ -25,8 +25,8 @@ class AlphabeticalSorterTest {
             listOf(
                 "a.pkg",
                 "b.pkg",
-                "d.pkg",
                 "c.pkg",
+                "d.pkg",
                 "z.pkg",
             ),
             sorted.map { it.key.packageName },

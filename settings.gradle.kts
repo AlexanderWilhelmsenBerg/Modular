@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "Modular"
 include(":app")
 include(":module-api")
+include(":reference-sort-alphabetical")

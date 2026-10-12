@@ -10,11 +10,11 @@ data class LaunchableAppParcel(
     val enabled: Boolean,
     val loadingProgress: Float?,
 ) : Parcelable {
+    @Suppress("DEPRECATION")
     private constructor(parcel: Parcel) : this(
         key = requireNotNull(
-            parcel.readParcelable(
+            parcel.readParcelable<AppKeyParcel>(
                 AppKeyParcel::class.java.classLoader,
-                AppKeyParcel::class.java,
             ),
         ),
         label = requireNotNull(parcel.readString()),

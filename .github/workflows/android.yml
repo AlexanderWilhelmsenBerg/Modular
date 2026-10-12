@@ -2,7 +2,8 @@ name: Android CI
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -27,22 +28,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.6.0"
-
-      - name: Locate Android SDK manager
-        shell: bash
-        run: |
-          set -euo pipefail
-          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
-          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager -perm -u+x | sort -V | tail -n 1)"
-          test -n "$SDKMANAGER"
-          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
-          echo "Using $SDKMANAGER"
-
-      - name: Accept Android SDK licenses
-        run: yes | "$SDKMANAGER" --licenses >/dev/null || true
-
-      - name: Install Android SDK 37
-        run: "$SDKMANAGER" "platforms;android-37" "build-tools;36.0.0"
 
       - name: Unit tests
         run: gradle :module-api:testDebugUnitTest :app:testDebugUnitTest --stacktrace

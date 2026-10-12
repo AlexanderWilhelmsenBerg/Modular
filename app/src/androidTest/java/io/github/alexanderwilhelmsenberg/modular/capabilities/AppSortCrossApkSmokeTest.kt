@@ -183,6 +183,8 @@ class AppSortCrossApkSmokeTest {
                             workContext.id
                     }
                 }
+
+                Unit
             } finally {
                 contexts.close()
                 instances.close()

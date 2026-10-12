@@ -1,15 +1,10 @@
 package io.github.alexanderwilhelmsenberg.modular.composition
 
 import android.content.Context
+import androidx.datastore.preferences.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.preferencesDataStoreFile
-import androidx.datastore.preferences.core.emptyPreferences
-import androidx.datastore.preferences.core.mutablePreferencesOf
-import androidx.datastore.preferences.core.toPreferences
-import androidx.datastore.preferences.PreferenceDataStoreFactory
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +48,8 @@ class DataStoreCompositionStateStore(
             .catch { throwable ->
                 if (throwable is IOException) {
                     _loadError.value =
-                        throwable.message ?: "Composition store I/O failure"
+                        throwable.message
+                            ?: "Composition store I/O failure"
                     emit(CompositionState())
                 } else {
                     throw throwable

@@ -17,6 +17,7 @@ data class ModuleRecord(
     val moduleVersion: String? = null,
     val protocolVersion: Int? = null,
     val capabilities: List<String> = emptyList(),
+    val sessionId: String? = null,
     val status: ModuleConnectionStatus = ModuleConnectionStatus.DISCOVERED,
     val error: String? = null,
 ) {

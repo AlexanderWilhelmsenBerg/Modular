@@ -10,6 +10,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.github.alexanderwilhelmsenberg.modular.apps.AndroidAppRepository
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
+import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
+import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
 import io.github.alexanderwilhelmsenberg.modular.home.HomeRoleController
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
@@ -17,6 +19,7 @@ import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
 class MainActivity : ComponentActivity() {
     private lateinit var homeRoleController: HomeRoleController
     private lateinit var moduleRegistry: ModuleRegistry
+    private lateinit var capabilityRouter: CapabilityRouter
     private lateinit var appRepository: AppRepository
 
     private var homeRoleAvailable by mutableStateOf(false)
@@ -31,8 +34,18 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         homeRoleController = HomeRoleController(this)
-        moduleRegistry = ModuleRegistry(this)
         appRepository = AndroidAppRepository(this)
+
+        val hostFactory = CoreHostFactory(
+            context = this,
+            appRepository = appRepository,
+        )
+
+        moduleRegistry = ModuleRegistry(
+            context = this,
+            hostFactory = hostFactory,
+        )
+        capabilityRouter = CapabilityRouter(moduleRegistry)
 
         refreshHomeRoleState()
         moduleRegistry.refresh()
@@ -68,11 +81,14 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (::appRepository.isInitialized) {
-            appRepository.close()
+        if (::capabilityRouter.isInitialized) {
+            capabilityRouter.close()
         }
         if (::moduleRegistry.isInitialized) {
             moduleRegistry.close()
+        }
+        if (::appRepository.isInitialized) {
+            appRepository.close()
         }
         super.onDestroy()
     }

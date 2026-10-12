@@ -96,7 +96,7 @@ class AlphabeticalSortService : Service() {
         moduleBinder
 
     override fun onDestroy() {
-        sessions.values.forEach(ModuleSession::revoke)
+        sessions.values.forEach { session -> session.revoke() }
         sessions.clear()
         super.onDestroy()
     }

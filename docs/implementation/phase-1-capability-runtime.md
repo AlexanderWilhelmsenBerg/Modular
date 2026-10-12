@@ -1,6 +1,6 @@
 # Phase 1 — Slice 3: Capability Runtime
 
-Status: **Implemented, pending CI**
+Status: **Implemented, pending final CI**
 
 ## Goal
 
@@ -89,22 +89,34 @@ A module cannot retain an old app-catalog/app-launch Binder and continue using i
 
 A connected protocol-v1 module remains discoverable but is not published as an invokable capability provider because it has no session.
 
+## Bootstrap trust policy
+
+Installing a module does not grant it Core authority.
+
+Until the user-managed capability grant model is implemented, Core uses a deliberately narrow Phase-1 bootstrap policy:
+
+- modules signed with the **same signer as Core** receive the currently defined Core capabilities;
+- modules signed by anyone else receive an empty Core-capability set.
+
+A third-party-signed module can still be discovered and can advertise its own capabilities, but it cannot read the Core app catalog or launch applications through Core merely because it is installed.
+
+The explicit grant system will replace this bootstrap rule for community modules later.
+
 ## Core host Binder
 
-The per-session host advertises Core capabilities and returns the requested capability Binder.
+The per-session host advertises only capabilities currently allowed for that session and returns only those capability Binders.
 
 Each root and capability call verifies:
 
 1. the session is still active;
-2. the Binder calling UID belongs to the package for which the session was created.
+2. the Binder calling UID belongs to the package for which the session was created;
+3. the requested Core capability is allowed for that session.
 
-Repeating the check on returned capability Binders means leaking a Binder reference does not implicitly grant another package access.
-
-This is the first identity check, not the final grant model. Signature/trust policy and per-capability grants remain future slices.
+Repeating the checks on returned capability Binders means leaking a Binder reference does not implicitly grant another package access.
 
 ## App catalog paging
 
-A module acquires `modular.apps.catalog/v1`, converts the returned Binder with `IAppCatalogCapability.Stub.asInterface(...)`, and reads the catalog in two steps:
+A permitted module acquires `modular.apps.catalog/v1`, converts the returned Binder with `IAppCatalogCapability.Stub.asInterface(...)`, and reads the catalog in two steps:
 
 1. `getInfo()`
 2. `getPage(expectedGeneration, offset, limit)`
@@ -126,7 +138,7 @@ This prevents a module from accidentally combining pages from different device s
 
 ## App launch
 
-A module acquires `modular.apps.launch/v1` and invokes `IAppLaunchCapability.launch(...)`.
+A permitted module acquires `modular.apps.launch/v1` and invokes `IAppLaunchCapability.launch(...)`.
 
 The request uses the same stable key returned by the catalog:
 
@@ -162,8 +174,8 @@ Provider selection belongs to Instance/Context policy in a later Core slice.
 
 ## Explicitly deferred
 
-- capability grants;
-- signature/trust policy;
+- user-managed capability grants;
+- community-module trust approval;
 - persistent instance selection;
 - Context Manager;
 - generic retry policy;
@@ -181,6 +193,7 @@ This slice is accepted when:
 - malformed capability IDs are rejected;
 - Core apps catalog/launch use separate capability Binders;
 - stale Core capability Binders fail after session revocation;
+- unsigned/differently-signed modules receive no Core capability authority by default;
 - catalog paging detects stale generations and enforces page bounds;
 - external capability routes can resolve to raw Binder endpoints;
 - module process death removes and revokes the active session;

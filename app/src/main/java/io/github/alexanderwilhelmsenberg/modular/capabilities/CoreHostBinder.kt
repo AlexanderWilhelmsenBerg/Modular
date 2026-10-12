@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Binder
 import android.os.IBinder
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CoreCapabilities
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularHost
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
@@ -31,6 +32,7 @@ class CoreHostBinder(
     private val expectedPackage: String,
     private val sessionId: String,
     private val appRepository: AppRepository,
+    private val allowedCapabilities: Set<CapabilityId>,
 ) : IModularHost.Stub() {
     private val packageManager = context.packageManager
     private val active = AtomicBoolean(true)
@@ -38,7 +40,7 @@ class CoreHostBinder(
     private val appCatalogCapability =
         object : IAppCatalogCapability.Stub() {
             override fun getInfo(): AppCatalogInfoParcel {
-                enforceSessionCaller()
+                enforceCapability(CoreCapabilities.AppsCatalog)
                 return AppCatalogIpcMapper.info(appRepository.catalog.value)
             }
 
@@ -47,7 +49,7 @@ class CoreHostBinder(
                 offset: Int,
                 limit: Int,
             ): AppCatalogPageParcel {
-                enforceSessionCaller()
+                enforceCapability(CoreCapabilities.AppsCatalog)
                 return AppCatalogIpcMapper.page(
                     catalog = appRepository.catalog.value,
                     expectedGeneration = expectedGeneration,
@@ -60,7 +62,7 @@ class CoreHostBinder(
     private val appLaunchCapability =
         object : IAppLaunchCapability.Stub() {
             override fun launch(key: AppKeyParcel): AppLaunchResultParcel {
-                enforceSessionCaller()
+                enforceCapability(CoreCapabilities.AppsLaunch)
 
                 if (key.packageName.isBlank() || key.activityName.isBlank()) {
                     return AppLaunchResultParcel(
@@ -112,7 +114,8 @@ class CoreHostBinder(
 
     override fun getCapabilities(): Array<String> {
         enforceSessionCaller()
-        return CoreCapabilities.all
+        return allowedCapabilities
+            .sortedBy { it.wireValue }
             .map { it.wireValue }
             .toTypedArray()
     }
@@ -120,11 +123,14 @@ class CoreHostBinder(
     override fun getCapabilityBinder(capabilityId: String): IBinder? {
         enforceSessionCaller()
 
-        return when (capabilityId) {
-            CoreCapabilities.AppsCatalog.wireValue ->
+        val capability = CapabilityId.parse(capabilityId) ?: return null
+        if (capability !in allowedCapabilities) return null
+
+        return when (capability) {
+            CoreCapabilities.AppsCatalog ->
                 appCatalogCapability.asBinder()
 
-            CoreCapabilities.AppsLaunch.wireValue ->
+            CoreCapabilities.AppsLaunch ->
                 appLaunchCapability.asBinder()
 
             else -> null
@@ -133,6 +139,19 @@ class CoreHostBinder(
 
     fun revoke() {
         active.set(false)
+    }
+
+    private fun enforceCapability(capability: CapabilityId) {
+        enforceSessionCaller()
+
+        if (capability !in allowedCapabilities) {
+            throw SecurityException(
+                "Capability " +
+                    capability.wireValue +
+                    " is not granted to " +
+                    expectedPackage,
+            )
+        }
     }
 
     private fun enforceSessionCaller() {

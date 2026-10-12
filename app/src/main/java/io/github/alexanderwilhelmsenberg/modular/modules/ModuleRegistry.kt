@@ -13,6 +13,7 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularModuleService
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,7 +39,7 @@ class ModuleRegistry(
     private val packageManager = appContext.packageManager
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val connections = mutableMapOf<ComponentName, ServiceConnection>()
-    private val sessions = mutableMapOf<ComponentName, SessionBinding>()
+    private val sessions = ConcurrentHashMap<ComponentName, SessionBinding>()
 
     private val _modules = MutableStateFlow<List<ModuleRecord>>(emptyList())
     val modules: StateFlow<List<ModuleRecord>> = _modules.asStateFlow()
@@ -68,6 +69,46 @@ class ModuleRegistry(
         discovered.forEach { candidate ->
             if (candidate.component !in connections) {
                 bind(candidate.component)
+            }
+        }
+    }
+
+    suspend fun acquireCapabilityBinder(
+        component: ComponentName,
+        capability: CapabilityId,
+    ): Result<IBinder> {
+        val module = modules.value.firstOrNull {
+            it.component == component &&
+                it.status == ModuleConnectionStatus.CONNECTED
+        } ?: return Result.failure(
+            IllegalStateException("Module is not connected"),
+        )
+
+        if (capability.wireValue !in module.capabilities) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "Module did not advertise " + capability.wireValue,
+                ),
+            )
+        }
+
+        val session = sessions[component]
+            ?: return Result.failure(
+                IllegalStateException(
+                    "Module does not have an active v2 session",
+                ),
+            )
+
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                requireNotNull(
+                    session.remote.getCapabilityBinder(
+                        session.sessionId,
+                        capability.wireValue,
+                    ),
+                ) {
+                    "Module returned no Binder for " + capability.wireValue
+                }
             }
         }
     }

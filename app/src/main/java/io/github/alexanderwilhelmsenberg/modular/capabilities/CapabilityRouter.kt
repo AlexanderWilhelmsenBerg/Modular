@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
  * Resolves exact major-version capability contracts to available providers.
  *
  * Selection policy is intentionally minimal in Slice 3: Core providers are
- * registered first and external providers are exposed as candidates.
+ * registered first and invokable external providers are exposed as candidates.
  * Instance/context policy will choose among multiple external providers later.
  */
 class CapabilityRouter(
@@ -34,7 +34,10 @@ class CapabilityRouter(
             moduleRegistry.modules.collect { modules ->
                 val moduleRoutes = modules
                     .asSequence()
-                    .filter { it.status == ModuleConnectionStatus.CONNECTED }
+                    .filter {
+                        it.status == ModuleConnectionStatus.CONNECTED &&
+                            it.sessionId != null
+                    }
                     .flatMap { module ->
                         module.capabilities
                             .asSequence()

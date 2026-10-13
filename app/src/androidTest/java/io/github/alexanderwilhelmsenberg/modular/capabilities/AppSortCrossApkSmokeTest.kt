@@ -8,8 +8,13 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
+import io.github.alexanderwilhelmsenberg.modular.composition.ContextCapabilityBinding
+import io.github.alexanderwilhelmsenberg.modular.composition.ContextManager
+import io.github.alexanderwilhelmsenberg.modular.composition.DataStoreCompositionStateStore
+import io.github.alexanderwilhelmsenberg.modular.composition.InstanceStore
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
+import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -23,75 +28,183 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class AppSortCrossApkSmokeTest {
     @Test
-    fun discoversExternalModuleAndSortsAcrossBinder() = runBlocking {
-        val context =
-            ApplicationProvider.getApplicationContext<Context>()
+    fun switchesDistinctInstancesAndSortsAcrossBinder() =
+        runBlocking {
+            val context =
+                ApplicationProvider
+                    .getApplicationContext<Context>()
 
-        assertSeparateTrustedApk(context)
+            assertSeparateTrustedApk(context)
 
-        val repository = FakeAppRepository(
-            listOf(
-                app("z.pkg", "Zulu"),
-                app("b.pkg", "beta"),
-                app("a.pkg", "Alpha"),
-            ),
-        )
-
-        val hostFactory = CoreHostFactory(
-            context = context,
-            appRepository = repository,
-        )
-        val registry = ModuleRegistry(
-            context = context,
-            hostFactory = hostFactory,
-        )
-        val router = CapabilityRouter(registry)
-
-        try {
-            registry.refresh()
-
-            val route = withTimeout(15_000) {
-                router.routes.first { routes ->
-                    routes.any { candidate ->
-                        candidate.capability ==
-                            StandardCapabilities.AppsSort &&
-                            candidate.providerId ==
-                            REFERENCE_MODULE_ID
-                    }
-                }.first { candidate ->
-                    candidate.capability ==
-                        StandardCapabilities.AppsSort &&
-                        candidate.providerId ==
-                        REFERENCE_MODULE_ID
-                }
-            }
-
-            val sorted = AppSortClient(router)
-                .sort(
-                    route = route,
-                    apps = repository.catalog.value.apps,
-                    localeTag = "en",
-                )
-                .getOrThrow()
-
-            assertEquals(
-                listOf("Alpha", "beta", "Zulu"),
-                sorted.map { it.label },
+            val repository = FakeAppRepository(
+                listOf(
+                    app("z.pkg", "Zulu"),
+                    app("b.pkg", "beta"),
+                    app("a.pkg", "Alpha"),
+                ),
             )
-        } finally {
-            router.close()
-            registry.close()
-            repository.close()
+
+            val hostFactory = CoreHostFactory(
+                context = context,
+                appRepository = repository,
+            )
+            val registry = ModuleRegistry(
+                context = context,
+                hostFactory = hostFactory,
+            )
+            val router = CapabilityRouter(registry)
+            val stateStore =
+                DataStoreCompositionStateStore(
+                    context = context,
+                    fileName =
+                        "slice5-" + UUID.randomUUID(),
+                )
+            val instances = InstanceStore(stateStore)
+            val contexts = ContextManager(
+                stateStore = stateStore,
+                routes = router.routes,
+            )
+
+            try {
+                registry.refresh()
+
+                withTimeout(15_000) {
+                    router.routes.first { routes ->
+                        routes.any { candidate ->
+                            candidate.capability ==
+                                StandardCapabilities.AppsSort &&
+                                candidate.providerId ==
+                                REFERENCE_MODULE_ID
+                        }
+                    }
+                }
+
+                val personalInstance = instances.create(
+                    name = "Personal sort",
+                    providerId = REFERENCE_MODULE_ID,
+                ).getOrThrow()
+
+                val workInstance = instances.create(
+                    name = "Work sort",
+                    providerId = REFERENCE_MODULE_ID,
+                ).getOrThrow()
+
+                assertNotEquals(
+                    personalInstance.id,
+                    workInstance.id,
+                )
+
+                val personalContext = contexts.create(
+                    name = "Personal",
+                    bindings = listOf(
+                        ContextCapabilityBinding(
+                            capability =
+                                StandardCapabilities.AppsSort,
+                            instanceId =
+                                personalInstance.id,
+                        ),
+                    ),
+                ).getOrThrow()
+
+                val workContext = contexts.create(
+                    name = "Work",
+                    bindings = listOf(
+                        ContextCapabilityBinding(
+                            capability =
+                                StandardCapabilities.AppsSort,
+                            instanceId =
+                                workInstance.id,
+                        ),
+                    ),
+                ).getOrThrow()
+
+                val personalActive = contexts.activate(
+                    personalContext.id,
+                ).getOrThrow()
+
+                val personalSorted = AppSortClient(router)
+                    .sort(
+                        route = requireNotNull(
+                            personalActive.routeFor(
+                                StandardCapabilities.AppsSort,
+                            ),
+                        ),
+                        apps =
+                            repository.catalog.value.apps,
+                        localeTag = "en",
+                    )
+                    .getOrThrow()
+
+                assertEquals(
+                    listOf("Alpha", "beta", "Zulu"),
+                    personalSorted.map { it.label },
+                )
+                assertEquals(
+                    personalInstance.id,
+                    personalActive.resolvedBindings
+                        .single()
+                        .instance
+                        .id,
+                )
+
+                val workActive = contexts.activate(
+                    workContext.id,
+                ).getOrThrow()
+
+                assertEquals(
+                    workInstance.id,
+                    workActive.resolvedBindings
+                        .single()
+                        .instance
+                        .id,
+                )
+
+                val workSorted = AppSortClient(router)
+                    .sort(
+                        route = requireNotNull(
+                            workActive.routeFor(
+                                StandardCapabilities.AppsSort,
+                            ),
+                        ),
+                        apps =
+                            repository.catalog.value.apps,
+                        localeTag = "en",
+                    )
+                    .getOrThrow()
+
+                assertEquals(
+                    listOf("Alpha", "beta", "Zulu"),
+                    workSorted.map { it.label },
+                )
+
+                withTimeout(5_000) {
+                    stateStore.state.first { state ->
+                        state.activeContextId ==
+                            workContext.id
+                    }
+                }
+
+                Unit
+            } finally {
+                contexts.close()
+                instances.close()
+                stateStore.close()
+                router.close()
+                registry.close()
+                repository.close()
+            }
         }
-    }
 
     @Suppress("DEPRECATION")
-    private fun assertSeparateTrustedApk(context: Context) {
+    private fun assertSeparateTrustedApk(
+        context: Context,
+    ) {
         val packageManager = context.packageManager
-        val moduleInfo = packageManager.getApplicationInfo(
-            REFERENCE_PACKAGE,
-            0,
-        )
+        val moduleInfo =
+            packageManager.getApplicationInfo(
+                REFERENCE_PACKAGE,
+                0,
+            )
 
         assertNotEquals(
             "Reference module must run under a distinct Android UID",
@@ -116,7 +229,8 @@ class AppSortCrossApkSmokeTest {
         LaunchableApp(
             key = AppKey(
                 packageName = packageName,
-                activityName = packageName + ".MainActivity",
+                activityName =
+                    packageName + ".MainActivity",
                 profileSerial = 1,
             ),
             label = label,
@@ -135,7 +249,8 @@ class AppSortCrossApkSmokeTest {
             ),
         )
 
-        override val catalog: StateFlow<AppCatalog> = state
+        override val catalog: StateFlow<AppCatalog> =
+            state
 
         override fun refresh() = Unit
 

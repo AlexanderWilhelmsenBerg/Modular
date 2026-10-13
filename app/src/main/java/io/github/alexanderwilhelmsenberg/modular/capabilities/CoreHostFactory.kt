@@ -2,57 +2,51 @@ package io.github.alexanderwilhelmsenberg.modular.capabilities
 
 import android.content.ComponentName
 import android.content.Context
-import android.content.pm.PackageManager
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
-import io.github.alexanderwilhelmsenberg.modular.moduleapi.CoreCapabilities
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularHost
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
 
 /**
- * Creates revocable host sessions and applies the Phase-1 bootstrap trust rule.
+ * Creates revocable Core-host sessions for verified module identities.
  *
- * Until explicit user-managed capability grants exist, only modules signed by
- * the same signer as Core receive Core-owned capabilities.
+ * The module's requested Core capabilities are not authority. The security
+ * manager resolves the installed package/signing identity and applies its
+ * persistent grant record before the session is opened.
  */
 class CoreHostFactory(
     context: Context,
     private val appRepository: AppRepository,
+    private val securityManager: ModuleSecurityManager,
 ) {
-    private val appContext = context.applicationContext
-    private val packageManager = appContext.packageManager
-    private val corePackage = appContext.packageName
+    private val appContext =
+        context.applicationContext
 
-    fun create(
+    suspend fun create(
         component: ComponentName,
         sessionId: String,
+        requestedCapabilities: Set<CapabilityId>,
     ): CoreHostSession {
+        val authorization =
+            securityManager.prepareSession(
+                packageName = component.packageName,
+                requestedCapabilities =
+                    requestedCapabilities,
+            )
+
         val binder = CoreHostBinder(
             context = appContext,
             expectedPackage = component.packageName,
             sessionId = sessionId,
             appRepository = appRepository,
-            allowedCapabilities = bootstrapCapabilities(component.packageName),
+            securityManager = securityManager,
+            authorization = authorization,
         )
 
         return CoreHostSession(
             host = binder,
             revokeAction = binder::revoke,
         )
-    }
-
-    private fun bootstrapCapabilities(
-        modulePackage: String,
-    ): Set<CapabilityId> {
-        val sameSigner = packageManager.checkSignatures(
-            corePackage,
-            modulePackage,
-        ) == PackageManager.SIGNATURE_MATCH
-
-        return if (sameSigner) {
-            CoreCapabilities.all.toSet()
-        } else {
-            emptySet()
-        }
     }
 }
 

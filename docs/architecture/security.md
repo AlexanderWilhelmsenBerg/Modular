@@ -1,6 +1,6 @@
 # Security Model
 
-Status: **Initial security principles**
+Status: **Phase-1 base security/grant infrastructure implemented; richer policy UX remains open**
 
 ## 1. Trust boundary
 
@@ -12,9 +12,32 @@ Core treats module identity, requested capabilities, and granted capabilities as
 
 ## 2. Capability grants
 
-Modules declare what they provide and what Core/system access they require.
+Modules declare what they provide and, from module protocol v3 onward, which
+Core capabilities they request.
 
-Core records explicit grants.
+Providing a capability and requesting Core authority are separate concepts.
+
+A request is never authority by itself. Core records explicit, persistent
+grants bound to the module's exact installed package name plus current APK
+signing-certificate SHA-256 identity.
+
+An effective grant is the intersection of:
+
+- a valid protocol-declared request;
+- a capability supported by this Core version;
+- the persistent grant record for the exact current module identity.
+
+A signing-identity change invalidates previous grants and requires a new
+authorization decision.
+
+For official same-signer modules, Phase 1 may initialize a new identity record
+with an explicit bootstrap grant set, but only for capabilities requested at
+that first initialization. Once the record exists, revocation is sticky and
+later module updates cannot silently bootstrap newly requested authority.
+
+Grant checks are live. Core re-checks the current signer and current grant state
+when a host capability is enumerated, when its Binder is acquired, and on every
+call through an already-issued capability Binder.
 
 Candidate categories:
 
@@ -52,9 +75,16 @@ Secrets remain in the narrowest owner possible.
 
 Core must verify the identity of connected module packages and modules must be able to verify legitimate Core calls.
 
-The exact caller/package/signing-certificate strategy requires a dedicated implementation spike because independently signed community modules cannot rely on a same-signature permission model.
+Core's Phase-1 host session verifies Binder caller UID ownership of the expected
+package and separately binds grant authority to that package's current signing
+certificate digest.
 
-Do not ship a public exported Binder service that trusts only an intent action string.
+This allows independently signed community modules without treating an intent
+action string, package name alone, or installation alone as authority.
+
+A future public distribution model may add signer-lineage migration UX, but
+Phase 1 intentionally fails closed on a changed current signer rather than
+silently carrying grants across signing-key rotation.
 
 ## 5. Declarative UI
 

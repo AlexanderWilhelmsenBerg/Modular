@@ -56,6 +56,15 @@ sealed interface CoreEvent {
             "core.composition.changed"
     }
 
+    data class GrantsChanged(
+        val addedIdentityKeys: List<String>,
+        val removedIdentityKeys: List<String>,
+        val changedIdentityKeys: List<String>,
+    ) : CoreEvent {
+        override val type: String =
+            "core.grants.changed"
+    }
+
     data class ActiveContextChanged(
         val previousContextId: String?,
         val currentContextId: String?,

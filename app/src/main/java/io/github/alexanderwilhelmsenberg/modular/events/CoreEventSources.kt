@@ -4,6 +4,7 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.composition.CompositionState
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleGrantState
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +26,7 @@ class CoreEventSources(
     modules: StateFlow<List<ModuleRecord>>,
     appCatalog: StateFlow<AppCatalog>,
     composition: StateFlow<CompositionState>,
+    grants: StateFlow<ModuleGrantState>,
     activeContext: StateFlow<ActiveContextState>,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : AutoCloseable {
@@ -73,6 +75,20 @@ class CoreEventSources(
             composition.collect { current ->
                 previous?.let { old ->
                     CoreEventDiffs.composition(
+                        previous = old,
+                        current = current,
+                    )?.let(eventBus::tryPublish)
+                }
+                previous = current
+            }
+        }
+
+        scope.launch {
+            var previous: ModuleGrantState? = null
+
+            grants.collect { current ->
+                previous?.let { old ->
+                    CoreEventDiffs.grants(
                         previous = old,
                         current = current,
                     )?.let(eventBus::tryPublish)

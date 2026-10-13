@@ -5,6 +5,7 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.composition.CompositionState
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleGrantState
 
 object CoreEventDiffs {
     fun modules(
@@ -124,6 +125,28 @@ object CoreEventDiffs {
                     contextDiff.removed,
                 changedContextIds =
                     contextDiff.changed,
+            )
+        }
+    }
+
+    fun grants(
+        previous: ModuleGrantState,
+        current: ModuleGrantState,
+    ): CoreEvent.GrantsChanged? {
+        val diff = entityDiff(
+            previous = previous.records,
+            current = current.records,
+            key = { record -> record.identity.key },
+            comparator = naturalOrder<String>(),
+        )
+
+        return if (diff.isEmpty) {
+            null
+        } else {
+            CoreEvent.GrantsChanged(
+                addedIdentityKeys = diff.added,
+                removedIdentityKeys = diff.removed,
+                changedIdentityKeys = diff.changed,
             )
         }
     }

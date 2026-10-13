@@ -14,6 +14,10 @@ import io.github.alexanderwilhelmsenberg.modular.composition.DataStoreCompositio
 import io.github.alexanderwilhelmsenberg.modular.composition.InstanceStore
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
+import io.github.alexanderwilhelmsenberg.modular.security.AndroidModuleIdentityResolver
+import io.github.alexanderwilhelmsenberg.modular.security.DataStoreModuleGrantStateStore
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
+import io.github.alexanderwilhelmsenberg.modular.security.OfficialModuleBootstrapPolicy
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,9 +48,25 @@ class AppSortCrossApkSmokeTest {
                 ),
             )
 
+            val grantStore =
+                DataStoreModuleGrantStateStore(
+                    context = context,
+                    fileName =
+                        "slice7-grants-" +
+                            UUID.randomUUID(),
+                )
+            val securityManager = ModuleSecurityManager(
+                identityResolver =
+                    AndroidModuleIdentityResolver(context),
+                grantStore = grantStore,
+                officialBootstrapCapabilities =
+                    OfficialModuleBootstrapPolicy
+                        .capabilities,
+            )
             val hostFactory = CoreHostFactory(
                 context = context,
                 appRepository = repository,
+                securityManager = securityManager,
             )
             val registry = ModuleRegistry(
                 context = context,
@@ -191,6 +211,7 @@ class AppSortCrossApkSmokeTest {
                 stateStore.close()
                 router.close()
                 registry.close()
+                grantStore.close()
                 repository.close()
             }
         }

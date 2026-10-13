@@ -19,7 +19,12 @@ import io.github.alexanderwilhelmsenberg.modular.composition.InstanceStore
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventBus
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventSources
 import io.github.alexanderwilhelmsenberg.modular.home.HomeRoleController
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
+import io.github.alexanderwilhelmsenberg.modular.security.AndroidModuleIdentityResolver
+import io.github.alexanderwilhelmsenberg.modular.security.DataStoreModuleGrantStateStore
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
+import io.github.alexanderwilhelmsenberg.modular.security.OfficialModuleBootstrapPolicy
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
 import kotlinx.coroutines.launch
 
@@ -34,6 +39,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var contextManager: ContextManager
     private lateinit var eventBus: CoreEventBus
     private lateinit var eventSources: CoreEventSources
+    private lateinit var grantStore:
+        DataStoreModuleGrantStateStore
+    private lateinit var securityManager:
+        ModuleSecurityManager
 
     private var homeRoleAvailable by mutableStateOf(false)
     private var homeRoleHeld by mutableStateOf(false)
@@ -50,10 +59,21 @@ class MainActivity : ComponentActivity() {
 
         homeRoleController = HomeRoleController(this)
         appRepository = AndroidAppRepository(this)
+        grantStore =
+            DataStoreModuleGrantStateStore(this)
+        securityManager = ModuleSecurityManager(
+            identityResolver =
+                AndroidModuleIdentityResolver(this),
+            grantStore = grantStore,
+            officialBootstrapCapabilities =
+                OfficialModuleBootstrapPolicy
+                    .capabilities,
+        )
 
         val hostFactory = CoreHostFactory(
             context = this,
             appRepository = appRepository,
+            securityManager = securityManager,
         )
 
         moduleRegistry = ModuleRegistry(
@@ -76,6 +96,7 @@ class MainActivity : ComponentActivity() {
             modules = moduleRegistry.modules,
             appCatalog = appRepository.catalog,
             composition = compositionStore.state,
+            grants = grantStore.state,
             activeContext = contextManager.active,
         )
 
@@ -95,6 +116,25 @@ class MainActivity : ComponentActivity() {
                 compositionStore.loadError.collectAsState()
             val eventDiagnostics by
                 eventBus.diagnostics.collectAsState()
+            val grantState by
+                grantStore.state.collectAsState()
+            val grantLoadError by
+                grantStore.loadError.collectAsState()
+
+            val securityStatuses = modules.map { module ->
+                val requested =
+                    module.requestedCoreCapabilities
+                        .mapNotNull { wireValue ->
+                            CapabilityId.parse(wireValue)
+                        }
+                        .toSet()
+
+                securityManager.status(
+                    packageName =
+                        module.component.packageName,
+                    requestedCapabilities = requested,
+                )
+            }
 
             ModularApp(
                 homeRoleAvailable = homeRoleAvailable,
@@ -107,6 +147,10 @@ class MainActivity : ComponentActivity() {
                 compositionLoadError = compositionLoadError,
                 contextActivationError = activationError,
                 eventBusDiagnostics = eventDiagnostics,
+                moduleSecurity = securityStatuses,
+                grantRecordCount =
+                    grantState.records.size,
+                grantLoadError = grantLoadError,
                 onRequestHomeRole = ::requestHomeRole,
                 onRefreshModules = moduleRegistry::refresh,
                 onRefreshApps = appRepository::refresh,
@@ -158,6 +202,9 @@ class MainActivity : ComponentActivity() {
         }
         if (::moduleRegistry.isInitialized) {
             moduleRegistry.close()
+        }
+        if (::grantStore.isInitialized) {
+            grantStore.close()
         }
         if (::appRepository.isInitialized) {
             appRepository.close()

@@ -85,6 +85,6 @@ class AndroidModuleIdentityResolver(
         MessageDigest.getInstance("SHA-256")
             .digest(value)
             .joinToString(separator = "") { byte ->
-                "%02x".format(byte)
+                "%02x".format(byte.toInt() and 0xff)
             }
 }

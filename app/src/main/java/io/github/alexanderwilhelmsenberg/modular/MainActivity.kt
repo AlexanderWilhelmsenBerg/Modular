@@ -19,7 +19,11 @@ import io.github.alexanderwilhelmsenberg.modular.composition.InstanceStore
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventBus
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventSources
 import io.github.alexanderwilhelmsenberg.modular.home.HomeRoleController
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
+import io.github.alexanderwilhelmsenberg.modular.security.AndroidModuleIdentityResolver
+import io.github.alexanderwilhelmsenberg.modular.security.DataStoreModuleGrantStateStore
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
 import kotlinx.coroutines.launch
 
@@ -34,6 +38,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var contextManager: ContextManager
     private lateinit var eventBus: CoreEventBus
     private lateinit var eventSources: CoreEventSources
+    private lateinit var grantStore:
+        DataStoreModuleGrantStateStore
+    private lateinit var securityManager:
+        ModuleSecurityManager
 
     private var homeRoleAvailable by mutableStateOf(false)
     private var homeRoleHeld by mutableStateOf(false)
@@ -112,9 +120,9 @@ class MainActivity : ComponentActivity() {
             val securityStatuses = modules.map { module ->
                 val requested =
                     module.requestedCoreCapabilities
-                        .mapNotNull(
-                            CapabilityId::parse,
-                        )
+                        .mapNotNull { wireValue ->
+                            CapabilityId.parse(wireValue)
+                        }
                         .toSet()
 
                 securityManager.status(

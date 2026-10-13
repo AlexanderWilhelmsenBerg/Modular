@@ -7,6 +7,7 @@ import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.composition.CompositionState
 import io.github.alexanderwilhelmsenberg.modular.composition.LauncherContext
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleGrantState
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow

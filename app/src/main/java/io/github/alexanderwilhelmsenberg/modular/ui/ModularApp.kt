@@ -26,6 +26,7 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.composition.LauncherContext
 import io.github.alexanderwilhelmsenberg.modular.composition.ModuleInstance
+import io.github.alexanderwilhelmsenberg.modular.events.CoreEventBusDiagnostics
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
 
@@ -41,6 +42,7 @@ fun ModularApp(
     activeContext: ActiveContextState,
     compositionLoadError: String?,
     contextActivationError: String?,
+    eventBusDiagnostics: CoreEventBusDiagnostics,
     onRequestHomeRole: () -> Unit,
     onRefreshModules: () -> Unit,
     onRefreshApps: () -> Unit,
@@ -138,6 +140,10 @@ fun ModularApp(
                     )
                 }
 
+                item {
+                    EventBusStatusCard(eventBusDiagnostics)
+                }
+
                 if (contexts.isNotEmpty()) {
                     item {
                         Text(
@@ -216,6 +222,31 @@ fun ModularApp(
             }
         }
     }
+}
+
+@Composable
+private fun EventBusStatusCard(
+    diagnostics: CoreEventBusDiagnostics,
+) {
+    val body = buildString {
+        append("Published sequence: ")
+        append(diagnostics.latestPublishedSequence)
+        append("\nDelivered sequence: ")
+        append(diagnostics.latestDeliveredSequence)
+        append("\nDropped before delivery: ")
+        append(diagnostics.droppedBeforeDelivery)
+
+        if (diagnostics.droppedBeforeDelivery > 0) {
+            append(
+                "\nSequence gaps require a state resync.",
+            )
+        }
+    }
+
+    StatusCard(
+        title = "Core event bus",
+        body = body,
+    )
 }
 
 @Composable

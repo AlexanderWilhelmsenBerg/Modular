@@ -16,6 +16,8 @@ import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
 import io.github.alexanderwilhelmsenberg.modular.composition.ContextManager
 import io.github.alexanderwilhelmsenberg.modular.composition.DataStoreCompositionStateStore
 import io.github.alexanderwilhelmsenberg.modular.composition.InstanceStore
+import io.github.alexanderwilhelmsenberg.modular.events.CoreEventBus
+import io.github.alexanderwilhelmsenberg.modular.events.CoreEventSources
 import io.github.alexanderwilhelmsenberg.modular.home.HomeRoleController
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
@@ -30,6 +32,8 @@ class MainActivity : ComponentActivity() {
         DataStoreCompositionStateStore
     private lateinit var instanceStore: InstanceStore
     private lateinit var contextManager: ContextManager
+    private lateinit var eventBus: CoreEventBus
+    private lateinit var eventSources: CoreEventSources
 
     private var homeRoleAvailable by mutableStateOf(false)
     private var homeRoleHeld by mutableStateOf(false)
@@ -66,6 +70,15 @@ class MainActivity : ComponentActivity() {
             routes = capabilityRouter.routes,
         )
 
+        eventBus = CoreEventBus()
+        eventSources = CoreEventSources(
+            eventBus = eventBus,
+            modules = moduleRegistry.modules,
+            appCatalog = appRepository.catalog,
+            composition = compositionStore.state,
+            activeContext = contextManager.active,
+        )
+
         refreshHomeRoleState()
         moduleRegistry.refresh()
         appRepository.refresh()
@@ -80,6 +93,8 @@ class MainActivity : ComponentActivity() {
                 contextManager.activationError.collectAsState()
             val compositionLoadError by
                 compositionStore.loadError.collectAsState()
+            val eventDiagnostics by
+                eventBus.diagnostics.collectAsState()
 
             ModularApp(
                 homeRoleAvailable = homeRoleAvailable,
@@ -91,6 +106,7 @@ class MainActivity : ComponentActivity() {
                 activeContext = activeContext,
                 compositionLoadError = compositionLoadError,
                 contextActivationError = activationError,
+                eventBusDiagnostics = eventDiagnostics,
                 onRequestHomeRole = ::requestHomeRole,
                 onRefreshModules = moduleRegistry::refresh,
                 onRefreshApps = appRepository::refresh,
@@ -122,6 +138,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (::eventSources.isInitialized) {
+            eventSources.close()
+        }
+        if (::eventBus.isInitialized) {
+            eventBus.close()
+        }
         if (::contextManager.isInitialized) {
             contextManager.close()
         }

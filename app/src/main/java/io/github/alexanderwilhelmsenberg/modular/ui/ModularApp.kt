@@ -210,8 +210,7 @@ fun ModularApp(
                                 ?.let {
                                     error ->
                                     append(
-                                        "
-Error: ",
+                                        "\nError: ",
                                     )
                                     append(error)
                                 }
@@ -445,8 +444,7 @@ private fun EventBusStatusCard(
                 .latestDeliveredSequence,
         )
         append(
-            "
-Dropped before delivery: ",
+            "\nDropped before delivery: ",
         )
         append(
             diagnostics
@@ -458,8 +456,7 @@ Dropped before delivery: ",
                 .droppedBeforeDelivery > 0
         ) {
             append(
-                "
-Sequence gaps require a state resync.",
+                "\nSequence gaps require a state resync.",
             )
         }
     }
@@ -490,8 +487,7 @@ private fun CompositionStatusCard(
 
         if (active == null) {
             append(
-                "
-No active context",
+                "\nNo active context",
             )
         } else {
             append("\nActive: ")
@@ -522,16 +518,14 @@ No active context",
 
         loadError?.let {
             append(
-                "
-Storage error: ",
+                "\nStorage error: ",
             )
             append(it)
         }
 
         activationError?.let {
             append(
-                "
-Activation error: ",
+                "\nActivation error: ",
             )
             append(it)
         }

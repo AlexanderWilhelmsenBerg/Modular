@@ -37,6 +37,9 @@ class AlphabeticalSortService : Service() {
         override fun getCapabilities(): Array<String> =
             arrayOf(StandardCapabilities.AppsSort.wireValue)
 
+        override fun getRequestedCoreCapabilities(): Array<String> =
+            emptyArray()
+
         override fun openSession(
             sessionId: String,
             host: IModularHost,

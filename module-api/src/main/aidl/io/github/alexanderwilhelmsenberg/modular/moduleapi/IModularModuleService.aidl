@@ -8,6 +8,8 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularHost;
  *
  * Transaction codes 1-4 preserve the v1 discovery ABI.
  * Protocol v2 adds session exchange and capability Binder acquisition.
+ * Protocol v3 adds explicit declaration of Core capabilities requested by the
+ * module. Providing a capability and requesting Core authority remain separate.
  */
 interface IModularModuleService {
     int getProtocolVersion() = 1;
@@ -26,4 +28,12 @@ interface IModularModuleService {
         String sessionId,
         String capabilityId
     ) = 7;
+
+    /**
+     * Core capabilities the module asks to consume through IModularHost.
+     *
+     * This declaration is not authority. Core separately evaluates persistent
+     * grants for the module's verified package/signing identity.
+     */
+    String[] getRequestedCoreCapabilities() = 8;
 }

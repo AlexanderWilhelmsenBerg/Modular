@@ -43,6 +43,9 @@ fun ModularApp(
     compositionLoadError: String?,
     contextActivationError: String?,
     eventBusDiagnostics: CoreEventBusDiagnostics,
+    moduleSecurity: List<ModuleSecurityStatus>,
+    grantRecordCount: Int,
+    grantLoadError: String?,
     onRequestHomeRole: () -> Unit,
     onRefreshModules: () -> Unit,
     onRefreshApps: () -> Unit,
@@ -141,6 +144,14 @@ fun ModularApp(
                 }
 
                 item {
+                    SecurityStatusCard(
+                        statuses = moduleSecurity,
+                        grantRecordCount = grantRecordCount,
+                        loadError = grantLoadError,
+                    )
+                }
+
+                item {
                     EventBusStatusCard(eventBusDiagnostics)
                 }
 
@@ -216,12 +227,65 @@ fun ModularApp(
                             it.component.flattenToString()
                         },
                     ) { module ->
-                        ModuleCard(module)
+                        ModuleCard(
+                            module = module,
+                            securityStatus =
+                                moduleSecurity
+                                    .firstOrNull {
+                                        it.packageName ==
+                                            module.component
+                                                .packageName
+                                    },
+                        )
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SecurityStatusCard(
+    statuses: List<ModuleSecurityStatus>,
+    grantRecordCount: Int,
+    loadError: String?,
+) {
+    val body = buildString {
+        append(grantRecordCount)
+        append(" persisted module identities")
+
+        val requested = statuses.sumOf {
+            it.requestedCapabilities.size
+        }
+        val effective = statuses.sumOf {
+            it.effectiveGrants.size
+        }
+
+        append("\n")
+        append(requested)
+        append(" requested Core capabilities · ")
+        append(effective)
+        append(" effective grants")
+
+        val unsupported = statuses.sumOf {
+            it.unsupportedRequests.size
+        }
+        if (unsupported > 0) {
+            append("\n")
+            append(unsupported)
+            append(" unsupported capability requests")
+        }
+
+        loadError?.let { error ->
+            append("\nStorage error: ")
+            append(error)
+        }
+    }
+
+    StatusCard(
+        title = "Module security",
+        body = body,
+    )
 }
 
 @Composable
@@ -424,7 +488,10 @@ private fun StatusCard(
 }
 
 @Composable
-private fun ModuleCard(module: ModuleRecord) {
+private fun ModuleCard(
+    module: ModuleRecord,
+    securityStatus: ModuleSecurityStatus?,
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -475,6 +542,80 @@ private fun ModuleCard(module: ModuleRecord) {
                     ),
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+
+            if (module.requestedCoreCapabilities.isNotEmpty()) {
+                Spacer(Modifier.height(2.dp))
+                HorizontalDivider()
+                Text(
+                    "Requests from Core:",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    module.requestedCoreCapabilities
+                        .joinToString(separator = "\n"),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            securityStatus?.let { security ->
+                val identity = security.identity
+                Text(
+                    buildString {
+                        append("Identity: ")
+                        append(
+                            if (security.sameSignerAsCore) {
+                                "official signer"
+                            } else {
+                                "external signer"
+                            },
+                        )
+
+                        identity?.signerSha256
+                            ?.firstOrNull()
+                            ?.let { digest ->
+                                append(" · ")
+                                append(digest.take(12))
+                                append("…")
+                            }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                Text(
+                    "Effective Core grants: " +
+                        if (security.effectiveGrants.isEmpty()) {
+                            "none"
+                        } else {
+                            security.effectiveGrants
+                                .sortedBy { it.wireValue }
+                                .joinToString {
+                                    it.wireValue
+                                }
+                        },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                if (security.unsupportedRequests.isNotEmpty()) {
+                    Text(
+                        "Unsupported requests: " +
+                            security.unsupportedRequests
+                                .sortedBy { it.wireValue }
+                                .joinToString {
+                                    it.wireValue
+                                },
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
+                security.error?.let { error ->
+                    Text(
+                        "Security identity error: " + error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
 
             module.error?.let { error ->

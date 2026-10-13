@@ -2,8 +2,6 @@ package io.github.alexanderwilhelmsenberg.modular.events
 
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
-import io.github.alexanderwilhelmsenberg.modular.apps.AppProfile
-import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.composition.CompositionState
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
@@ -56,6 +54,8 @@ object CoreEventDiffs {
             previous = previous.apps,
             current = current.apps,
             key = { app -> app.key },
+            comparator =
+                compareBy<AppKey> { it.stableId },
         ).takeIf { diff -> !diff.isEmpty }
             ?.let { diff ->
                 events += CoreEvent.AppsChanged(
@@ -73,6 +73,7 @@ object CoreEventDiffs {
             key = { profile ->
                 profile.serialNumber
             },
+            comparator = naturalOrder<Long>(),
         ).takeIf { diff -> !diff.isEmpty }
             ?.let { diff ->
                 events += CoreEvent.ProfilesChanged(
@@ -95,11 +96,13 @@ object CoreEventDiffs {
             previous = previous.instances,
             current = current.instances,
             key = { instance -> instance.id },
+            comparator = naturalOrder<String>(),
         )
         val contextDiff = entityDiff(
             previous = previous.contexts,
             current = current.contexts,
             key = { context -> context.id },
+            comparator = naturalOrder<String>(),
         )
 
         return if (
@@ -201,10 +204,11 @@ object CoreEventDiffs {
                 ),
         )
 
-    private fun <T, K : Comparable<K>> entityDiff(
+    private fun <T, K> entityDiff(
         previous: List<T>,
         current: List<T>,
         key: (T) -> K,
+        comparator: Comparator<K>,
     ): EntityDiff<K> {
         val previousByKey =
             previous.associateBy(key)
@@ -214,17 +218,17 @@ object CoreEventDiffs {
         return EntityDiff(
             added = currentByKey.keys
                 .minus(previousByKey.keys)
-                .sorted(),
+                .sortedWith(comparator),
             removed = previousByKey.keys
                 .minus(currentByKey.keys)
-                .sorted(),
+                .sortedWith(comparator),
             changed = currentByKey.keys
                 .intersect(previousByKey.keys)
                 .filter { itemKey ->
                     currentByKey[itemKey] !=
                         previousByKey[itemKey]
                 }
-                .sorted(),
+                .sortedWith(comparator),
         )
     }
 

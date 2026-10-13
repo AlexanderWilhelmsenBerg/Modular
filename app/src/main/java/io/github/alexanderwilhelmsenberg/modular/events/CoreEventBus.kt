@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -44,12 +45,12 @@ class CoreEventBus(
         capacity = requirePositiveCapacity(bufferCapacity),
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
         onUndeliveredElement = {
-            _diagnostics.value =
-                _diagnostics.value.copy(
+            _diagnostics.update { diagnostics ->
+                diagnostics.copy(
                     droppedBeforeDelivery =
-                        _diagnostics.value
-                            .droppedBeforeDelivery + 1,
+                        diagnostics.droppedBeforeDelivery + 1,
                 )
+            }
         },
     )
 
@@ -65,11 +66,12 @@ class CoreEventBus(
         scope.launch {
             for (envelope in queue) {
                 _events.emit(envelope)
-                _diagnostics.value =
-                    _diagnostics.value.copy(
+                _diagnostics.update { diagnostics ->
+                    diagnostics.copy(
                         latestDeliveredSequence =
                             envelope.sequence,
                     )
+                }
             }
         }
     }
@@ -91,11 +93,12 @@ class CoreEventBus(
                 "Core event bus queue rejected an event"
             }
 
-            _diagnostics.value =
-                _diagnostics.value.copy(
+            _diagnostics.update { diagnostics ->
+                diagnostics.copy(
                     latestPublishedSequence =
                         nextSequence,
                 )
+            }
 
             nextSequence
         }

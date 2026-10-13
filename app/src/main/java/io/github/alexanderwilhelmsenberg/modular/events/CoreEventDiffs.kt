@@ -5,6 +5,7 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.composition.CompositionState
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleGrantState
 
 object CoreEventDiffs {
     fun modules(

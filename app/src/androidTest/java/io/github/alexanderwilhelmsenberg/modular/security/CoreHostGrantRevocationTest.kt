@@ -51,6 +51,8 @@ class CoreHostGrantRevocationTest {
             val manager = ModuleSecurityManager(
                 identityResolver = resolver,
                 grantStore = store,
+                officialBootstrapCapabilities =
+                    emptySet(),
             )
             val authorization =
                 ModuleAuthorizationContext(

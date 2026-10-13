@@ -45,6 +45,22 @@ class ModuleSecurityManagerTest {
                     ),
             )
 
+            val expandedRequest =
+                manager.prepareSession(
+                    packageName = identity.packageName,
+                    requestedCapabilities = setOf(
+                        CoreCapabilities.AppsCatalog,
+                        CoreCapabilities.AppsLaunch,
+                    ),
+                )
+
+            assertEquals(
+                setOf(CoreCapabilities.AppsCatalog),
+                manager.effectiveCapabilities(
+                    expandedRequest,
+                ),
+            )
+
             manager.revoke(
                 packageName = identity.packageName,
                 capability =
@@ -166,6 +182,13 @@ class ModuleSecurityManagerTest {
                 manager.effectiveCapabilities(
                     oldAuthorization,
                 ).isEmpty(),
+            )
+            assertTrue(
+                manager.grant(
+                    authorization = oldAuthorization,
+                    capability =
+                        CoreCapabilities.AppsCatalog,
+                ).isFailure,
             )
 
             val newAuthorization =

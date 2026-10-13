@@ -98,8 +98,7 @@ class ModuleSecurityManager(
             effectiveCapabilities(authorization)
 
     suspend fun grant(
-        packageName: String,
-        requestedCapabilities: Set<CapabilityId>,
+        authorization: ModuleAuthorizationContext,
         capability: CapabilityId,
     ): Result<Unit> =
         runCatching {
@@ -107,20 +106,33 @@ class ModuleSecurityManager(
                 "Core does not support " +
                     capability.wireValue
             }
-            require(capability in requestedCapabilities) {
+            require(
+                capability in
+                    authorization.requestedCapabilities,
+            ) {
                 "Module did not request " +
                     capability.wireValue
             }
 
-            val identity =
+            val currentIdentity =
                 identityResolver.resolve(
-                    packageName,
+                    authorization.identity.packageName,
                 ).getOrThrow()
+
+            require(
+                currentIdentity ==
+                    authorization.identity,
+            ) {
+                "Module signing identity changed before grant"
+            }
 
             grantStore.update { state ->
                 val existing =
-                    state.recordFor(identity)
-                        ?: ModuleGrantRecord(identity)
+                    state.recordFor(
+                        authorization.identity,
+                    ) ?: ModuleGrantRecord(
+                        authorization.identity,
+                    )
 
                 val replacement = existing.copy(
                     grantedCapabilities =
@@ -131,7 +143,8 @@ class ModuleSecurityManager(
                 state.copy(
                     records =
                         state.records.filterNot {
-                            it.identity == identity
+                            it.identity ==
+                                authorization.identity
                         } + replacement,
                 )
             }

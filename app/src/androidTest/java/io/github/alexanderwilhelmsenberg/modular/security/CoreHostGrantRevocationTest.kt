@@ -124,6 +124,8 @@ class CoreHostGrantRevocationTest {
             ) {
                 catalog.info
             }
+
+            Unit
         }
 
     private class FixedIdentityResolver(

@@ -96,7 +96,7 @@ class ModuleRegistry(
         val session = sessions[component]
             ?: return Result.failure(
                 IllegalStateException(
-                    "Module does not have an active v2 session",
+                    "Module does not have an active Core-host session",
                 ),
             )
 
@@ -271,6 +271,43 @@ class ModuleRegistry(
             )
         }
 
+        val requestedCoreCapabilities =
+            if (
+                ModuleContract
+                    .supportsCoreCapabilityRequests(
+                        protocolVersion,
+                    )
+            ) {
+                remote.requestedCoreCapabilities
+                    ?.toList()
+                    .orEmpty()
+                    .distinct()
+                    .sorted()
+            } else {
+                emptyList()
+            }
+
+        val invalidCoreRequests =
+            requestedCoreCapabilities.filter {
+                CapabilityId.parse(it) == null
+            }
+
+        if (invalidCoreRequests.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "Invalid requested Core capabilities: " +
+                    invalidCoreRequests.joinToString(),
+            )
+        }
+
+        val requestedCoreCapabilityIds =
+            requestedCoreCapabilities
+                .map { wireValue ->
+                    requireNotNull(
+                        CapabilityId.parse(wireValue),
+                    )
+                }
+                .toSet()
+
         if (!supported) {
             return HandshakeResult(
                 record = ModuleRecord(
@@ -292,7 +329,12 @@ class ModuleRegistry(
 
         val sessionId = if (ModuleContract.supportsSessions(protocolVersion)) {
             UUID.randomUUID().toString().also { id ->
-                coreHostSession = hostFactory.create(component, id)
+                coreHostSession = hostFactory.create(
+                    component = component,
+                    sessionId = id,
+                    requestedCapabilities =
+                        requestedCoreCapabilityIds,
+                )
 
                 try {
                     remote.openSession(

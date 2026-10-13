@@ -77,9 +77,19 @@ class CoreEventBus(
     }
 
     fun publish(event: CoreEvent): Long =
+        checkNotNull(tryPublish(event)) {
+            "Core event bus is closed"
+        }
+
+    /**
+     * Lifecycle-safe publication used by owned source adapters.
+     *
+     * Returns null when teardown already closed the bus.
+     */
+    fun tryPublish(event: CoreEvent): Long? =
         synchronized(publishLock) {
-            check(!closed.get()) {
-                "Core event bus is closed"
+            if (closed.get()) {
+                return@synchronized null
             }
 
             val nextSequence =
@@ -89,8 +99,8 @@ class CoreEventBus(
                 event = event,
             )
 
-            check(queue.trySend(envelope).isSuccess) {
-                "Core event bus queue rejected an event"
+            if (!queue.trySend(envelope).isSuccess) {
+                return@synchronized null
             }
 
             _diagnostics.update { diagnostics ->
@@ -107,12 +117,22 @@ class CoreEventBus(
         events.forEach(::publish)
     }
 
+    fun tryPublishAll(events: Iterable<CoreEvent>) {
+        events.forEach { event ->
+            if (tryPublish(event) == null) {
+                return
+            }
+        }
+    }
+
     override fun close() {
-        if (!closed.compareAndSet(false, true)) {
-            return
+        synchronized(publishLock) {
+            if (!closed.compareAndSet(false, true)) {
+                return
+            }
+            queue.close()
         }
 
-        queue.close()
         scope.cancel()
     }
 

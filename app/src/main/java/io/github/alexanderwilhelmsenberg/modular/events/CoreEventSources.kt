@@ -40,7 +40,7 @@ class CoreEventSources(
                     CoreEventDiffs.modules(
                         previous = old,
                         current = current,
-                    )?.let(eventBus::publish)
+                    )?.let(eventBus::tryPublish)
                 }
                 previous = current
             }
@@ -56,7 +56,7 @@ class CoreEventSources(
                 }
                 .collect { current ->
                     previous?.let { old ->
-                        eventBus.publishAll(
+                        eventBus.tryPublishAll(
                             CoreEventDiffs.apps(
                                 previous = old,
                                 current = current,
@@ -75,7 +75,7 @@ class CoreEventSources(
                     CoreEventDiffs.composition(
                         previous = old,
                         current = current,
-                    )?.let(eventBus::publish)
+                    )?.let(eventBus::tryPublish)
                 }
                 previous = current
             }
@@ -86,7 +86,7 @@ class CoreEventSources(
 
             activeContext.collect { current ->
                 previous?.let { old ->
-                    eventBus.publishAll(
+                    eventBus.tryPublishAll(
                         CoreEventDiffs.activeContext(
                             previous = old,
                             current = current,

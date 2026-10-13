@@ -4,6 +4,8 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -51,6 +53,31 @@ class CoreEventBusTest {
                 bus.close()
             }
         }
+
+    @Test
+    fun lifecycleSafePublishIsIgnoredAfterClose() {
+        val bus = CoreEventBus()
+
+        bus.close()
+
+        assertNull(
+            bus.tryPublish(
+                CoreEvent.ActiveContextChanged(
+                    previousContextId = null,
+                    currentContextId = "closed",
+                ),
+            ),
+        )
+
+        assertThrows(IllegalStateException::class.java) {
+            bus.publish(
+                CoreEvent.ActiveContextChanged(
+                    previousContextId = null,
+                    currentContextId = "closed",
+                ),
+            )
+        }
+    }
 
     @Test
     fun cursorDetectsSequenceGapAndCanReset() {

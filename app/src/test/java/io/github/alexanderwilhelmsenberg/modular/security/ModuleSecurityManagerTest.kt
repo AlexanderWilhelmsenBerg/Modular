@@ -19,15 +19,7 @@ class ModuleSecurityManagerTest {
                 sameSignerAsCore = true,
             )
             val store = FakeGrantStore()
-            val manager = ModuleSecurityManager(
-                identityResolver = resolver,
-                grantStore = store,
-                officialBootstrapCapabilities =
-                    setOf(
-                        CoreCapabilities.AppsCatalog,
-                        CoreCapabilities.AppsLaunch,
-                    ),
-            )
+            val manager = manager(resolver, store)
             val requested = setOf(
                 CoreCapabilities.AppsCatalog,
             )
@@ -103,15 +95,7 @@ class ModuleSecurityManagerTest {
                 sameSignerAsCore = false,
             )
             val store = FakeGrantStore()
-            val manager = ModuleSecurityManager(
-                identityResolver = resolver,
-                grantStore = store,
-                officialBootstrapCapabilities =
-                    setOf(
-                        CoreCapabilities.AppsCatalog,
-                        CoreCapabilities.AppsLaunch,
-                    ),
-            )
+            val manager = manager(resolver, store)
             val requested = setOf(
                 CoreCapabilities.AppsCatalog,
             )
@@ -159,15 +143,7 @@ class ModuleSecurityManagerTest {
                 sameSignerAsCore = false,
             )
             val store = FakeGrantStore()
-            val manager = ModuleSecurityManager(
-                identityResolver = resolver,
-                grantStore = store,
-                officialBootstrapCapabilities =
-                    setOf(
-                        CoreCapabilities.AppsCatalog,
-                        CoreCapabilities.AppsLaunch,
-                    ),
-            )
+            val manager = manager(resolver, store)
             val requested = setOf(
                 CoreCapabilities.AppsCatalog,
             )
@@ -240,15 +216,7 @@ class ModuleSecurityManagerTest {
                     ),
                 ),
             )
-            val manager = ModuleSecurityManager(
-                identityResolver = resolver,
-                grantStore = store,
-                officialBootstrapCapabilities =
-                    setOf(
-                        CoreCapabilities.AppsCatalog,
-                        CoreCapabilities.AppsLaunch,
-                    ),
-            )
+            val manager = manager(resolver, store)
             val authorization =
                 ModuleAuthorizationContext(
                     identity = identity,
@@ -290,6 +258,93 @@ class ModuleSecurityManagerTest {
         }
 
     @Test
+    fun failedPolicyInitializationStillAllowsZeroAuthoritySession() =
+        runBlocking {
+            val identity = identity("9")
+            val resolver = FakeIdentityResolver(
+                currentIdentity = identity,
+                sameSignerAsCore = true,
+            )
+            val store = FakeGrantStore()
+            store.failNextUpdate("write failed")
+            val manager = manager(resolver, store)
+
+            val authorization = manager.prepareSession(
+                packageName = identity.packageName,
+                requestedCapabilities = setOf(
+                    CoreCapabilities.AppsCatalog,
+                ),
+            )
+
+            assertTrue(
+                manager.effectiveCapabilities(
+                    authorization,
+                ).isEmpty(),
+            )
+            assertTrue(
+                store.loadError.value != null,
+            )
+            assertTrue(
+                store.state.value
+                    .recordFor(identity) == null,
+            )
+        }
+
+    @Test
+    fun failedGrantWriteImmediatelySuppressesPreviouslyEffectiveAuthority() =
+        runBlocking {
+            val identity = identity("8")
+            val resolver = FakeIdentityResolver(
+                currentIdentity = identity,
+                sameSignerAsCore = false,
+            )
+            val store = FakeGrantStore(
+                initial = ModuleGrantState(
+                    records = listOf(
+                        ModuleGrantRecord(
+                            identity = identity,
+                            grantedCapabilities =
+                                setOf(
+                                    CoreCapabilities.AppsCatalog,
+                                ),
+                        ),
+                    ),
+                ),
+            )
+            val manager = manager(resolver, store)
+            val authorization =
+                ModuleAuthorizationContext(
+                    identity = identity,
+                    requestedCapabilities =
+                        setOf(
+                            CoreCapabilities.AppsCatalog,
+                            CoreCapabilities.AppsLaunch,
+                        ),
+                )
+
+            assertEquals(
+                setOf(CoreCapabilities.AppsCatalog),
+                manager.effectiveCapabilities(
+                    authorization,
+                ),
+            )
+
+            store.failNextUpdate("disk write failed")
+
+            assertTrue(
+                manager.grant(
+                    authorization,
+                    CoreCapabilities.AppsLaunch,
+                ).isFailure,
+            )
+            assertTrue(
+                manager.effectiveCapabilities(
+                    authorization,
+                ).isEmpty(),
+            )
+        }
+
+    @Test
     fun unsupportedRequestIsReportedButNeverEffective() =
         runBlocking {
             val identity = identity("e")
@@ -302,15 +357,7 @@ class ModuleSecurityManagerTest {
                 sameSignerAsCore = true,
             )
             val store = FakeGrantStore()
-            val manager = ModuleSecurityManager(
-                identityResolver = resolver,
-                grantStore = store,
-                officialBootstrapCapabilities =
-                    setOf(
-                        CoreCapabilities.AppsCatalog,
-                        CoreCapabilities.AppsLaunch,
-                    ),
-            )
+            val manager = manager(resolver, store)
             val requested = setOf(
                 unsupported,
                 CoreCapabilities.AppsCatalog,
@@ -339,6 +386,19 @@ class ModuleSecurityManagerTest {
                 status.unsupportedRequests,
             )
         }
+
+    private fun manager(
+        resolver: FakeIdentityResolver,
+        store: FakeGrantStore,
+    ) = ModuleSecurityManager(
+        identityResolver = resolver,
+        grantStore = store,
+        officialBootstrapCapabilities =
+            setOf(
+                CoreCapabilities.AppsCatalog,
+                CoreCapabilities.AppsLaunch,
+            ),
+    )
 
     private fun identity(
         fill: String,
@@ -383,6 +443,8 @@ class ModuleSecurityManagerTest {
             MutableStateFlow(initial)
         private val mutableLoadError =
             MutableStateFlow<String?>(null)
+        private var failNextUpdateMessage: String? =
+            null
 
         override val state:
             StateFlow<ModuleGrantState> =
@@ -396,14 +458,25 @@ class ModuleSecurityManagerTest {
             mutableLoadError.value = message
         }
 
+        fun failNextUpdate(message: String) {
+            failNextUpdateMessage = message
+        }
+
         override suspend fun update(
             transform:
                 (ModuleGrantState) ->
                     ModuleGrantState,
         ): ModuleGrantState {
+            failNextUpdateMessage?.let { message ->
+                failNextUpdateMessage = null
+                mutableLoadError.value = message
+                throw IllegalStateException(message)
+            }
+
             val next =
                 transform(mutableState.value)
             mutableState.value = next
+            mutableLoadError.value = null
             return next
         }
 

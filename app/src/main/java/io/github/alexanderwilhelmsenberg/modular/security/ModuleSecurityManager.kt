@@ -14,9 +14,11 @@ class ModuleSecurityManager(
 
     /**
      * Resolves the exact installed identity and ensures it has one persisted
-     * grant record. Official same-signer modules are initialized only with the
-     * Core capabilities they explicitly requested and that the bootstrap policy
-     * allows. An empty record is still persisted so later revocation is sticky.
+     * grant record when policy storage is healthy.
+     *
+     * If grant-policy storage is unhealthy, the module may still establish a
+     * Core session so it can provide its own capabilities. Effective Core
+     * authority remains zero until policy storage becomes healthy again.
      */
     suspend fun prepareSession(
         packageName: String,
@@ -25,35 +27,43 @@ class ModuleSecurityManager(
         val identity =
             identityResolver.resolve(packageName).getOrThrow()
 
-        grantStore.update { state ->
-            if (state.recordFor(identity) != null) {
-                state
-            } else {
-                val bootstrap =
-                    if (
-                        identityResolver
-                            .isSameSignerAsCore(identity)
-                    ) {
-                        requestedCapabilities
-                            .intersect(
-                                officialBootstrapCapabilities,
-                            )
-                            .intersect(
-                                supportedCapabilities,
-                            )
-                    } else {
-                        emptySet()
-                    }
+        try {
+            grantStore.update { state ->
+                if (state.recordFor(identity) != null) {
+                    state
+                } else {
+                    val bootstrap =
+                        if (
+                            identityResolver
+                                .isSameSignerAsCore(identity)
+                        ) {
+                            requestedCapabilities
+                                .intersect(
+                                    officialBootstrapCapabilities,
+                                )
+                                .intersect(
+                                    supportedCapabilities,
+                                )
+                        } else {
+                            emptySet()
+                        }
 
-                state.copy(
-                    records = state.records +
-                        ModuleGrantRecord(
-                            identity = identity,
-                            grantedCapabilities =
-                                bootstrap,
-                        ),
-                )
+                    state.copy(
+                        records = state.records +
+                            ModuleGrantRecord(
+                                identity = identity,
+                                grantedCapabilities =
+                                    bootstrap,
+                            ),
+                    )
+                }
             }
+        } catch (throwable: Throwable) {
+            if (grantStore.loadError.value == null) {
+                throw throwable
+            }
+            // Policy storage failure removes Core authority, but must not stop
+            // the module from providing capabilities to Core.
         }
 
         return ModuleAuthorizationContext(
@@ -85,6 +95,10 @@ class ModuleSecurityManager(
             .recordFor(authorization.identity)
             ?.grantedCapabilities
             .orEmpty()
+
+        if (grantStore.loadError.value != null) {
+            return emptySet()
+        }
 
         return explicit
             .intersect(

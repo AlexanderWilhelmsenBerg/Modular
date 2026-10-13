@@ -50,10 +50,11 @@ class DataStoreModuleGrantStateStore(
             dataStore.data
                 .catch { throwable ->
                     if (throwable is IOException) {
-                        _loadError.value =
-                            throwable.message
-                                ?: "Module-grant store I/O failure"
-                        // Keep the last known state and preserve the error.
+                        markUnhealthy(
+                            throwable,
+                            "Module-grant store I/O failure",
+                        )
+                        // Keep last-known state for diagnostics.
                     } else {
                         throw throwable
                     }
@@ -69,10 +70,10 @@ class DataStoreModuleGrantStateStore(
                             _state.value = decoded
                         },
                         onFailure = { throwable ->
-                            _loadError.value =
-                                throwable.message
-                                    ?: throwable::class.java
-                                        .simpleName
+                            markUnhealthy(
+                                throwable,
+                                "Module-grant store decode failure",
+                            )
                             _state.value =
                                 ModuleGrantState()
                         },
@@ -84,29 +85,46 @@ class DataStoreModuleGrantStateStore(
     override suspend fun update(
         transform: (ModuleGrantState) -> ModuleGrantState,
     ): ModuleGrantState {
-        var updated: ModuleGrantState? = null
+        return try {
+            var updated: ModuleGrantState? = null
 
-        dataStore.edit { preferences ->
-            val current = ModuleGrantStateCodec.decode(
-                preferences[stateKey],
-            )
-            val next = normalize(
-                transform(current),
-            )
+            dataStore.edit { preferences ->
+                val current = ModuleGrantStateCodec.decode(
+                    preferences[stateKey],
+                )
+                val next = normalize(
+                    transform(current),
+                )
 
-            preferences[stateKey] =
-                ModuleGrantStateCodec.encode(next)
-            updated = next
+                preferences[stateKey] =
+                    ModuleGrantStateCodec.encode(next)
+                updated = next
+            }
+
+            requireNotNull(updated).also { result ->
+                _loadError.value = null
+                _state.value = result
+            }
+        } catch (throwable: Throwable) {
+            markUnhealthy(
+                throwable,
+                "Module-grant store write failure",
+            )
+            throw throwable
         }
-
-        val result = requireNotNull(updated)
-        _loadError.value = null
-        _state.value = result
-        return result
     }
 
     override fun close() {
         scope.cancel()
+    }
+
+    private fun markUnhealthy(
+        throwable: Throwable,
+        fallback: String,
+    ) {
+        _loadError.value =
+            throwable.message
+                ?: fallback
     }
 
     private fun normalize(

@@ -102,8 +102,7 @@ class ModuleSecurityManagerTest {
             )
 
             manager.grant(
-                packageName = identity.packageName,
-                requestedCapabilities = requested,
+                authorization = authorization,
                 capability =
                     CoreCapabilities.AppsCatalog,
             ).getOrThrow()
@@ -116,8 +115,7 @@ class ModuleSecurityManagerTest {
             )
 
             val unrequested = manager.grant(
-                packageName = identity.packageName,
-                requestedCapabilities = requested,
+                authorization = authorization,
                 capability =
                     CoreCapabilities.AppsLaunch,
             )
@@ -150,8 +148,7 @@ class ModuleSecurityManagerTest {
                 )
 
             manager.grant(
-                packageName = original.packageName,
-                requestedCapabilities = requested,
+                authorization = oldAuthorization,
                 capability =
                     CoreCapabilities.AppsCatalog,
             ).getOrThrow()

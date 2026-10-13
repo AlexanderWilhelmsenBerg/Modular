@@ -45,10 +45,11 @@ jobs:
           :reference-sort-alphabetical:lintDebug
           --stacktrace
 
-      - name: Assemble debug APKs
+      - name: Assemble debug and test APKs
         run: >
           gradle
           :app:assembleDebug
+          :app:assembleDebugAndroidTest
           :reference-sort-alphabetical:assembleDebug
           --stacktrace
 

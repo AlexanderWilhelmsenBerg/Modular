@@ -14,6 +14,8 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppCatalogInfoP
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppCatalogPageParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppKeyParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppLaunchResultParcel
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleAuthorizationContext
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.runBlocking
 
@@ -21,8 +23,8 @@ import kotlinx.coroutines.runBlocking
  * Per-session Core Binder exposed to one external module package.
  *
  * The root Binder only brokers capability Binders. Each capability Binder
- * repeats the session caller check so a leaked Binder reference does not become
- * authority for another package.
+ * repeats both the session caller check and the live grant check so leaked
+ * Binder references do not become durable authority.
  *
  * A closed module session revokes this object and every capability Binder
  * created by it.
@@ -32,7 +34,8 @@ class CoreHostBinder(
     private val expectedPackage: String,
     private val sessionId: String,
     private val appRepository: AppRepository,
-    private val allowedCapabilities: Set<CapabilityId>,
+    private val securityManager: ModuleSecurityManager,
+    private val authorization: ModuleAuthorizationContext,
 ) : IModularHost.Stub() {
     private val packageManager = context.packageManager
     private val active = AtomicBoolean(true)
@@ -41,7 +44,9 @@ class CoreHostBinder(
         object : IAppCatalogCapability.Stub() {
             override fun getInfo(): AppCatalogInfoParcel {
                 enforceCapability(CoreCapabilities.AppsCatalog)
-                return AppCatalogIpcMapper.info(appRepository.catalog.value)
+                return AppCatalogIpcMapper.info(
+                    appRepository.catalog.value,
+                )
             }
 
             override fun getPage(
@@ -61,25 +66,37 @@ class CoreHostBinder(
 
     private val appLaunchCapability =
         object : IAppLaunchCapability.Stub() {
-            override fun launch(key: AppKeyParcel): AppLaunchResultParcel {
+            override fun launch(
+                key: AppKeyParcel,
+            ): AppLaunchResultParcel {
                 enforceCapability(CoreCapabilities.AppsLaunch)
 
-                if (key.packageName.isBlank() || key.activityName.isBlank()) {
+                if (
+                    key.packageName.isBlank() ||
+                    key.activityName.isBlank()
+                ) {
                     return AppLaunchResultParcel(
-                        status = AppLaunchResultParcel.STATUS_NOT_FOUND,
+                        status =
+                            AppLaunchResultParcel
+                                .STATUS_NOT_FOUND,
                         message = "Invalid app key",
                     )
                 }
 
-                val appKey = AppCatalogIpcMapper.fromParcel(key)
-                val exists = appRepository.catalog.value.apps.any {
-                    it.key == appKey
-                }
+                val appKey =
+                    AppCatalogIpcMapper.fromParcel(key)
+                val exists =
+                    appRepository.catalog.value.apps.any {
+                        it.key == appKey
+                    }
 
                 if (!exists) {
                     return AppLaunchResultParcel(
-                        status = AppLaunchResultParcel.STATUS_NOT_FOUND,
-                        message = "App is not present in the current catalog",
+                        status =
+                            AppLaunchResultParcel
+                                .STATUS_NOT_FOUND,
+                        message =
+                            "App is not present in the current catalog",
                     )
                 }
 
@@ -87,19 +104,29 @@ class CoreHostBinder(
                     appRepository.launch(appKey).fold(
                         onSuccess = {
                             AppLaunchResultParcel(
-                                status = AppLaunchResultParcel.STATUS_SUCCESS,
+                                status =
+                                    AppLaunchResultParcel
+                                        .STATUS_SUCCESS,
                                 message = null,
                             )
                         },
                         onFailure = { throwable ->
                             AppLaunchResultParcel(
-                                status = if (throwable is SecurityException) {
-                                    AppLaunchResultParcel.STATUS_DENIED
-                                } else {
-                                    AppLaunchResultParcel.STATUS_FAILED
-                                },
-                                message = throwable.message
-                                    ?: throwable::class.java.simpleName,
+                                status =
+                                    if (
+                                        throwable is
+                                        SecurityException
+                                    ) {
+                                        AppLaunchResultParcel
+                                            .STATUS_DENIED
+                                    } else {
+                                        AppLaunchResultParcel
+                                            .STATUS_FAILED
+                                    },
+                                message =
+                                    throwable.message
+                                        ?: throwable::class.java
+                                            .simpleName,
                             )
                         },
                     )
@@ -114,17 +141,31 @@ class CoreHostBinder(
 
     override fun getCapabilities(): Array<String> {
         enforceSessionCaller()
-        return allowedCapabilities
+
+        return securityManager
+            .effectiveCapabilities(authorization)
             .sortedBy { it.wireValue }
             .map { it.wireValue }
             .toTypedArray()
     }
 
-    override fun getCapabilityBinder(capabilityId: String): IBinder? {
+    override fun getCapabilityBinder(
+        capabilityId: String,
+    ): IBinder? {
         enforceSessionCaller()
 
-        val capability = CapabilityId.parse(capabilityId) ?: return null
-        if (capability !in allowedCapabilities) return null
+        val capability =
+            CapabilityId.parse(capabilityId)
+                ?: return null
+
+        if (
+            !securityManager.isGranted(
+                authorization,
+                capability,
+            )
+        ) {
+            return null
+        }
 
         return when (capability) {
             CoreCapabilities.AppsCatalog ->
@@ -141,10 +182,17 @@ class CoreHostBinder(
         active.set(false)
     }
 
-    private fun enforceCapability(capability: CapabilityId) {
+    private fun enforceCapability(
+        capability: CapabilityId,
+    ) {
         enforceSessionCaller()
 
-        if (capability !in allowedCapabilities) {
+        if (
+            !securityManager.isGranted(
+                authorization,
+                capability,
+            )
+        ) {
             throw SecurityException(
                 "Capability " +
                     capability.wireValue +
@@ -162,7 +210,10 @@ class CoreHostBinder(
         }
 
         val callingUid = Binder.getCallingUid()
-        val callerPackages = packageManager.getPackagesForUid(callingUid).orEmpty()
+        val callerPackages =
+            packageManager
+                .getPackagesForUid(callingUid)
+                .orEmpty()
 
         if (expectedPackage !in callerPackages) {
             throw SecurityException(

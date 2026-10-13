@@ -7,8 +7,7 @@ class ModuleSecurityManager(
     private val identityResolver: ModuleIdentityResolver,
     private val grantStore: ModuleGrantStateStore,
     private val officialBootstrapCapabilities:
-        Set<CapabilityId> =
-        CoreCapabilities.all.toSet(),
+        Set<CapabilityId>,
 ) {
     private val supportedCapabilities =
         CoreCapabilities.all.toSet()

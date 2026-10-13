@@ -50,10 +50,18 @@ class MainActivity : ComponentActivity() {
 
         homeRoleController = HomeRoleController(this)
         appRepository = AndroidAppRepository(this)
+        grantStore =
+            DataStoreModuleGrantStateStore(this)
+        securityManager = ModuleSecurityManager(
+            identityResolver =
+                AndroidModuleIdentityResolver(this),
+            grantStore = grantStore,
+        )
 
         val hostFactory = CoreHostFactory(
             context = this,
             appRepository = appRepository,
+            securityManager = securityManager,
         )
 
         moduleRegistry = ModuleRegistry(
@@ -76,6 +84,7 @@ class MainActivity : ComponentActivity() {
             modules = moduleRegistry.modules,
             appCatalog = appRepository.catalog,
             composition = compositionStore.state,
+            grants = grantStore.state,
             activeContext = contextManager.active,
         )
 
@@ -95,6 +104,25 @@ class MainActivity : ComponentActivity() {
                 compositionStore.loadError.collectAsState()
             val eventDiagnostics by
                 eventBus.diagnostics.collectAsState()
+            val grantState by
+                grantStore.state.collectAsState()
+            val grantLoadError by
+                grantStore.loadError.collectAsState()
+
+            val securityStatuses = modules.map { module ->
+                val requested =
+                    module.requestedCoreCapabilities
+                        .mapNotNull(
+                            CapabilityId::parse,
+                        )
+                        .toSet()
+
+                securityManager.status(
+                    packageName =
+                        module.component.packageName,
+                    requestedCapabilities = requested,
+                )
+            }
 
             ModularApp(
                 homeRoleAvailable = homeRoleAvailable,
@@ -107,6 +135,10 @@ class MainActivity : ComponentActivity() {
                 compositionLoadError = compositionLoadError,
                 contextActivationError = activationError,
                 eventBusDiagnostics = eventDiagnostics,
+                moduleSecurity = securityStatuses,
+                grantRecordCount =
+                    grantState.records.size,
+                grantLoadError = grantLoadError,
                 onRequestHomeRole = ::requestHomeRole,
                 onRefreshModules = moduleRegistry::refresh,
                 onRefreshApps = appRepository::refresh,
@@ -158,6 +190,9 @@ class MainActivity : ComponentActivity() {
         }
         if (::moduleRegistry.isInitialized) {
             moduleRegistry.close()
+        }
+        if (::grantStore.isInitialized) {
+            grantStore.close()
         }
         if (::appRepository.isInitialized) {
             appRepository.close()

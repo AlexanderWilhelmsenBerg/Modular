@@ -67,6 +67,10 @@ class ModuleSecurityManager(
     fun effectiveCapabilities(
         authorization: ModuleAuthorizationContext,
     ): Set<CapabilityId> {
+        if (grantStore.loadError.value != null) {
+            return emptySet()
+        }
+
         val currentIdentity =
             identityResolver
                 .resolve(
@@ -199,6 +203,9 @@ class ModuleSecurityManager(
                         ?.grantedCapabilities
                         .orEmpty()
 
+                val storeError =
+                    grantStore.loadError.value
+
                 ModuleSecurityStatus(
                     packageName = packageName,
                     identity = identity,
@@ -208,17 +215,24 @@ class ModuleSecurityManager(
                     requestedCapabilities =
                         requestedCapabilities,
                     explicitGrants = explicit,
-                    effectiveGrants = explicit
-                        .intersect(
-                            requestedCapabilities,
-                        )
-                        .intersect(
-                            supportedCapabilities,
-                        ),
+                    effectiveGrants =
+                        if (storeError == null) {
+                            explicit
+                                .intersect(
+                                    requestedCapabilities,
+                                )
+                                .intersect(
+                                    supportedCapabilities,
+                                )
+                        } else {
+                            emptySet()
+                        },
                     unsupportedRequests =
                         requestedCapabilities -
                             supportedCapabilities,
-                    error = null,
+                    error = storeError?.let {
+                        "Grant store unavailable: " + it
+                    },
                 )
             },
             onFailure = { throwable ->

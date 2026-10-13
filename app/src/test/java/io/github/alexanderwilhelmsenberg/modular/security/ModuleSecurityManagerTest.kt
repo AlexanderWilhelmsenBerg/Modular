@@ -183,6 +183,70 @@ class ModuleSecurityManagerTest {
         }
 
     @Test
+    fun grantStoreFailureFailsClosedWithoutDiscardingRecordedState() =
+        runBlocking {
+            val identity = identity("f")
+            val resolver = FakeIdentityResolver(
+                currentIdentity = identity,
+                sameSignerAsCore = false,
+            )
+            val store = FakeGrantStore(
+                initial = ModuleGrantState(
+                    records = listOf(
+                        ModuleGrantRecord(
+                            identity = identity,
+                            grantedCapabilities = setOf(
+                                CoreCapabilities.AppsCatalog,
+                            ),
+                        ),
+                    ),
+                ),
+            )
+            val manager = ModuleSecurityManager(
+                identityResolver = resolver,
+                grantStore = store,
+            )
+            val authorization =
+                ModuleAuthorizationContext(
+                    identity = identity,
+                    requestedCapabilities = setOf(
+                        CoreCapabilities.AppsCatalog,
+                    ),
+                )
+
+            assertEquals(
+                setOf(CoreCapabilities.AppsCatalog),
+                manager.effectiveCapabilities(
+                    authorization,
+                ),
+            )
+
+            store.fail("disk unavailable")
+
+            assertTrue(
+                manager.effectiveCapabilities(
+                    authorization,
+                ).isEmpty(),
+            )
+            assertEquals(
+                setOf(CoreCapabilities.AppsCatalog),
+                store.state.value
+                    .recordFor(identity)
+                    ?.grantedCapabilities,
+            )
+            assertTrue(
+                manager.status(
+                    packageName = identity.packageName,
+                    requestedCapabilities =
+                        authorization
+                            .requestedCapabilities,
+                ).error
+                    ?.contains("Grant store unavailable")
+                    == true,
+            )
+        }
+
+    @Test
     fun unsupportedRequestIsReportedButNeverEffective() =
         runBlocking {
             val identity = identity("e")
@@ -279,6 +343,10 @@ class ModuleSecurityManagerTest {
         override val loadError:
             StateFlow<String?> =
             mutableLoadError
+
+        fun fail(message: String) {
+            mutableLoadError.value = message
+        }
 
         override suspend fun update(
             transform:

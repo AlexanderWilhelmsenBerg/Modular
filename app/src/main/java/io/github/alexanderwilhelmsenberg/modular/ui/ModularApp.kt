@@ -396,8 +396,7 @@ private fun SecurityStatusCard(
                 it.effectiveGrants.size
             }
 
-        append("
-")
+        append("\n")
         append(requested)
         append(
             " requested Core capabilities · ",
@@ -411,8 +410,7 @@ private fun SecurityStatusCard(
             }
 
         if (unsupported > 0) {
-            append("
-")
+            append("\n")
             append(unsupported)
             append(
                 " unsupported capability requests",
@@ -420,8 +418,7 @@ private fun SecurityStatusCard(
         }
 
         loadError?.let { error ->
-            append("
-Storage error: ")
+            append("\nStorage error: ")
             append(error)
         }
     }
@@ -442,8 +439,7 @@ private fun EventBusStatusCard(
             diagnostics
                 .latestPublishedSequence,
         )
-        append("
-Delivered sequence: ")
+        append("\nDelivered sequence: ")
         append(
             diagnostics
                 .latestDeliveredSequence,
@@ -498,8 +494,7 @@ private fun CompositionStatusCard(
 No active context",
             )
         } else {
-            append("
-Active: ")
+            append("\nActive: ")
             append(active.name)
             append(
                 if (
@@ -514,8 +509,7 @@ Active: ")
             activeContext
                 .problems
                 .forEach { problem ->
-                    append("
-")
+                    append("\n")
                     append(
                         problem
                             .capability
@@ -808,8 +802,7 @@ private fun ModuleCard(
                 Text(
                     module.capabilities
                         .joinToString(
-                            separator = "
-",
+                            separator = "\n",
                         ),
                     style =
                         MaterialTheme
@@ -838,8 +831,7 @@ private fun ModuleCard(
                     module
                         .requestedCoreCapabilities
                         .joinToString(
-                            separator = "
-",
+                            separator = "\n",
                         ),
                     style =
                         MaterialTheme

@@ -35,6 +35,7 @@ jobs:
           :module-api:testDebugUnitTest
           :app:testDebugUnitTest
           :reference-sort-alphabetical:testDebugUnitTest
+          :reference-home-minimal:testDebugUnitTest
           --stacktrace
 
       - name: Lint
@@ -43,6 +44,7 @@ jobs:
           :module-api:lintDebug
           :app:lintDebug
           :reference-sort-alphabetical:lintDebug
+          :reference-home-minimal:lintDebug
           --stacktrace
 
       - name: Assemble debug and test APKs
@@ -51,6 +53,7 @@ jobs:
           :app:assembleDebug
           :app:assembleDebugAndroidTest
           :reference-sort-alphabetical:assembleDebug
+          :reference-home-minimal:assembleDebug
           --stacktrace
 
   ipc-smoke:
@@ -94,6 +97,7 @@ jobs:
             -no-boot-anim
             -camera-back none
           script: |
-            gradle :reference-sort-alphabetical:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+            gradle :reference-sort-alphabetical:assembleDebug :reference-home-minimal:assembleDebug :app:assembleDebugAndroidTest --stacktrace
             adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
-            gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; exit 1; }
+            adb install -r reference-home-minimal/build/outputs/apk/debug/reference-home-minimal-debug.apk
+            gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} ; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; exit 1; }

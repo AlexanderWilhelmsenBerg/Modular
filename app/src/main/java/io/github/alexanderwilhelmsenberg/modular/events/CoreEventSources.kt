@@ -26,6 +26,7 @@ class CoreEventSources(
     modules: StateFlow<List<ModuleRecord>>,
     appCatalog: StateFlow<AppCatalog>,
     composition: StateFlow<CompositionState>,
+    grants: StateFlow<ModuleGrantState>,
     activeContext: StateFlow<ActiveContextState>,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : AutoCloseable {

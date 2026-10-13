@@ -247,7 +247,7 @@ class ModuleRegistry(
         }
     }
 
-    private fun performHandshake(
+    private suspend fun performHandshake(
         component: ComponentName,
         remote: IModularModuleService,
     ): HandshakeResult {
@@ -316,6 +316,8 @@ class ModuleRegistry(
                     moduleVersion = remote.moduleVersion,
                     protocolVersion = protocolVersion,
                     capabilities = capabilities,
+                    requestedCoreCapabilities =
+                        requestedCoreCapabilities,
                     sessionId = null,
                     status = ModuleConnectionStatus.INCOMPATIBLE,
                     error = "Unsupported protocol version " + protocolVersion,
@@ -357,6 +359,8 @@ class ModuleRegistry(
                 moduleVersion = remote.moduleVersion,
                 protocolVersion = protocolVersion,
                 capabilities = capabilities,
+                requestedCoreCapabilities =
+                    requestedCoreCapabilities,
                 sessionId = sessionId,
                 status = ModuleConnectionStatus.CONNECTED,
                 error = null,

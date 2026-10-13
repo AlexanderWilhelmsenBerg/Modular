@@ -252,9 +252,7 @@ class MainActivity : ComponentActivity() {
                                         homeSurfaceError =
                                             throwable
                                                 .message
-                                                ?: throwable::
-                                                    class
-                                                    .java
+                                                ?: throwable::class.java
                                                     .simpleName
                                     },
                                 )

@@ -13,6 +13,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
 class DataStoreModuleGrantStateStore(
@@ -46,26 +47,40 @@ class DataStoreModuleGrantStateStore(
 
     init {
         scope.launch {
-            dataStore.data.collect { preferences ->
-                runCatching {
-                    ModuleGrantStateCodec.decode(
-                        preferences[stateKey],
-                    )
-                }.fold(
-                    onSuccess = { decoded ->
-                        _loadError.value = null
-                        _state.value = decoded
-                    },
-                    onFailure = { throwable ->
+            dataStore.data
+                .catch { throwable ->
+                    if (throwable is IOException) {
                         _loadError.value =
                             throwable.message
-                                ?: throwable::class.java
-                                    .simpleName
-                        _state.value =
-                            ModuleGrantState()
-                    },
-                )
-            }
+                                ?: "Module-grant store I/O failure"
+                        emit(
+                            androidx.datastore.preferences.core
+                                .emptyPreferences(),
+                        )
+                    } else {
+                        throw throwable
+                    }
+                }
+                .collect { preferences ->
+                    runCatching {
+                        ModuleGrantStateCodec.decode(
+                            preferences[stateKey],
+                        )
+                    }.fold(
+                        onSuccess = { decoded ->
+                            _loadError.value = null
+                            _state.value = decoded
+                        },
+                        onFailure = { throwable ->
+                            _loadError.value =
+                                throwable.message
+                                    ?: throwable::class.java
+                                        .simpleName
+                            _state.value =
+                                ModuleGrantState()
+                        },
+                    )
+                }
         }
     }
 

@@ -29,6 +29,7 @@ import io.github.alexanderwilhelmsenberg.modular.composition.ModuleInstance
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventBusDiagnostics
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

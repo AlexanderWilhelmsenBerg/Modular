@@ -82,6 +82,20 @@ class CoreEventSources(
         }
 
         scope.launch {
+            var previous: ModuleGrantState? = null
+
+            grants.collect { current ->
+                previous?.let { old ->
+                    CoreEventDiffs.grants(
+                        previous = old,
+                        current = current,
+                    )?.let(eventBus::tryPublish)
+                }
+                previous = current
+            }
+        }
+
+        scope.launch {
             var previous: ActiveContextState? = null
 
             activeContext.collect { current ->

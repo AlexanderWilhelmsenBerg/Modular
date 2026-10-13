@@ -67,6 +67,17 @@ class ModuleSecurityManager(
     fun effectiveCapabilities(
         authorization: ModuleAuthorizationContext,
     ): Set<CapabilityId> {
+        val currentIdentity =
+            identityResolver
+                .resolve(
+                    authorization.identity.packageName,
+                )
+                .getOrNull()
+
+        if (currentIdentity != authorization.identity) {
+            return emptySet()
+        }
+
         val explicit = grantStore.state.value
             .recordFor(authorization.identity)
             ?.grantedCapabilities

@@ -128,6 +128,28 @@ object CoreEventDiffs {
         }
     }
 
+    fun grants(
+        previous: ModuleGrantState,
+        current: ModuleGrantState,
+    ): CoreEvent.GrantsChanged? {
+        val diff = entityDiff(
+            previous = previous.records,
+            current = current.records,
+            key = { record -> record.identity.key },
+            comparator = naturalOrder<String>(),
+        )
+
+        return if (diff.isEmpty) {
+            null
+        } else {
+            CoreEvent.GrantsChanged(
+                addedIdentityKeys = diff.added,
+                removedIdentityKeys = diff.removed,
+                changedIdentityKeys = diff.changed,
+            )
+        }
+    }
+
     fun activeContext(
         previous: ActiveContextState,
         current: ActiveContextState,

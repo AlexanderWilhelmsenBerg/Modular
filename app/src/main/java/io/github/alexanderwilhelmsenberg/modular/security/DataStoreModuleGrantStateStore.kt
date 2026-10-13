@@ -53,10 +53,7 @@ class DataStoreModuleGrantStateStore(
                         _loadError.value =
                             throwable.message
                                 ?: "Module-grant store I/O failure"
-                        emit(
-                            androidx.datastore.preferences.core
-                                .emptyPreferences(),
-                        )
+                        // Keep the last known state and preserve the error.
                     } else {
                         throw throwable
                     }

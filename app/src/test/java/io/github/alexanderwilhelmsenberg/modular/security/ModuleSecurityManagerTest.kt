@@ -22,6 +22,11 @@ class ModuleSecurityManagerTest {
             val manager = ModuleSecurityManager(
                 identityResolver = resolver,
                 grantStore = store,
+                officialBootstrapCapabilities =
+                    setOf(
+                        CoreCapabilities.AppsCatalog,
+                        CoreCapabilities.AppsLaunch,
+                    ),
             )
             val requested = setOf(
                 CoreCapabilities.AppsCatalog,
@@ -101,6 +106,11 @@ class ModuleSecurityManagerTest {
             val manager = ModuleSecurityManager(
                 identityResolver = resolver,
                 grantStore = store,
+                officialBootstrapCapabilities =
+                    setOf(
+                        CoreCapabilities.AppsCatalog,
+                        CoreCapabilities.AppsLaunch,
+                    ),
             )
             val requested = setOf(
                 CoreCapabilities.AppsCatalog,
@@ -152,6 +162,11 @@ class ModuleSecurityManagerTest {
             val manager = ModuleSecurityManager(
                 identityResolver = resolver,
                 grantStore = store,
+                officialBootstrapCapabilities =
+                    setOf(
+                        CoreCapabilities.AppsCatalog,
+                        CoreCapabilities.AppsLaunch,
+                    ),
             )
             val requested = setOf(
                 CoreCapabilities.AppsCatalog,
@@ -228,6 +243,11 @@ class ModuleSecurityManagerTest {
             val manager = ModuleSecurityManager(
                 identityResolver = resolver,
                 grantStore = store,
+                officialBootstrapCapabilities =
+                    setOf(
+                        CoreCapabilities.AppsCatalog,
+                        CoreCapabilities.AppsLaunch,
+                    ),
             )
             val authorization =
                 ModuleAuthorizationContext(
@@ -285,6 +305,11 @@ class ModuleSecurityManagerTest {
             val manager = ModuleSecurityManager(
                 identityResolver = resolver,
                 grantStore = store,
+                officialBootstrapCapabilities =
+                    setOf(
+                        CoreCapabilities.AppsCatalog,
+                        CoreCapabilities.AppsLaunch,
+                    ),
             )
             val requested = setOf(
                 unsupported,

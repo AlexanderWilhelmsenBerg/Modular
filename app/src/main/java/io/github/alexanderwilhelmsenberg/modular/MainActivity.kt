@@ -24,6 +24,7 @@ import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
 import io.github.alexanderwilhelmsenberg.modular.security.AndroidModuleIdentityResolver
 import io.github.alexanderwilhelmsenberg.modular.security.DataStoreModuleGrantStateStore
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
+import io.github.alexanderwilhelmsenberg.modular.security.OfficialModuleBootstrapPolicy
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
 import kotlinx.coroutines.launch
 
@@ -64,6 +65,9 @@ class MainActivity : ComponentActivity() {
             identityResolver =
                 AndroidModuleIdentityResolver(this),
             grantStore = grantStore,
+            officialBootstrapCapabilities =
+                OfficialModuleBootstrapPolicy
+                    .capabilities,
         )
 
         val hostFactory = CoreHostFactory(

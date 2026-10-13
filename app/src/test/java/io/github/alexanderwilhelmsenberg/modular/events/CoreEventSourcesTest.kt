@@ -36,6 +36,8 @@ class CoreEventSourcesTest {
             )
             val composition =
                 MutableStateFlow(CompositionState())
+            val grants =
+                MutableStateFlow(ModuleGrantState())
             val active =
                 MutableStateFlow(ActiveContextState.NONE)
 
@@ -47,6 +49,7 @@ class CoreEventSourcesTest {
                 modules = modules,
                 appCatalog = catalog,
                 composition = composition,
+                grants = grants,
                 activeContext = active,
                 dispatcher = dispatcher,
             )

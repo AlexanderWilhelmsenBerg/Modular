@@ -255,10 +255,7 @@ class MainActivity : ComponentActivity() {
                 homeSetupError = homeSetupError,
                 homeSetupInProgress =
                     homeSetupInProgress,
-                onCreateHomeSetup = {
-                    providerId,
-                    name,
-                    ->
+                onCreateHomeSetup = { providerId, name ->
                     if (!homeSetupInProgress) {
                         homeSetupInProgress = true
                         homeSetupError = null

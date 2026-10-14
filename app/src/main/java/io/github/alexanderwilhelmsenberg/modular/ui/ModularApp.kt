@@ -456,10 +456,7 @@ private fun HomeSetupCard(
                             .bodySmall,
                 )
             } else {
-                providerIds.forEachIndexed {
-                    index,
-                    providerId,
-                    ->
+                providerIds.forEachIndexed { index, providerId ->
                     if (index > 0) {
                         HorizontalDivider()
                     }

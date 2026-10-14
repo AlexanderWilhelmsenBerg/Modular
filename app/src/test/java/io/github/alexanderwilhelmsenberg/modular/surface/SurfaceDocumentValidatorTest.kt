@@ -97,6 +97,84 @@ class SurfaceDocumentValidatorTest {
     }
 
     @Test
+    fun excessiveNodeCountFailsClosed() {
+        val children = List(
+            SurfaceDocumentParcel.MAX_NODES,
+        ) { index ->
+            SurfaceNodeParcel(
+                id = "node-$index",
+                type = SurfaceNodeParcel.TYPE_TEXT,
+                text = "x",
+            )
+        }
+
+        val document = SurfaceDocumentParcel(
+            schemaVersion = 1,
+            revision = 0,
+            root = SurfaceNodeParcel(
+                id = "root",
+                type = SurfaceNodeParcel.TYPE_COLUMN,
+                children = children,
+            ),
+        )
+
+        assertTrue(
+            SurfaceDocumentValidator
+                .validate(document)
+                .isFailure,
+        )
+    }
+
+    @Test
+    fun excessiveTotalTextFailsClosed() {
+        val children = List(17) { index ->
+            SurfaceNodeParcel(
+                id = "text-$index",
+                type = SurfaceNodeParcel.TYPE_TEXT,
+                text = "x".repeat(
+                    SurfaceDocumentParcel.MAX_TEXT_LENGTH,
+                ),
+            )
+        }
+
+        val document = SurfaceDocumentParcel(
+            schemaVersion = 1,
+            revision = 0,
+            root = SurfaceNodeParcel(
+                id = "root",
+                type = SurfaceNodeParcel.TYPE_COLUMN,
+                children = children,
+            ),
+        )
+
+        assertTrue(
+            SurfaceDocumentValidator
+                .validate(document)
+                .isFailure,
+        )
+    }
+
+    @Test
+    fun invalidActionIdFailsClosed() {
+        val document = SurfaceDocumentParcel(
+            schemaVersion = 1,
+            revision = 0,
+            root = SurfaceNodeParcel(
+                id = "action",
+                type = SurfaceNodeParcel.TYPE_BUTTON,
+                text = "Run",
+                actionId = "bad action/with spaces",
+            ),
+        )
+
+        assertTrue(
+            SurfaceDocumentValidator
+                .validate(document)
+                .isFailure,
+        )
+    }
+
+    @Test
     fun unknownNodeTypeFailsClosed() {
         val document = SurfaceDocumentParcel(
             schemaVersion = 1,

@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: android-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -16,18 +20,28 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle 9.6
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "9.6.0"
+          add-job-summary: on-failure
+
+      - name: Compile production sources
+        run: >
+          gradle
+          :module-api:compileDebugKotlin
+          :app:compileDebugKotlin
+          :reference-sort-alphabetical:compileDebugKotlin
+          :reference-home-minimal:compileDebugKotlin
+          --stacktrace
 
       - name: Unit tests
         run: >
@@ -56,6 +70,19 @@ jobs:
           :reference-home-minimal:assembleDebug
           --stacktrace
 
+      - name: Upload verification diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: verify-diagnostics-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            **/build/test-results/**/*.xml
+            **/build/reports/tests/**
+            **/build/reports/lint-results-*.html
+            **/build/reports/lint-results-*.xml
+
   ipc-smoke:
     needs: verify
     runs-on: ubuntu-latest
@@ -63,18 +90,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle 9.6
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "9.6.0"
+          add-job-summary: on-failure
 
       - name: Enable KVM
         run: |
@@ -97,7 +125,40 @@ jobs:
             -no-boot-anim
             -camera-back none
           script: |
-            gradle :reference-sort-alphabetical:assembleDebug :reference-home-minimal:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+            set -o pipefail
+            mkdir -p build/ci-diagnostics
+
+            collect_diagnostics() {
+              status=$?
+              if [ "$status" -ne 0 ]; then
+                echo "=== Collecting emulator diagnostics ==="
+                adb get-state > build/ci-diagnostics/adb-state.txt 2>&1 || true
+                adb shell getprop > build/ci-diagnostics/getprop.txt 2>&1 || true
+                adb shell dumpsys activity activities > build/ci-diagnostics/activities.txt 2>&1 || true
+                adb shell dumpsys package io.github.alexanderwilhelmsenberg.modular > build/ci-diagnostics/core-package.txt 2>&1 || true
+                adb shell dumpsys package io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical > build/ci-diagnostics/sort-package.txt 2>&1 || true
+                adb shell dumpsys package io.github.alexanderwilhelmsenberg.modular.reference.home.minimal > build/ci-diagnostics/home-package.txt 2>&1 || true
+                adb logcat -d -v threadtime > build/ci-diagnostics/logcat.txt 2>&1 || true
+                find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -exec cp {} build/ci-diagnostics/ \; 2>/dev/null || true
+              fi
+              exit "$status"
+            }
+            trap collect_diagnostics EXIT
+
+            gradle               :reference-sort-alphabetical:assembleDebug               :reference-home-minimal:assembleDebug               :app:assembleDebugAndroidTest               --stacktrace
+
             adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
             adb install -r reference-home-minimal/build/outputs/apk/debug/reference-home-minimal-debug.apk
-            gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} ; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; exit 1; }
+            gradle :app:connectedDebugAndroidTest --stacktrace
+
+      - name: Upload emulator diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ipc-smoke-diagnostics-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            build/ci-diagnostics/**
+            app/build/outputs/androidTest-results/connected/**
+            app/build/reports/androidTests/connected/**

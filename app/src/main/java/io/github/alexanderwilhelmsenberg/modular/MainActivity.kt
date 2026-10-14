@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import io.github.alexanderwilhelmsenberg.modular.apps.AndroidAppRepository
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
+import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityProviderKind
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
 import io.github.alexanderwilhelmsenberg.modular.composition.ContextManager
@@ -20,6 +21,7 @@ import io.github.alexanderwilhelmsenberg.modular.composition.DataStoreCompositio
 import io.github.alexanderwilhelmsenberg.modular.composition.InstanceStore
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventBus
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventSources
+import io.github.alexanderwilhelmsenberg.modular.home.HomeCompositionSetup
 import io.github.alexanderwilhelmsenberg.modular.home.HomeRoleController
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
@@ -42,6 +44,7 @@ class MainActivity : ComponentActivity() {
         DataStoreCompositionStateStore
     private lateinit var instanceStore: InstanceStore
     private lateinit var contextManager: ContextManager
+    private lateinit var homeCompositionSetup: HomeCompositionSetup
     private lateinit var eventBus: CoreEventBus
     private lateinit var eventSources: CoreEventSources
     private lateinit var grantStore:
@@ -51,6 +54,8 @@ class MainActivity : ComponentActivity() {
 
     private var homeRoleAvailable by mutableStateOf(false)
     private var homeRoleHeld by mutableStateOf(false)
+    private var homeSetupError by mutableStateOf<String?>(null)
+    private var homeSetupInProgress by mutableStateOf(false)
 
     private val homeRoleLauncher =
         registerForActivityResult(
@@ -94,6 +99,11 @@ class MainActivity : ComponentActivity() {
             stateStore = compositionStore,
             routes = capabilityRouter.routes,
         )
+        homeCompositionSetup = HomeCompositionSetup(
+            instances = instanceStore,
+            contexts = contextManager,
+            routes = capabilityRouter.routes,
+        )
 
         eventBus = CoreEventBus()
         eventSources = CoreEventSources(
@@ -111,6 +121,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val modules by moduleRegistry.modules.collectAsState()
+            val capabilityRoutes by
+                capabilityRouter.routes.collectAsState()
             val appCatalog by appRepository.catalog.collectAsState()
             val instances by instanceStore.instances.collectAsState()
             val contexts by contextManager.contexts.collectAsState()
@@ -129,6 +141,18 @@ class MainActivity : ComponentActivity() {
             val homeSurfaceClient = remember {
                 HomeSurfaceClient(capabilityRouter)
             }
+            val homeProviderIds = capabilityRoutes
+                .asSequence()
+                .filter { route ->
+                    route.capability ==
+                        StandardCapabilities.SurfaceHome &&
+                        route.providerKind ==
+                        CapabilityProviderKind.MODULE
+                }
+                .map { route -> route.providerId }
+                .distinct()
+                .sorted()
+                .toList()
             val homeBinding =
                 activeContext.resolvedBindings
                     .firstOrNull { binding ->
@@ -227,6 +251,40 @@ class MainActivity : ComponentActivity() {
                 homeSurface = homeSurface,
                 homeSurfaceError =
                     homeSurfaceError,
+                homeProviderIds = homeProviderIds,
+                homeSetupError = homeSetupError,
+                homeSetupInProgress =
+                    homeSetupInProgress,
+                onCreateHomeSetup = {
+                    providerId,
+                    name,
+                    ->
+                    if (!homeSetupInProgress) {
+                        homeSetupInProgress = true
+                        homeSetupError = null
+
+                        lifecycleScope.launch {
+                            try {
+                                homeCompositionSetup
+                                    .createAndActivate(
+                                        providerId =
+                                            providerId,
+                                        name = name,
+                                    )
+                                    .onFailure {
+                                        throwable ->
+                                        homeSetupError =
+                                            throwable.message
+                                                ?: throwable::class
+                                                    .java.simpleName
+                                    }
+                            } finally {
+                                homeSetupInProgress =
+                                    false
+                            }
+                        }
+                    }
+                },
                 onHomeSurfaceAction = { actionId ->
                     val binding = homeBinding
 

@@ -9,10 +9,10 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
-import io.github.alexanderwilhelmsenberg.modular.composition.ContextCapabilityBinding
 import io.github.alexanderwilhelmsenberg.modular.composition.ContextManager
 import io.github.alexanderwilhelmsenberg.modular.composition.DataStoreCompositionStateStore
 import io.github.alexanderwilhelmsenberg.modular.composition.InstanceStore
+import io.github.alexanderwilhelmsenberg.modular.home.HomeCompositionSetup
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.SurfaceNodeParcel
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
@@ -99,34 +99,19 @@ class HomeSurfaceCrossApkSmokeTest {
                     }
                 }
 
-                val instance = instances.create(
-                    name = "Minimal Home",
+                val active = HomeCompositionSetup(
+                    instances = instances,
+                    contexts = contexts,
+                    routes = router.routes,
+                ).createAndActivate(
                     providerId = REFERENCE_MODULE_ID,
+                    name = "Minimal",
                 ).getOrThrow()
 
-                val launcherContext =
-                    contexts.create(
-                        name = "Minimal",
-                        bindings = listOf(
-                            ContextCapabilityBinding(
-                                capability =
-                                    StandardCapabilities
-                                        .SurfaceHome,
-                                instanceId =
-                                    instance.id,
-                            ),
-                        ),
-                    ).getOrThrow()
-
-                val active = contexts.activate(
-                    launcherContext.id,
-                ).getOrThrow()
-                val route = requireNotNull(
-                    active.routeFor(
-                        StandardCapabilities
-                            .SurfaceHome,
-                    ),
-                )
+                val binding =
+                    active.resolvedBindings.single()
+                val instance = binding.instance
+                val route = binding.route
 
                 val client = HomeSurfaceClient(router)
                 val first = client.render(

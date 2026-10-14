@@ -98,6 +98,51 @@ class HomeCompositionSetupTest {
         }
 
     @Test
+    fun activationFailureRollsBackInstanceAndContext() =
+        runBlocking {
+            val routes = MutableStateFlow(
+                listOf(homeRoute(PROVIDER_ID)),
+            )
+            val store = FakeCompositionStateStore {
+                previous,
+                next,
+                ->
+                if (
+                    previous.contexts.isEmpty() &&
+                    next.contexts.isNotEmpty()
+                ) {
+                    routes.value = emptyList()
+                }
+            }
+            val instances = InstanceStore(store)
+            val contexts = ContextManager(store, routes)
+            val setup = HomeCompositionSetup(
+                instances = instances,
+                contexts = contexts,
+                routes = routes,
+            )
+
+            try {
+                val result = setup.createAndActivate(
+                    providerId = PROVIDER_ID,
+                    name = "Personal",
+                )
+
+                assertTrue(result.isFailure)
+                assertTrue(store.state.value.instances.isEmpty())
+                assertTrue(store.state.value.contexts.isEmpty())
+                assertEquals(
+                    null,
+                    store.state.value.activeContextId,
+                )
+            } finally {
+                contexts.close()
+                instances.close()
+                store.close()
+            }
+        }
+
+    @Test
     fun ambiguousProviderFailsWithoutPersistingPartialSetup() =
         runBlocking {
             val store = FakeCompositionStateStore()
@@ -139,8 +184,10 @@ class HomeCompositionSetupTest {
         providerId = providerId,
     )
 
-    private class FakeCompositionStateStore :
-        CompositionStateStore {
+    private class FakeCompositionStateStore(
+        private val afterUpdate:
+            ((CompositionState, CompositionState) -> Unit)? = null,
+    ) : CompositionStateStore {
         private val mutableState =
             MutableStateFlow(CompositionState())
         private val mutableLoadError =
@@ -155,8 +202,10 @@ class HomeCompositionSetupTest {
         override suspend fun update(
             transform: (CompositionState) -> CompositionState,
         ): CompositionState {
-            val next = transform(mutableState.value)
+            val previous = mutableState.value
+            val next = transform(previous)
             mutableState.value = next
+            afterUpdate?.invoke(previous, next)
             return next
         }
 

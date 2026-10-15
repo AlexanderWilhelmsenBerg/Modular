@@ -111,6 +111,9 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Validate smoke script syntax
+        run: bash -n scripts/ci/run-ipc-smoke.sh
+
       - name: Cross-APK Binder smoke test
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
@@ -124,32 +127,7 @@ jobs:
             -noaudio
             -no-boot-anim
             -camera-back none
-          script: |
-            set -eu
-            mkdir -p build/ci-diagnostics
-
-            collect_diagnostics() {
-              status=$?
-              if [ "$status" -ne 0 ]; then
-                echo "=== Collecting emulator diagnostics ==="
-                adb get-state > build/ci-diagnostics/adb-state.txt 2>&1 || true
-                adb shell getprop > build/ci-diagnostics/getprop.txt 2>&1 || true
-                adb shell dumpsys activity activities > build/ci-diagnostics/activities.txt 2>&1 || true
-                adb shell dumpsys package io.github.alexanderwilhelmsenberg.modular > build/ci-diagnostics/core-package.txt 2>&1 || true
-                adb shell dumpsys package io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical > build/ci-diagnostics/sort-package.txt 2>&1 || true
-                adb shell dumpsys package io.github.alexanderwilhelmsenberg.modular.reference.home.minimal > build/ci-diagnostics/home-package.txt 2>&1 || true
-                adb logcat -d -v threadtime > build/ci-diagnostics/logcat.txt 2>&1 || true
-                find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -exec cp {} build/ci-diagnostics/ \; 2>/dev/null || true
-              fi
-              exit "$status"
-            }
-            trap collect_diagnostics EXIT
-
-            gradle :reference-sort-alphabetical:assembleDebug :reference-home-minimal:assembleDebug :app:assembleDebugAndroidTest --stacktrace
-
-            adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
-            adb install -r reference-home-minimal/build/outputs/apk/debug/reference-home-minimal-debug.apk
-            gradle :app:connectedDebugAndroidTest --stacktrace
+          script: bash scripts/ci/run-ipc-smoke.sh
 
       - name: Upload emulator diagnostics
         if: failure()

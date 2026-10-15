@@ -191,4 +191,120 @@ class SurfaceDocumentValidatorTest {
                 .isFailure,
         )
     }
+
+    @Test
+    fun unsupportedSchemaAndNegativeRevisionFailClosed() {
+        val root = SurfaceNodeParcel(
+            id = "root",
+            type = SurfaceNodeParcel.TYPE_COLUMN,
+        )
+        assertTrue(
+            SurfaceDocumentValidator.validate(
+                SurfaceDocumentParcel(999, 0, root),
+            ).isFailure,
+        )
+        assertTrue(
+            SurfaceDocumentValidator.validate(
+                SurfaceDocumentParcel(1, -1, root),
+            ).isFailure,
+        )
+    }
+
+    @Test
+    fun tooMuchTextFailsBothPerNodeAndDocumentLimits() {
+        val longText = "x".repeat(
+            SurfaceDocumentParcel.MAX_TEXT_LENGTH + 1,
+        )
+        val largeNode = SurfaceNodeParcel(
+            id = "oversized",
+            type = SurfaceNodeParcel.TYPE_TEXT,
+            text = longText,
+        )
+        assertTrue(
+            SurfaceDocumentValidator.validate(
+                SurfaceDocumentParcel(1, 0, largeNode),
+            ).isFailure,
+        )
+
+        val children = (1..17).map { index ->
+            SurfaceNodeParcel(
+                id = "text-$index",
+                type = SurfaceNodeParcel.TYPE_TEXT,
+                text = "x".repeat(
+                    SurfaceDocumentParcel.MAX_TEXT_LENGTH,
+                ),
+            )
+        }
+        assertTrue(
+            SurfaceDocumentValidator.validate(
+                SurfaceDocumentParcel(
+                    1,
+                    0,
+                    SurfaceNodeParcel(
+                        id = "root",
+                        type = SurfaceNodeParcel.TYPE_COLUMN,
+                        children = children,
+                    ),
+                ),
+            ).isFailure,
+        )
+    }
+
+    @Test
+    fun structuralViolationsFailClosed() {
+        val invalidNodes = listOf(
+            SurfaceNodeParcel(
+                id = "layout-with-action",
+                type = SurfaceNodeParcel.TYPE_COLUMN,
+                actionId = "unexpected",
+            ),
+            SurfaceNodeParcel(
+                id = "text-with-children",
+                type = SurfaceNodeParcel.TYPE_TEXT,
+                text = "Hello",
+                children = listOf(
+                    SurfaceNodeParcel(
+                        id = "child",
+                        type = SurfaceNodeParcel.TYPE_SPACER,
+                    ),
+                ),
+            ),
+            SurfaceNodeParcel(
+                id = "button-without-action",
+                type = SurfaceNodeParcel.TYPE_BUTTON,
+                text = "Click",
+            ),
+            SurfaceNodeParcel(
+                id = "button-with-child",
+                type = SurfaceNodeParcel.TYPE_BUTTON,
+                text = "Click",
+                actionId = "click",
+                children = listOf(
+                    SurfaceNodeParcel(
+                        id = "child",
+                        type = SurfaceNodeParcel.TYPE_SPACER,
+                    ),
+                ),
+            ),
+            SurfaceNodeParcel(
+                id = "spacer-with-text",
+                type = SurfaceNodeParcel.TYPE_SPACER,
+                text = "No",
+            ),
+            SurfaceNodeParcel(
+                id = "unsupported-text-style",
+                type = SurfaceNodeParcel.TYPE_TEXT,
+                text = "Hello",
+                textStyle = 99,
+            ),
+        )
+        invalidNodes.forEach { node ->
+            assertTrue(
+                "Expected invalid node: ${node.id}",
+                SurfaceDocumentValidator.validate(
+                    SurfaceDocumentParcel(1, 0, node),
+                ).isFailure,
+            )
+        }
+    }
 }

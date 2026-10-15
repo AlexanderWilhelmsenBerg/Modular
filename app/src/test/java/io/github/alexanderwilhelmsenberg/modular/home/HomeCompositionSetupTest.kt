@@ -216,4 +216,74 @@ class HomeCompositionSetupTest {
         private const val PROVIDER_ID =
             "modular.reference.home.minimal"
     }
+
+    @Test
+    fun failedNewHomePreservesPreviouslyActiveContext() =
+        runBlocking {
+            val routes = MutableStateFlow(
+                listOf(
+                    homeRoute(PROVIDER_ID),
+                    homeRoute("existing.provider"),
+                ),
+            )
+            var dropNewProvider = false
+            val store = FakeCompositionStateStore { previous, next ->
+                if (
+                    dropNewProvider &&
+                    next.contexts.size > previous.contexts.size
+                ) {
+                    routes.value = listOf(
+                        homeRoute("existing.provider"),
+                    )
+                }
+            }
+            val instances = InstanceStore(store)
+            val contexts = ContextManager(store, routes)
+            val setup = HomeCompositionSetup(
+                instances = instances,
+                contexts = contexts,
+                routes = routes,
+            )
+
+            try {
+                val existing = instances.create(
+                    name = "Existing Home",
+                    providerId = "existing.provider",
+                ).getOrThrow()
+                val original = contexts.create(
+                    name = "Existing",
+                    bindings = listOf(
+                        io.github.alexanderwilhelmsenberg.modular.composition.ContextCapabilityBinding(
+                            capability = StandardCapabilities.SurfaceHome,
+                            instanceId = existing.id,
+                        ),
+                    ),
+                ).getOrThrow()
+                contexts.activate(original.id).getOrThrow()
+
+                dropNewProvider = true
+                val result = setup.createAndActivate(
+                    providerId = PROVIDER_ID,
+                    name = "Replacement",
+                )
+
+                assertTrue(result.isFailure)
+                assertEquals(
+                    original.id,
+                    store.state.value.activeContextId,
+                )
+                assertEquals(
+                    listOf(original.id),
+                    store.state.value.contexts.map { it.id },
+                )
+                assertEquals(
+                    listOf(existing.id),
+                    store.state.value.instances.map { it.id },
+                )
+            } finally {
+                contexts.close()
+                instances.close()
+                store.close()
+            }
+        }
 }

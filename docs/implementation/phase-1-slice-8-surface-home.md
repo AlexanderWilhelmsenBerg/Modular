@@ -1,6 +1,6 @@
 # Phase 1 — Slice 8: Surface Protocol and Minimal Home
 
-Status: **Implementation in progress**
+Status: **Implemented in PR #8; final review and CI acceptance pending**
 
 ## Goal
 
@@ -39,7 +39,7 @@ Supported nodes are deliberately limited to:
 - Button;
 - Spacer.
 
-Core validates the complete tree before rendering it with Compose.
+Core validates the complete tree before rendering it with Compose. The\nParcelable node decoder also enforces depth and node-count bounds *during*\nunmarshalling, before typed child-list allocation. String decoding still\noccurs inside Android Parcel/Binder and is not a substitute for transport-level\nresource limits.
 
 Current hard limits include:
 
@@ -114,7 +114,7 @@ The emulator canary installs the Minimal Home APK separately and proves:
 5. Core routes an action back across Binder;
 6. a fresh render reflects module-owned state.
 
-The existing sort-module canary continues to run in the same emulator job.
+The existing sort-module canary continues to run in the same emulator job.\nInstrumentation XML results are uploaded on successful and failed runs; on\nfailure the script records its stage, bounded logcat, ADB state and relevant\npackage/activity diagnostics. The prior multiline-emulator-runner shell\nparsing problem is avoided by invoking one standalone Bash script.
 
 ## Deliberately deferred
 

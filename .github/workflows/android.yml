@@ -129,8 +129,19 @@ jobs:
             -camera-back none
           script: bash scripts/ci/run-ipc-smoke.sh
 
-      - name: Upload emulator diagnostics
+      - name: Capture emulator state on failure
         if: failure()
+        shell: bash
+        run: |
+          mkdir -p build/ci-diagnostics
+          adb devices -l > build/ci-diagnostics/adb-devices.txt 2>&1 || true
+          adb shell getprop sys.boot_completed > build/ci-diagnostics/boot-completed.txt 2>&1 || true
+          if [ ! -e build/ci-diagnostics/logcat.txt ]; then
+            timeout 15s adb logcat -d -v threadtime -t 3000 > build/ci-diagnostics/logcat.txt 2>&1 || true
+          fi
+
+      - name: Upload emulator test results and diagnostics
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: ipc-smoke-diagnostics-${{ github.run_id }}

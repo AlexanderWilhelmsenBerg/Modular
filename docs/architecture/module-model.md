@@ -115,18 +115,36 @@ Sensitive module-owned secrets should not be copied into generic Core configurat
 
 For embedded launcher surfaces, modules return a declarative, versioned surface model rather than arbitrary executable UI.
 
-Desired properties:
+Surface Protocol v1 is established by `modular.surface.home/v1`.
 
-- deterministic rendering by Core;
-- bounded payload size;
-- stable accessibility semantics;
-- action IDs routed back to the module;
-- incremental updates;
-- theme tokens rather than unrestricted drawing code;
-- graceful handling of unsupported nodes;
-- schema negotiation.
+The v1 document is intentionally small and declarative:
 
-A module's own configuration Activity may use ordinary Android UI inside the module APK.
+- `Column`;
+- `Row`;
+- `Text`;
+- `Button`;
+- `Spacer`.
+
+Core owns validation and Compose rendering. Modules send no Compose objects,
+Views, lambdas, DEX, or native drawing code across the IPC boundary.
+
+Each surface document carries a schema version and revision. Core validates hard
+limits for node count, depth, individual text length, total text volume, unique
+node IDs, supported node/style values, and action IDs before rendering.
+
+Button actions are routed back to the provider through the surface capability.
+After an action succeeds, Core requests a fresh document. This keeps module
+state and behavior behind the module boundary while rendering remains Core-owned.
+
+Unsupported schemas or malformed trees fail closed to Core's recovery/settings
+surface rather than executing partial or unvalidated module UI.
+
+Future versions may add richer layout, accessibility metadata, theme tokens,
+resources, incremental updates, and additional action/result semantics. Those
+extensions must not silently change v1 behavior.
+
+A module's own configuration Activity may use ordinary Android UI inside the
+module APK.
 
 ## 9. Module instances: Work and Personal example
 

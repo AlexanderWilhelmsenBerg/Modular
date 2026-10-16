@@ -100,8 +100,7 @@ class HomeSurfaceCrossApkSmokeTest {
                 }
 
                 val active = HomeCompositionSetup(
-                    instances = instances,
-                    contexts = contexts,
+                    stateStore = stateStore,
                     routes = router.routes,
                 ).createAndActivate(
                     providerId = REFERENCE_MODULE_ID,

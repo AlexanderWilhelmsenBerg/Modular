@@ -100,8 +100,7 @@ class MainActivity : ComponentActivity() {
             routes = capabilityRouter.routes,
         )
         homeCompositionSetup = HomeCompositionSetup(
-            instances = instanceStore,
-            contexts = contextManager,
+            stateStore = compositionStore,
             routes = capabilityRouter.routes,
         )
 

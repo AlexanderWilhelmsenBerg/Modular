@@ -140,6 +140,17 @@ parsing problem is avoided by invoking one standalone Bash script.
 
 ## Acceptance
 
+### Lifecycle-safe setup
+
+Home setup creates the provider-bound instance, context, and activation in one
+atomic CompositionStateStore update. Provider liveness is checked inside that
+transaction. A failed write leaves the previous composition unchanged;
+cancellation at commit/return can leave either the previous state or the complete
+new composition, never an orphan instance or partially created context. No
+compensating cleanup depends on a live Activity or open store after cancellation.
+Cancellation propagates to the caller. Focused unit regressions cover both sides
+of the commit boundary, persistence failure, provider loss, and distinct setups.
+
 Slice 8 is complete when the branch passes:
 
 - module-api tests;

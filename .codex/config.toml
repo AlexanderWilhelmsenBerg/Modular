@@ -1,0 +1,7 @@
+# Project-scoped defaults. Requires a trusted checkout and a compatible Codex runtime.
+# Does not change an already-running managed chat or configure MCP credentials.
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 1
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "low"

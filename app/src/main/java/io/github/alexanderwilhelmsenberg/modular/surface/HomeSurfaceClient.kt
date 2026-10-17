@@ -1,13 +1,13 @@
 package io.github.alexanderwilhelmsenberg.modular.surface
 
+import io.github.alexanderwilhelmsenberg.modular.capabilities.BoundedBinderCalls
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRoute
+import io.github.alexanderwilhelmsenberg.modular.capabilities.BoundedBinderCalls
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.ISurfaceHomeCapability
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.SurfaceActionResultParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.SurfaceDocumentParcel
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 class HomeSurfaceClient(
     private val capabilityRouter: CapabilityRouter,
@@ -31,7 +31,7 @@ class HomeSurfaceClient(
             .acquireModuleBinder(route)
             .fold(
                 onSuccess = { binder ->
-                    withContext(Dispatchers.IO) {
+                    BoundedBinderCalls.call("home:${route.component}") {
                         runCatching {
                             val capability =
                                 ISurfaceHomeCapability.Stub
@@ -40,7 +40,7 @@ class HomeSurfaceClient(
                             SurfaceDocumentValidator.validate(
                                 capability.render(instanceId),
                             ).getOrThrow()
-                        }
+                        }.getOrThrow()
                     }
                 },
                 onFailure = { throwable ->
@@ -70,7 +70,7 @@ class HomeSurfaceClient(
             .acquireModuleBinder(route)
             .fold(
                 onSuccess = { binder ->
-                    withContext(Dispatchers.IO) {
+                    BoundedBinderCalls.call("home:${route.component}") {
                         runCatching {
                             val capability =
                                 ISurfaceHomeCapability.Stub
@@ -89,7 +89,7 @@ class HomeSurfaceClient(
                                 result.message
                                     ?: "Surface action failed"
                             }
-                        }
+                        }.getOrThrow()
                     }
                 },
                 onFailure = { throwable ->

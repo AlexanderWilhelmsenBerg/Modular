@@ -8,8 +8,6 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortItemParc
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortRequestParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortResultParcel
 import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 class AppSortClient(
     private val capabilityRouter: CapabilityRouter,
@@ -41,7 +39,7 @@ class AppSortClient(
             .acquireModuleBinder(route)
             .fold(
                 onSuccess = { binder ->
-                    withContext(Dispatchers.IO) {
+                    BoundedBinderCalls.call("sort:${route.component}") {
                         runCatching {
                             val capability =
                                 IAppSortCapability.Stub.asInterface(
@@ -79,7 +77,7 @@ class AppSortClient(
                                 input = apps,
                                 orderedKeys = result.orderedKeys,
                             ).getOrThrow()
-                        }
+                        }.getOrThrow()
                     }
                 },
                 onFailure = { throwable ->

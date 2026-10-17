@@ -38,6 +38,9 @@ import io.github.alexanderwilhelmsenberg.modular.surface.DrawerSurfaceClient
 import io.github.alexanderwilhelmsenberg.modular.ui.SurfaceRenderer
 import io.github.alexanderwilhelmsenberg.modular.ui.LauncherCompositionPanel
 import io.github.alexanderwilhelmsenberg.modular.ui.CoreManagementPanel
+import io.github.alexanderwilhelmsenberg.modular.ui.McpBrokerPanel
+import io.github.alexanderwilhelmsenberg.modular.mcp.McpBroker
+import io.github.alexanderwilhelmsenberg.modular.mcp.ModuleToolRegistry
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleAuthorizationContext
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
 import kotlinx.coroutines.launch
@@ -58,6 +61,7 @@ class MainActivity : ComponentActivity() {
         DataStoreModuleGrantStateStore
     private lateinit var securityManager:
         ModuleSecurityManager
+    private lateinit var mcpBroker: McpBroker
 
     private var homeRoleAvailable by mutableStateOf(false)
     private var homeRoleHeld by mutableStateOf(false)
@@ -112,6 +116,8 @@ class MainActivity : ComponentActivity() {
             stateStore = compositionStore,
             routes = capabilityRouter.routes,
         )
+        mcpBroker = McpBroker(this, contextManager, compositionStore, appRepository, moduleRegistry,
+            ModuleToolRegistry(contextManager, capabilityRouter, moduleRegistry, securityManager, this))
 
         eventBus = CoreEventBus()
         eventSources = CoreEventSources(
@@ -145,6 +151,8 @@ class MainActivity : ComponentActivity() {
                 grantStore.state.collectAsState()
             val grantLoadError by
                 grantStore.loadError.collectAsState()
+            val brokerState by mcpBroker.state.collectAsState()
+            LaunchedEffect(activeContext, modules, grantState) { mcpBroker.refreshTools() }
 
             val homeSurfaceClient = remember {
                 HomeSurfaceClient(capabilityRouter)
@@ -359,6 +367,13 @@ class MainActivity : ComponentActivity() {
                 },
                 additionalContent = {
                     item {
+                        McpBrokerPanel(brokerState, managementBusy,
+                            onStart = { manage { runCatching { mcpBroker.start() } } },
+                            onStop = { manage { runCatching { mcpBroker.stop() } } },
+                            onPolicy = { policy -> manage { runCatching { mcpBroker.setPolicy(policy) } } },
+                            onRefreshTools = { manage { runCatching { mcpBroker.refreshTools() } } })
+                    }
+                    item {
                         drawerSurface?.let { document ->
                             SurfaceRenderer(document, onAction = { action ->
                                 if (!drawerActionBusy) {
@@ -391,7 +406,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     item {
-                        CoreManagementPanel(contexts, modules, securityStatuses, managementBusy,
+                        CoreManagementPanel(contexts, instances, modules, securityStatuses, managementBusy,
                             onRemoveContext = { id -> manage { launcherSetup.removeContext(id) } },
                             onSetModuleEnabled = { module, enabled -> manage { moduleRegistry.setEnabled(module.component, enabled) } },
                             onPermission = { status, capability, allowed -> manage {
@@ -399,6 +414,10 @@ class MainActivity : ComponentActivity() {
                                     requireNotNull(status.identity), status.requestedCapabilities), capability)
                                 else securityManager.revoke(status.packageName, capability)
                             } },
+                            onSaveInstance = { instance, name, json -> manage {
+                                instanceStore.upsert(instance.copy(name = name, configurationJson = json))
+                            } },
+                            onRenameContext = { context, name -> manage { contextManager.upsert(context.copy(name = name)) } },
                         )
                     }
                 },
@@ -433,6 +452,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (::mcpBroker.isInitialized) mcpBroker.close()
         if (::eventSources.isInitialized) {
             eventSources.close()
         }

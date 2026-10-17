@@ -17,12 +17,11 @@ collect_diagnostics() {
     for package_name in \
       io.github.alexanderwilhelmsenberg.modular \
       io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical \
-      io.github.alexanderwilhelmsenberg.modular.reference.home.minimal; do
-    # Reference drawer diagnostics are included by the dedicated package dump below.
+      io.github.alexanderwilhelmsenberg.modular.reference.home.minimal \
+      io.github.alexanderwilhelmsenberg.modular.reference.drawer.basic; do
       adb shell dumpsys package "$package_name" \
         > "$diagnostics_dir/package-${package_name##*.}.txt" 2>&1 || true
     done
-    adb shell dumpsys package io.github.alexanderwilhelmsenberg.modular.reference.drawer.basic > "$diagnostics_dir/package-drawer.txt" 2>&1 || true
     timeout 15s adb logcat -d -v threadtime -t 3000 \
       > "$diagnostics_dir/logcat.txt" 2>&1 || true
   fi

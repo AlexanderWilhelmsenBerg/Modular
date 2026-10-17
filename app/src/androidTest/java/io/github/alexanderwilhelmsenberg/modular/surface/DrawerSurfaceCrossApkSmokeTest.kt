@@ -12,6 +12,8 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.ISurface
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.SurfaceNodeParcel
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
 import io.github.alexanderwilhelmsenberg.modular.security.*
+import io.github.alexanderwilhelmsenberg.modular.mcp.*
+import kotlinx.serialization.json.*
 import java.util.UUID
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.runBlocking
@@ -22,7 +24,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class DrawerSurfaceCrossApkSmokeTest {
-    @Test fun sortsFiltersLaunchesAndRevokesAcrossSeparateApks() = runBlocking {
+    @Test fun sortsFiltersLaunchesAndRevokesAcrossSeparateApks() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val moduleInfo = context.packageManager.getApplicationInfo(DRAWER_PACKAGE, 0)
         assertNotEquals(context.applicationInfo.uid, moduleInfo.uid)
@@ -30,7 +32,7 @@ class DrawerSurfaceCrossApkSmokeTest {
         val grants = DataStoreModuleGrantStateStore(context, "drawer-grants-" + UUID.randomUUID())
         val security = ModuleSecurityManager(AndroidModuleIdentityResolver(context), grants,
             officialBootstrapCapabilities = OfficialModuleBootstrapPolicy.capabilities)
-        val registry = ModuleRegistry(context, CoreHostFactory(context, repository, security))
+        val registry = ModuleRegistry(context, CoreHostFactory(context, repository, security), "drawer-policy-" + UUID.randomUUID())
         val router = CapabilityRouter(registry)
         val store = DataStoreCompositionStateStore(context, "drawer-composition-" + UUID.randomUUID())
         val contexts = ContextManager(store, router.routes)
@@ -61,6 +63,23 @@ class DrawerSurfaceCrossApkSmokeTest {
                 .filter { it.type == SurfaceNodeParcel.TYPE_BUTTON }.map { it.text })
             contexts.activate(personal.context!!.id).getOrThrow()
             contexts.activate(work.context!!.id).getOrThrow()
+            withTimeout(5000) { contexts.active.first { it.context?.id == work.context!!.id } }
+            val toolRegistry = ModuleToolRegistry(contexts, router, registry, security, context)
+            val broker = McpBroker(context, contexts, store, repository, registry, toolRegistry,
+                "drawer-mcp-policy-" + UUID.randomUUID())
+            try {
+                broker.refreshTools()
+                val proposal = broker.state.value.tools.single { it.name == "drawer.status" }
+                broker.start(0)
+                val arguments = buildJsonObject {
+                    put("approvalKey", proposal.approvalKey); put("arguments", JsonObject(emptyMap()))
+                }
+                assertTrue(runCatching { broker.execute("launcher.module.invoke", arguments) }.isFailure)
+                broker.setPolicy(BrokerPolicy(approvedModuleTools = setOf(proposal.approvalKey)))
+                assertTrue(broker.execute("launcher.module.invoke", arguments).contains("ready"))
+                broker.setPolicy(BrokerPolicy())
+                assertTrue(runCatching { broker.execute("launcher.module.invoke", arguments) }.isFailure)
+            } finally { broker.stop() }
 
             security.revoke(DRAWER_PACKAGE, CoreCapabilities.AppsLaunch).getOrThrow()
             val workAction = workDocument.root.children.single { it.type == SurfaceNodeParcel.TYPE_BUTTON }.actionId!!

@@ -12,6 +12,9 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.IAppLaunchCapability
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.ISurfaceDrawerCapability
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.IMcpToolsCapability
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortRequestParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppLaunchResultParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.SurfaceActionResultParcel
@@ -25,7 +28,7 @@ class BasicDrawerService : Service() {
         override fun getProtocolVersion() = ModuleContract.CURRENT_PROTOCOL_VERSION
         override fun getModuleId() = "modular.reference.drawer.basic"
         override fun getModuleVersion() = "0.1.0"
-        override fun getCapabilities() = arrayOf(StandardCapabilities.SurfaceDrawer.wireValue)
+        override fun getCapabilities() = arrayOf(StandardCapabilities.SurfaceDrawer.wireValue, StandardCapabilities.McpTools.wireValue)
         override fun getRequestedCoreCapabilities() = arrayOf(CoreCapabilities.AppsCatalog.wireValue, CoreCapabilities.AppsLaunch.wireValue)
         override fun openSession(sessionId: String, host: IModularHost) {
             enforceTrustedCaller()
@@ -55,7 +58,11 @@ class BasicDrawerService : Service() {
             enforceTrustedCaller()
             val session = sessions[sessionId] ?: return null
             session.enforce()
-            return if (capabilityId == StandardCapabilities.SurfaceDrawer.wireValue) session.surface else null
+            return when (capabilityId) {
+                StandardCapabilities.SurfaceDrawer.wireValue -> session.surface
+                StandardCapabilities.McpTools.wireValue -> session.tools
+                else -> null
+            }
         }
     }
 
@@ -119,6 +126,18 @@ class BasicDrawerService : Service() {
                 } catch (failure: Exception) {
                     SurfaceActionResultParcel(SurfaceActionResultParcel.STATUS_FAILED, failure.message?.take(512))
                 }
+            }
+        }
+        val tools = object : IMcpToolsCapability.Stub() {
+            override fun listTools(): String {
+                enforce()
+                return """[{"name":"drawer.status","description":"Read this Drawer instance's page status","readOnly":true,"inputSchema":{"type":"object","properties":{},"additionalProperties":false}}]"""
+            }
+            override fun callTool(instanceId: String, name: String, argumentsJson: String): String {
+                enforce()
+                require(name == "drawer.status")
+                require(argumentsJson.length <= 8192 && Json.parseToJsonElement(argumentsJson).jsonObject.isEmpty())
+                return synchronized(instances) { instances[instanceId]?.status() ?: "{\"ready\":false}" }
             }
         }
     }

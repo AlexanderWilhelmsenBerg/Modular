@@ -2,6 +2,7 @@ package io.github.alexanderwilhelmsenberg.modular.surface
 
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.capabilities.AppSortClient
+import io.github.alexanderwilhelmsenberg.modular.capabilities.BoundedBinderCalls
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
 import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
@@ -15,8 +16,6 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.SurfaceActionRe
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.SurfaceDocumentParcel
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 class DrawerSurfaceClient(private val router: CapabilityRouter, private val security: ModuleSecurityManager) {
     suspend fun render(active: ActiveContextState, apps: List<LaunchableApp>): Result<SurfaceDocumentParcel> = attempt {
@@ -37,13 +36,13 @@ class DrawerSurfaceClient(private val router: CapabilityRouter, private val secu
             "Catalog exceeds Drawer transport budget"
         }
         val binder = router.acquireModuleBinder(drawer.route).getOrThrow()
-        withContext(Dispatchers.IO) {
+        BoundedBinderCalls.call("drawer:${drawer.route.component}") {
             val document = ISurfaceDrawerCapability.Stub.asInterface(binder).render(
                 drawer.instance.id, drawer.instance.configurationJson,
                 AppSortRequestParcel(items, Locale.getDefault().toLanguageTag()),
             )
             SurfaceDocumentValidator.validate(document).getOrThrow()
-        }
+        }.getOrThrow()
     }
 
     suspend fun performAction(active: ActiveContextState, actionId: String): Result<Unit> = attempt {
@@ -52,10 +51,10 @@ class DrawerSurfaceClient(private val router: CapabilityRouter, private val secu
         }) { "No unambiguous Drawer binding" }
         require(actionId.matches(Regex("^[A-Za-z0-9._:-]{1,96}$")))
         val binder = router.acquireModuleBinder(drawer.route).getOrThrow()
-        withContext(Dispatchers.IO) {
+        BoundedBinderCalls.call("drawer:${drawer.route.component}") {
             val result = ISurfaceDrawerCapability.Stub.asInterface(binder).performAction(drawer.instance.id, actionId)
             require(result.status == SurfaceActionResultParcel.STATUS_SUCCESS) { result.message ?: "Drawer action failed" }
-        }
+        }.getOrThrow()
     }
 
     private suspend fun <T> attempt(block: suspend () -> T): Result<T> = try {

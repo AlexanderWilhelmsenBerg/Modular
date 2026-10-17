@@ -14,6 +14,7 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppProfile
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityProviderKind
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRoute
 import io.github.alexanderwilhelmsenberg.modular.composition.LauncherContext
+import io.github.alexanderwilhelmsenberg.modular.composition.ModuleInstance
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
@@ -78,20 +79,33 @@ fun LauncherCompositionPanel(
 @Composable
 fun CoreManagementPanel(
     contexts: List<LauncherContext>,
+    instances: List<ModuleInstance>,
     modules: List<ModuleRecord>,
     security: List<ModuleSecurityStatus>,
     busy: Boolean,
     onRemoveContext: (String) -> Unit,
     onSetModuleEnabled: (ModuleRecord, Boolean) -> Unit,
     onPermission: (ModuleSecurityStatus, CapabilityId, Boolean) -> Unit,
+    onSaveInstance: (ModuleInstance, String, String) -> Unit,
+    onRenameContext: (LauncherContext, String) -> Unit,
 ) {
     var remove by remember { mutableStateOf<LauncherContext?>(null) }
     var pendingGrant by remember { mutableStateOf<Pair<ModuleSecurityStatus, CapabilityId>?>(null) }
+    var editing by remember { mutableStateOf<ModuleInstance?>(null) }
+    var renaming by remember { mutableStateOf<LauncherContext?>(null) }
+    var editedName by remember { mutableStateOf("") }
+    var editedJson by remember { mutableStateOf("") }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Manage Core", style = MaterialTheme.typography.titleMedium)
             contexts.forEach { context ->
+                OutlinedButton({ renaming = context; editedName = context.name }, enabled = !busy) { Text("Rename ${context.name}") }
                 OutlinedButton({ remove = context }, enabled = !busy) { Text("Delete ${context.name}") }
+            }
+            instances.forEach { instance ->
+                OutlinedButton({ editing = instance; editedName = instance.name; editedJson = instance.configurationJson }, enabled = !busy) {
+                    Text("Configure ${instance.name}")
+                }
             }
             modules.forEach { module ->
                 val disabled = module.status == ModuleConnectionStatus.DISABLED
@@ -130,5 +144,23 @@ fun CoreManagementPanel(
                 status.identity?.signerSha256?.joinToString()) },
             confirmButton = { TextButton({ pendingGrant = null; onPermission(status, capability, true) }) { Text("Allow") } },
             dismissButton = { TextButton({ pendingGrant = null }) { Text("Cancel") } })
+    }
+    editing?.let { instance ->
+        AlertDialog(onDismissRequest = { editing = null }, title = { Text("Configure instance") },
+            text = { Column {
+                OutlinedTextField(editedName, { editedName = it }, label = { Text("Instance name") })
+                Text("Advanced settings are defined by the module. Invalid settings leave Core recovery available.")
+                OutlinedTextField(editedJson, { editedJson = it }, label = { Text("Module configuration JSON") }, maxLines = 8)
+            } },
+            confirmButton = { TextButton({ editing = null; onSaveInstance(instance, editedName, editedJson) },
+                enabled = editedName.isNotBlank() && editedJson.length <= 8192) { Text("Save") } },
+            dismissButton = { TextButton({ editing = null }) { Text("Cancel") } })
+    }
+    renaming?.let { context ->
+        AlertDialog(onDismissRequest = { renaming = null }, title = { Text("Rename context") },
+            text = { OutlinedTextField(editedName, { editedName = it }, label = { Text("Context name") }) },
+            confirmButton = { TextButton({ renaming = null; onRenameContext(context, editedName) },
+                enabled = editedName.isNotBlank()) { Text("Save") } },
+            dismissButton = { TextButton({ renaming = null }) { Text("Cancel") } })
     }
 }

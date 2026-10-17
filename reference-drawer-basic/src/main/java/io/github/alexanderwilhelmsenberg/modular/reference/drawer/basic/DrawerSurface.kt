@@ -17,6 +17,9 @@ class DrawerSurface {
     private var pageCount = 1
 
     @Synchronized
+    fun status(): String = "{\"ready\":true,\"page\":$page,\"pages\":$pageCount,\"revision\":$revision}"
+
+    @Synchronized
     fun render(configurationJson: String, orderedApps: List<AppSortItemParcel>): SurfaceDocumentParcel {
         require(configurationJson.length <= 8192) { "Drawer configuration is too large" }
         val config = Json.parseToJsonElement(configurationJson).jsonObject

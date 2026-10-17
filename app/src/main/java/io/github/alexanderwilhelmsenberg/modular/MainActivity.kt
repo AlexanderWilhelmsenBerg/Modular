@@ -418,6 +418,7 @@ class MainActivity : ComponentActivity() {
                                 instanceStore.upsert(instance.copy(name = name, configurationJson = json))
                             } },
                             onRenameContext = { context, name -> manage { contextManager.upsert(context.copy(name = name)) } },
+                            onRemoveBinding = { context, capability -> manage { launcherSetup.removeBinding(context.id, capability) } },
                         )
                     }
                 },

@@ -11,7 +11,7 @@ brokering, after correcting Slice 8. Slice 8 fix 50ed456d passed full Android CI
 | Android HOME integration | HomeRoleController and MainActivity; existing launcher-role UI |
 | Settings and recovery | Core Compose shell remains available when modules are missing or invalid |
 | Module discovery / compatibility | Versioned AIDL metadata/session handshake; exact capability majors; bounded metadata |
-| Module enable / disable / active removal | Persistent component policy, immediate Core-host revocation, unbinding and route removal |
+| Module enable / disable / active removal | Persistent component policy, immediate Core-host revocation, unbinding, and atomic removal of one context capability binding |
 | Module-instance configuration | InstanceStore, atomic composition setup, profile setup and advanced per-instance JSON editor |
 | Capability registration / routing | Generic advertised capabilities and CapabilityRouter; no reference module IDs in Core |
 | Connection lifecycle | Binder-death tracking, revocable sessions, bounded provider calls, reconnect/refresh diagnostics |
@@ -22,12 +22,20 @@ brokering, after correcting Slice 8. Slice 8 fix 50ed456d passed full Android CI
 | App discovery / launching | Existing LauncherApps repository; new Drawer requests route launch through the granted Core host |
 | MCP brokering | Authenticated loopback SDK endpoint, explicit mutation exposure, individually approved module tools/resources and bounded audit history |
 
-All rows describe implemented source, not a claim that final validation has passed.
+The 799e0c9a checkpoint passed full Android CI 39035924085, including ten device
+tests. A subsequent completion audit added per-context capability removal;
+consult PR #9 for that final HEAD's validation rather than applying older evidence.
 Composition and grant DataStores have one process-owned file owner; Activity
 recreation cancels only observers, avoiding an overlapping asynchronous close/reopen.
 See PR #9 for exact-HEAD CI state. The initial Drawer milestone afb6bb4 passed
 verification but its new emulator test was rejected by JUnit because Kotlin
 inferred a non-void return type. The test now explicitly uses runBlocking<Unit>.
+
+Manage Core can remove one capability from one context without disabling the
+installed module or deleting other contexts. The same atomic transaction removes
+the instance only if no remaining binding uses it. Editing the active composition
+deactivates it and returns to recovery; the user explicitly chooses activation
+afterwards. Unit and cross-APK tests cover isolation and continued provider use.
 
 ## Reference composition
 

@@ -1,6 +1,7 @@
 # Slice 9 — Drawer composition and Core management
 
-Implemented on a follow-on branch based on Slice 8 fix 50ed456d. Validation pending.
+Implemented on a follow-on branch based on Slice 8 fix 50ed456d. Exact-HEAD
+validation is recorded in PR #9; checkpoint 799e0c9a passed full Android CI.
 
 The separate reference-drawer-basic APK advertises modular.surface.drawer/v1.
 Core supplies a bounded app snapshot ordered by the context's external Sort
@@ -29,4 +30,7 @@ Drawer modules. The cross-APK test uses a recording Core app repository to
 verify launch requests and grant revocation deterministically; it does not
 claim that Android work profiles are provisioned in the emulator.
 
-MCP brokering and remaining Core management requirements follow this milestone.
+Manage Core also supports atomic removal of one capability from a context,
+preserving shared instances and other contexts. An edited active composition is
+deactivated until explicitly activated again. The completed local MCP broker and
+remaining Core requirement mapping are documented in core-completion.md.

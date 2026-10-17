@@ -107,6 +107,14 @@ class DrawerSurfaceCrossApkSmokeTest {
                 routes.any { it.capability == StandardCapabilities.SurfaceDrawer }
             } }
             client.render(work, repository.catalog.value.apps).getOrThrow()
+            setup.removeBinding(work.context!!.id, StandardCapabilities.SurfaceDrawer).getOrThrow()
+            assertNull(store.state.value.activeContextId)
+            assertTrue(router.providersFor(StandardCapabilities.SurfaceDrawer).isNotEmpty())
+            assertFalse(store.state.value.contexts.single { it.id == work.context!!.id }.bindings.any {
+                it.capability == StandardCapabilities.SurfaceDrawer
+            })
+            val restoredPersonal = contexts.activate(personal.context!!.id).getOrThrow()
+            client.render(restoredPersonal, repository.catalog.value.apps).getOrThrow()
         } finally {
             contexts.close()
             store.close()

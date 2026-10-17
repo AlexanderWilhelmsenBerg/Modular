@@ -88,8 +88,10 @@ fun CoreManagementPanel(
     onPermission: (ModuleSecurityStatus, CapabilityId, Boolean) -> Unit,
     onSaveInstance: (ModuleInstance, String, String) -> Unit,
     onRenameContext: (LauncherContext, String) -> Unit,
+    onRemoveBinding: (LauncherContext, CapabilityId) -> Unit,
 ) {
     var remove by remember { mutableStateOf<LauncherContext?>(null) }
+    var detach by remember { mutableStateOf<Pair<LauncherContext, CapabilityId>?>(null) }
     var pendingGrant by remember { mutableStateOf<Pair<ModuleSecurityStatus, CapabilityId>?>(null) }
     var editing by remember { mutableStateOf<ModuleInstance?>(null) }
     var renaming by remember { mutableStateOf<LauncherContext?>(null) }
@@ -101,6 +103,12 @@ fun CoreManagementPanel(
             contexts.forEach { context ->
                 OutlinedButton({ renaming = context; editedName = context.name }, enabled = !busy) { Text("Rename ${context.name}") }
                 OutlinedButton({ remove = context }, enabled = !busy) { Text("Delete ${context.name}") }
+                context.bindings.forEach { binding ->
+                    val label = instances.find { it.id == binding.instanceId }?.name ?: binding.instanceId
+                    OutlinedButton({ detach = context to binding.capability }, enabled = !busy) {
+                        Text("Remove $label (${binding.capability.name.substringAfterLast('.')}) from ${context.name}")
+                    }
+                }
             }
             instances.forEach { instance ->
                 OutlinedButton({ editing = instance; editedName = instance.name; editedJson = instance.configurationJson }, enabled = !busy) {
@@ -137,6 +145,12 @@ fun CoreManagementPanel(
             text = { Text("This removes the context and its unused instances. Deleting the active context returns to Core recovery.") },
             confirmButton = { TextButton({ remove = null; onRemoveContext(context.id) }) { Text("Delete") } },
             dismissButton = { TextButton({ remove = null }) { Text("Cancel") } })
+    }
+    detach?.let { (context, capability) ->
+        AlertDialog(onDismissRequest = { detach = null }, title = { Text("Remove capability from ${context.name}?") },
+            text = { Text("This removes only the selected capability from this context. An unused instance is deleted; shared instances and installed modules remain. If this context is active, the launcher shows settings until you activate a context again.") },
+            confirmButton = { TextButton({ detach = null; onRemoveBinding(context, capability) }, enabled = !busy) { Text("Remove") } },
+            dismissButton = { TextButton({ detach = null }) { Text("Cancel") } })
     }
     pendingGrant?.let { (status, capability) ->
         AlertDialog(onDismissRequest = { pendingGrant = null }, title = { Text("Allow module capability?") },

@@ -58,6 +58,38 @@ class LauncherCompositionSetupTest {
             store.state.value.instances.map { it.id }.toSet())
     }
 
+    @Test fun removingOneBindingIsAtomicAndPreservesOtherContextsAndSharedInstances() = runBlocking<Unit> {
+        val store = Store()
+        val setup = LauncherCompositionSetup(store, routes)
+        val personal = setup.createAndActivate("Personal", requests).getOrThrow().context!!
+        val work = setup.createAndActivate("Work", requests).getOrThrow().context!!
+        val shared = work.copy(id = "shared", name = "Shared drawer",
+            bindings = work.bindings.filter { it.capability == StandardCapabilities.SurfaceDrawer })
+        store.state.value = store.state.value.copy(contexts = store.state.value.contexts + shared)
+        val before = store.state.value
+        val writes = store.writes
+        setup.removeBinding(work.id, StandardCapabilities.SurfaceDrawer).getOrThrow()
+        assertEquals(writes + 1, store.writes)
+        assertNull(store.state.value.activeContextId)
+        assertEquals(before.instances, store.state.value.instances)
+        assertEquals(personal, store.state.value.contexts.single { it.id == personal.id })
+        assertEquals(shared, store.state.value.contexts.single { it.id == shared.id })
+        assertFalse(store.state.value.contexts.single { it.id == work.id }.bindings.any {
+            it.capability == StandardCapabilities.SurfaceDrawer
+        })
+        store.state.value = store.state.value.copy(activeContextId = personal.id)
+        setup.removeBinding(shared.id, StandardCapabilities.SurfaceDrawer).getOrThrow()
+        assertEquals(personal.id, store.state.value.activeContextId)
+        val removedId = shared.bindings.single().instanceId
+        assertFalse(store.state.value.instances.any { it.id == removedId })
+        val after = store.state.value
+        val afterWrites = store.writes
+        assertTrue(setup.removeBinding("missing", StandardCapabilities.SurfaceHome).isFailure)
+        assertTrue(setup.removeBinding(work.id, StandardCapabilities.SurfaceDrawer).isFailure)
+        assertEquals(after, store.state.value)
+        assertEquals(afterWrites, store.writes)
+    }
+
     private class Store : CompositionStateStore {
         override val state = MutableStateFlow(CompositionState())
         override val loadError = MutableStateFlow<String?>(null)

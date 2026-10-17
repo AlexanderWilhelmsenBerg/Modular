@@ -102,7 +102,9 @@ builds, not a signed distribution release. No modules are bundled or silently in
 Open Core, choose Home/Drawer/Sort providers in Launcher setup, choose a profile
 or all profiles, and create a context. Repeat for an independent Work or Personal
 composition. Contexts can be switched manually; Manage Core provides module
-enable/disable, signing-bound grants and instance configuration. Missing or
+enable/disable, signing-bound grants, instance configuration and removal of an
+individual capability from a context. Editing the active composition returns to
+recovery until a composition is activated again. Missing or
 disabled providers leave the settings/recovery shell available. Use Android's
 HOME-role prompt to select Modular as the default launcher.
 

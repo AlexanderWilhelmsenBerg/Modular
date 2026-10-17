@@ -55,6 +55,27 @@ class LauncherCompositionSetup(
         Result.failure(failure)
     }
 
+    suspend fun removeBinding(contextId: String, capability: CapabilityId): Result<Unit> = try {
+        store.update { old ->
+            val context = requireNotNull(old.contexts.find { it.id == contextId }) { "Context no longer exists" }
+            val binding = requireNotNull(context.bindings.singleOrNull { it.capability == capability }) {
+                "Capability binding no longer exists or is ambiguous"
+            }
+            val contexts = old.contexts.map {
+                if (it.id == contextId) it.copy(bindings = it.bindings.filterNot { it.capability == capability }) else it
+            }
+            val stillUsed = contexts.any { candidate -> candidate.bindings.any { it.instanceId == binding.instanceId } }
+            old.copy(contexts = contexts,
+                instances = if (stillUsed) old.instances else old.instances.filterNot { it.id == binding.instanceId },
+                activeContextId = old.activeContextId.takeUnless { it == contextId })
+        }
+        Result.success(Unit)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
+        Result.failure(failure)
+    }
+
     suspend fun removeContext(contextId: String): Result<Unit> = try {
         store.update { old ->
             val context = requireNotNull(old.contexts.find { it.id == contextId }) { "Context no longer exists" }

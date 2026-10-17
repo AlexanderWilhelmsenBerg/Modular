@@ -88,3 +88,26 @@ Phase 1 is the Core launcher and proof of the external module boundary:
 - Minimal Home, Basic Drawer, and Alphabetical Sort reference modules.
 
 Automation, Python, MCP script authoring, and terminal capabilities are deliberately later phases. Phase 1 must only ensure its contracts do not prevent them.
+
+## Core development build
+
+The current Core implementation and its validation boundaries are tracked in
+[Core completion](docs/implementation/core-completion.md). Build with JDK 17,
+Gradle 9.6 and Android SDK 37 using the same targets as Android CI. Install the
+Core APK and the separate Minimal Home, Basic Drawer and Alphabetical Sort APKs
+from their debug outputs, or download the modular-development-apks artifact from
+the matching successful Android CI run (retained seven days). These are development
+builds, not a signed distribution release. No modules are bundled or silently installed by Core.
+
+Open Core, choose Home/Drawer/Sort providers in Launcher setup, choose a profile
+or all profiles, and create a context. Repeat for an independent Work or Personal
+composition. Contexts can be switched manually; Manage Core provides module
+enable/disable, signing-bound grants, instance configuration and removal of an
+individual capability from a context. Editing the active composition returns to
+recovery until a composition is activated again. Missing or
+disabled providers leave the settings/recovery shell available. Use Android's
+HOME-role prompt to select Modular as the default launcher.
+
+MCP is optional and off at startup. Start it explicitly in MCP access and pair
+using the copied token. See the Core completion document for the local endpoint,
+policy controls, audit behavior and desktop forwarding instructions.

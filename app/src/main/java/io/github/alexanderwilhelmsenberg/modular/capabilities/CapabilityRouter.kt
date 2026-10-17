@@ -68,6 +68,10 @@ class CapabilityRouter(
     fun providersFor(capability: CapabilityId): List<CapabilityRoute> =
         routes.value.filter { it.capability == capability }
 
+    fun requestedCoreCapabilities(route: CapabilityRoute): Set<CapabilityId> =
+        moduleRegistry.modules.value.singleOrNull { it.component == route.component }
+            ?.requestedCoreCapabilities.orEmpty().mapNotNull(CapabilityId::parse).toSet()
+
     fun resolveCore(capability: CapabilityId): CapabilityRoute? =
         routes.value.firstOrNull {
             it.capability == capability &&

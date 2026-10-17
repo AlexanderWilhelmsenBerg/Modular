@@ -42,6 +42,12 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    // SDK 0.9 targets Kotlin 2.2 metadata, matching the current Android toolchain.
+    implementation("io.modelcontextprotocol:kotlin-sdk-server:0.9.0")
+    implementation("io.ktor:ktor-server-cio:3.2.3")
+    implementation("io.ktor:ktor-server-body-limit:3.2.3")
+    implementation("io.ktor:ktor-server-content-negotiation:3.2.3")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.2.3")
 
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)

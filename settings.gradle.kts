@@ -18,3 +18,5 @@ rootProject.name = "Modular"
 include(":app")
 include(":module-api")
 include(":reference-sort-alphabetical")
+include(":reference-home-minimal")
+include(":reference-drawer-basic")

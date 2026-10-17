@@ -9,6 +9,7 @@ enum class ModuleConnectionStatus {
     INCOMPATIBLE,
     DISCONNECTED,
     FAILED,
+    DISABLED,
 }
 
 data class ModuleRecord(

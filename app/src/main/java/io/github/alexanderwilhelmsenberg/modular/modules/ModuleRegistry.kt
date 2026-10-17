@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.os.RemoteException
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostSession
+import io.github.alexanderwilhelmsenberg.modular.capabilities.BoundedBinderCalls
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularModuleService
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
@@ -25,6 +26,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Discovers external Modular module services and negotiates their root session.
@@ -35,12 +38,41 @@ import kotlinx.coroutines.withContext
 class ModuleRegistry(
     context: Context,
     private val hostFactory: CoreHostFactory,
+    policyPreferencesName: String = "module-policy",
 ) : AutoCloseable {
     private val appContext = context.applicationContext
     private val packageManager = appContext.packageManager
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val connections = mutableMapOf<ComponentName, ServiceConnection>()
     private val sessions = ConcurrentHashMap<ComponentName, SessionBinding>()
+    private val preferences = appContext.getSharedPreferences(policyPreferencesName, Context.MODE_PRIVATE)
+    private var disabled = preferences.getStringSet("disabled", emptySet()).orEmpty().toSet()
+    private val policyLock = Mutex()
+
+    suspend fun setEnabled(component: ComponentName, enabled: Boolean): Result<Unit> =
+        withContext(Dispatchers.Main.immediate) {
+            policyLock.withLock {
+                runCatching {
+                    val key = component.flattenToString()
+                    val next = if (enabled) disabled - key else disabled + key
+                    withContext(Dispatchers.IO) {
+                        check(preferences.edit().putStringSet("disabled", next).commit()) { "Module policy could not be saved" }
+                    }
+                    disabled = next
+                    if (!enabled) {
+                        val live = sessions[component]
+                        live?.coreHostSession?.revoke()
+                        unbind(component, closeSession = false)
+                        update(component) { it.copy(status = ModuleConnectionStatus.DISABLED, sessionId = null) }
+                        live?.let { BoundedBinderCalls.call("close:$component") { it.remote.closeSession(it.sessionId) } }
+                    } else {
+                        update(component) { it.copy(status = ModuleConnectionStatus.DISCOVERED, error = null) }
+                        refresh()
+                    }
+                    Unit
+                }
+            }
+        }
 
     private val _modules = MutableStateFlow<List<ModuleRecord>>(emptyList())
     val modules: StateFlow<List<ModuleRecord>> = _modules.asStateFlow()
@@ -64,11 +96,14 @@ class ModuleRegistry(
             .forEach(::unbind)
 
         _modules.value = discovered.map { candidate ->
-            previousByComponent[candidate.component] ?: candidate
+            val record = previousByComponent[candidate.component] ?: candidate
+            if (candidate.component.flattenToString() in disabled) {
+                record.copy(status = ModuleConnectionStatus.DISABLED, sessionId = null)
+            } else record
         }
 
         discovered.forEach { candidate ->
-            if (candidate.component !in connections) {
+            if (candidate.component !in connections && candidate.component.flattenToString() !in disabled) {
                 bind(candidate.component)
             }
         }
@@ -100,8 +135,7 @@ class ModuleRegistry(
                 ),
             )
 
-        return withContext(Dispatchers.IO) {
-            runCatching {
+        return BoundedBinderCalls.call("acquire:$component") {
                 requireNotNull(
                     session.remote.getCapabilityBinder(
                         session.sessionId,
@@ -110,7 +144,6 @@ class ModuleRegistry(
                 ) {
                     "Module returned no Binder for " + capability.wireValue
                 }
-            }
         }
     }
 
@@ -139,6 +172,7 @@ class ModuleRegistry(
 
         val connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName, service: IBinder) {
+                val boundConnection = this
                 val remote = IModularModuleService.Stub.asInterface(service)
 
                 scope.launch {
@@ -150,6 +184,13 @@ class ModuleRegistry(
 
                     result.fold(
                         onSuccess = { handshake ->
+                            if (connections[name] !== boundConnection || name.flattenToString() in disabled) {
+                                handshake.coreHostSession?.revoke()
+                                handshake.sessionId?.let { sessionId ->
+                                    BoundedBinderCalls.forget("close:$name:$sessionId") { remote.closeSession(sessionId) }
+                                }
+                                return@fold
+                            }
                             if (handshake.record.status ==
                                 ModuleConnectionStatus.CONNECTED &&
                                 handshake.sessionId != null &&
@@ -171,6 +212,7 @@ class ModuleRegistry(
                             replace(name, handshake.record)
                         },
                         onFailure = { throwable ->
+                            if (connections[name] !== boundConnection) return@fold
                             update(name) {
                                 it.copy(
                                     status = ModuleConnectionStatus.FAILED,
@@ -251,12 +293,23 @@ class ModuleRegistry(
         component: ComponentName,
         remote: IModularModuleService,
     ): HandshakeResult {
-        val protocolVersion = remote.protocolVersion
+        val metadata = BoundedBinderCalls.call("handshake:$component") {
+            val protocol = remote.protocolVersion
+            val capabilities = remote.capabilities?.toList().orEmpty()
+            val requested = if (ModuleContract.supportsCoreCapabilityRequests(protocol)) {
+                remote.requestedCoreCapabilities?.toList().orEmpty()
+            } else emptyList()
+            require(capabilities.size <= 128 && requested.size <= 128)
+            require((capabilities + requested).all { it.length <= 128 })
+            val id = remote.moduleId
+            val version = remote.moduleVersion
+            require((id?.length ?: 0) <= 256 && (version?.length ?: 0) <= 256)
+            ModuleMetadata(protocol, id, version, capabilities, requested)
+        }.getOrThrow()
+        val protocolVersion = metadata.protocol
         val supported = ModuleContract.isProtocolSupported(protocolVersion)
 
-        val capabilities = remote.capabilities
-            ?.toList()
-            .orEmpty()
+        val capabilities = metadata.capabilities
             .distinct()
             .sorted()
 
@@ -278,9 +331,7 @@ class ModuleRegistry(
                         protocolVersion,
                     )
             ) {
-                remote.requestedCoreCapabilities
-                    ?.toList()
-                    .orEmpty()
+                metadata.requested
                     .distinct()
                     .sorted()
             } else {
@@ -312,8 +363,8 @@ class ModuleRegistry(
             return HandshakeResult(
                 record = ModuleRecord(
                     component = component,
-                    moduleId = remote.moduleId,
-                    moduleVersion = remote.moduleVersion,
+                    moduleId = metadata.id,
+                    moduleVersion = metadata.version,
                     protocolVersion = protocolVersion,
                     capabilities = capabilities,
                     requestedCoreCapabilities =
@@ -339,12 +390,12 @@ class ModuleRegistry(
                 )
 
                 try {
-                    remote.openSession(
-                        id,
-                        requireNotNull(coreHostSession).host,
-                    )
+                    BoundedBinderCalls.call("open:$component") {
+                        remote.openSession(id, requireNotNull(coreHostSession).host)
+                    }.getOrThrow()
                 } catch (throwable: Throwable) {
                     coreHostSession?.revoke()
+                    BoundedBinderCalls.forget("close:$component:$id") { remote.closeSession(id) }
                     throw throwable
                 }
             }
@@ -355,8 +406,8 @@ class ModuleRegistry(
         return HandshakeResult(
             record = ModuleRecord(
                 component = component,
-                moduleId = remote.moduleId,
-                moduleVersion = remote.moduleVersion,
+                moduleId = metadata.id,
+                moduleVersion = metadata.version,
                 protocolVersion = protocolVersion,
                 capabilities = capabilities,
                 requestedCoreCapabilities =
@@ -401,7 +452,7 @@ class ModuleRegistry(
             true
         } catch (remoteException: RemoteException) {
             coreHostSession.revoke()
-            runCatching {
+            BoundedBinderCalls.forget("close:$component:$sessionId") {
                 remote.closeSession(sessionId)
             }
             update(component) {
@@ -419,7 +470,7 @@ class ModuleRegistry(
     private fun replace(component: ComponentName, replacement: ModuleRecord) {
         _modules.update { records ->
             records.map { record ->
-                if (record.component == component) replacement else record
+                if (record.component == component && component.flattenToString() !in disabled) replacement else record
             }
         }
     }
@@ -430,7 +481,11 @@ class ModuleRegistry(
     ) {
         _modules.update { records ->
             records.map { record ->
-                if (record.component == component) transform(record) else record
+                if (record.component == component) {
+                    if (component.flattenToString() in disabled) {
+                        record.copy(status = ModuleConnectionStatus.DISABLED, sessionId = null)
+                    } else transform(record)
+                } else record
             }
         }
     }
@@ -447,7 +502,7 @@ class ModuleRegistry(
             )
         }
 
-        runCatching {
+        BoundedBinderCalls.forget("close:$component") {
             session.remote.closeSession(session.sessionId)
         }
     }
@@ -484,6 +539,11 @@ class ModuleRegistry(
         val record: ModuleRecord,
         val sessionId: String?,
         val coreHostSession: CoreHostSession?,
+    )
+
+    private data class ModuleMetadata(
+        val protocol: Int, val id: String?, val version: String?,
+        val capabilities: List<String>, val requested: List<String>,
     )
 
     private data class SessionBinding(

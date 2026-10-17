@@ -10,16 +10,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
@@ -27,6 +33,7 @@ import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.composition.LauncherContext
 import io.github.alexanderwilhelmsenberg.modular.composition.ModuleInstance
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventBusDiagnostics
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.SurfaceDocumentParcel
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityStatus
@@ -47,34 +54,102 @@ fun ModularApp(
     moduleSecurity: List<ModuleSecurityStatus>,
     grantRecordCount: Int,
     grantLoadError: String?,
+    homeSurface: SurfaceDocumentParcel?,
+    homeSurfaceError: String?,
+    homeProviderIds: List<String>,
+    homeSetupError: String?,
+    homeSetupInProgress: Boolean,
+    onCreateHomeSetup: (String, String) -> Unit,
+    onHomeSurfaceAction: (String) -> Unit,
     onRequestHomeRole: () -> Unit,
     onRefreshModules: () -> Unit,
     onRefreshApps: () -> Unit,
     onActivateContext: (String) -> Unit,
     onDeactivateContext: () -> Unit,
+    additionalContent: LazyListScope.() -> Unit = {},
 ) {
     MaterialTheme {
         Scaffold(
             topBar = {
-                TopAppBar(title = { Text("Modular Core") })
+                TopAppBar(
+                    title = {
+                        Text("Modular Core")
+                    },
+                )
             },
         ) { padding ->
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                contentPadding =
+                    PaddingValues(16.dp),
                 verticalArrangement =
                     Arrangement.spacedBy(12.dp),
             ) {
+                if (homeSurface != null) {
+                    item {
+                        Card(
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier =
+                                    Modifier.padding(
+                                        20.dp,
+                                    ),
+                                verticalArrangement =
+                                    Arrangement
+                                        .spacedBy(
+                                            12.dp,
+                                        ),
+                            ) {
+                                Text(
+                                    text =
+                                        "Active Home surface",
+                                    style =
+                                        MaterialTheme
+                                            .typography
+                                            .labelLarge,
+                                )
+                                SurfaceRenderer(
+                                    document =
+                                        homeSurface,
+                                    onAction =
+                                        onHomeSurfaceAction,
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth(),
+                                )
+                            }
+                        }
+                    }
+                } else if (
+                    homeSurfaceError != null
+                ) {
+                    item {
+                        StatusCard(
+                            title =
+                                "Home surface unavailable",
+                            body =
+                                homeSurfaceError,
+                        )
+                    }
+                }
+
+                additionalContent()
+
                 item {
                     StatusCard(
                         title = "Launcher role",
                         body = when {
                             !homeRoleAvailable ->
                                 "HOME role is unavailable on this device."
+
                             homeRoleHeld ->
                                 "Modular is the active HOME application."
+
                             else ->
                                 "Modular is not the current HOME application."
                         },
@@ -87,49 +162,80 @@ fun ModularApp(
                             } else {
                                 null
                             },
-                        onAction = onRequestHomeRole,
+                        onAction =
+                            onRequestHomeRole,
                     )
                 }
 
                 item {
-                    val connected = modules.count {
-                        it.status ==
-                            ModuleConnectionStatus.CONNECTED
-                    }
+                    val connected =
+                        modules.count {
+                            it.status ==
+                                ModuleConnectionStatus
+                                    .CONNECTED
+                        }
 
                     StatusCard(
-                        title = "Module registry",
-                        body = modules.size.toString() +
-                            " discovered · " +
-                            connected.toString() +
-                            " connected",
+                        title =
+                            "Module registry",
+                        body =
+                            modules.size
+                                .toString() +
+                                " discovered · " +
+                                connected
+                                    .toString() +
+                                " connected",
                         actionText = "Refresh",
-                        onAction = onRefreshModules,
+                        onAction =
+                            onRefreshModules,
                     )
                 }
 
                 item {
-                    val appStatus = buildString {
-                        append(appCatalog.apps.size)
-                        append(" launchable activities · ")
-                        append(appCatalog.profiles.size)
-                        append(" profiles")
+                    val appStatus =
+                        buildString {
+                            append(
+                                appCatalog
+                                    .apps
+                                    .size,
+                            )
+                            append(
+                                " launchable activities · ",
+                            )
+                            append(
+                                appCatalog
+                                    .profiles
+                                    .size,
+                            )
+                            append(" profiles")
 
-                        if (appCatalog.isRefreshing) {
-                            append(" · refreshing")
-                        }
+                            if (
+                                appCatalog
+                                    .isRefreshing
+                            ) {
+                                append(
+                                    " · refreshing",
+                                )
+                            }
 
-                        appCatalog.lastError?.let { error ->
-                            append("\nError: ")
-                            append(error)
+                            appCatalog
+                                .lastError
+                                ?.let {
+                                    error ->
+                                    append(
+                                        "\nError: ",
+                                    )
+                                    append(error)
+                                }
                         }
-                    }
 
                     StatusCard(
-                        title = "App repository",
+                        title =
+                            "App repository",
                         body = appStatus,
                         actionText = "Refresh",
-                        onAction = onRefreshApps,
+                        onAction =
+                            onRefreshApps,
                     )
                 }
 
@@ -137,23 +243,42 @@ fun ModularApp(
                     CompositionStatusCard(
                         instances = instances,
                         contexts = contexts,
-                        activeContext = activeContext,
-                        loadError = compositionLoadError,
-                        activationError = contextActivationError,
-                        onDeactivateContext = onDeactivateContext,
+                        activeContext =
+                            activeContext,
+                        loadError =
+                            compositionLoadError,
+                        activationError =
+                            contextActivationError,
+                        onDeactivateContext =
+                            onDeactivateContext,
+                    )
+                }
+
+                item {
+                    HomeSetupCard(
+                        providerIds = homeProviderIds,
+                        error = homeSetupError,
+                        inProgress =
+                            homeSetupInProgress,
+                        onCreate = onCreateHomeSetup,
                     )
                 }
 
                 item {
                     SecurityStatusCard(
-                        statuses = moduleSecurity,
-                        grantRecordCount = grantRecordCount,
-                        loadError = grantLoadError,
+                        statuses =
+                            moduleSecurity,
+                        grantRecordCount =
+                            grantRecordCount,
+                        loadError =
+                            grantLoadError,
                     )
                 }
 
                 item {
-                    EventBusStatusCard(eventBusDiagnostics)
+                    EventBusStatusCard(
+                        eventBusDiagnostics,
+                    )
                 }
 
                 if (contexts.isNotEmpty()) {
@@ -161,7 +286,9 @@ fun ModularApp(
                         Text(
                             text = "Contexts",
                             style =
-                                MaterialTheme.typography.titleMedium,
+                                MaterialTheme
+                                    .typography
+                                    .titleMedium,
                         )
                     }
 
@@ -171,8 +298,10 @@ fun ModularApp(
                     ) { context ->
                         ContextCard(
                             context = context,
-                            activeContext = activeContext,
-                            onActivate = onActivateContext,
+                            activeContext =
+                                activeContext,
+                            onActivate =
+                                onActivateContext,
                         )
                     }
                 }
@@ -180,9 +309,12 @@ fun ModularApp(
                 if (instances.isNotEmpty()) {
                     item {
                         Text(
-                            text = "Saved module instances",
+                            text =
+                                "Saved module instances",
                             style =
-                                MaterialTheme.typography.titleMedium,
+                                MaterialTheme
+                                    .typography
+                                    .titleMedium,
                         )
                     }
 
@@ -190,17 +322,29 @@ fun ModularApp(
                         items = instances,
                         key = { it.id },
                     ) { instance ->
-                        InstanceCard(instance)
+                        InstanceCard(
+                            instance,
+                        )
                     }
                 }
 
                 item {
                     StatusCard(
-                        title = "Recovery surface",
-                        body = "No Home surface module is active yet. " +
-                            "This screen is Core's minimal " +
-                            "recovery/settings UI, not the " +
-                            "production home screen.",
+                        title =
+                            "Recovery surface",
+                        body =
+                            if (
+                                homeSurface == null
+                            ) {
+                                "No valid Home surface is active. " +
+                                    "Core recovery/settings remains available " +
+                                    "so a missing or invalid module cannot " +
+                                    "strand the launcher."
+                            } else {
+                                "The active Home above is module-provided. " +
+                                    "This diagnostic area remains Core-owned " +
+                                    "as the recovery path."
+                            },
                     )
                 }
 
@@ -210,22 +354,28 @@ fun ModularApp(
                             text =
                                 "No compatible module services discovered.",
                             style =
-                                MaterialTheme.typography.bodyMedium,
+                                MaterialTheme
+                                    .typography
+                                    .bodyMedium,
                         )
                     }
                 } else {
                     item {
                         Text(
-                            text = "Discovered modules",
+                            text =
+                                "Discovered modules",
                             style =
-                                MaterialTheme.typography.titleMedium,
+                                MaterialTheme
+                                    .typography
+                                    .titleMedium,
                         )
                     }
 
                     items(
                         items = modules,
                         key = {
-                            it.component.flattenToString()
+                            it.component
+                                .flattenToString()
                         },
                     ) { module ->
                         ModuleCard(
@@ -234,12 +384,129 @@ fun ModularApp(
                                 moduleSecurity
                                     .firstOrNull {
                                         it.packageName ==
-                                            module.component
+                                            module
+                                                .component
                                                 .packageName
                                     },
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeSetupCard(
+    providerIds: List<String>,
+    error: String?,
+    inProgress: Boolean,
+    onCreate: (String, String) -> Unit,
+) {
+    var contextName by rememberSaveable {
+        mutableStateOf("Home")
+    }
+
+    Card(
+        modifier =
+            Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier =
+                Modifier.padding(16.dp),
+            verticalArrangement =
+                Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Home setup",
+                style =
+                    MaterialTheme
+                        .typography
+                        .titleMedium,
+            )
+            Text(
+                text =
+                    "Create a module instance, bind it to " +
+                        "modular.surface.home/v1, and activate " +
+                        "the resulting context.",
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodyMedium,
+            )
+
+            OutlinedTextField(
+                value = contextName,
+                onValueChange = { value ->
+                    contextName = value
+                },
+                modifier =
+                    Modifier.fillMaxWidth(),
+                enabled = !inProgress,
+                singleLine = true,
+                label = {
+                    Text("Context name")
+                },
+            )
+
+            if (providerIds.isEmpty()) {
+                Text(
+                    text =
+                        "No live Home surface providers are " +
+                            "currently available.",
+                    style =
+                        MaterialTheme
+                            .typography
+                            .bodySmall,
+                )
+            } else {
+                providerIds.forEachIndexed { index, providerId ->
+                    if (index > 0) {
+                        HorizontalDivider()
+                    }
+
+                    Text(
+                        text = providerId,
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                    )
+                    Button(
+                        onClick = {
+                            onCreate(
+                                providerId,
+                                contextName,
+                            )
+                        },
+                        enabled =
+                            !inProgress &&
+                                contextName
+                                    .isNotBlank(),
+                    ) {
+                        Text(
+                            if (inProgress) {
+                                "Creating…"
+                            } else {
+                                "Create and activate"
+                            },
+                        )
+                    }
+                }
+            }
+
+            error?.let { message ->
+                Text(
+                    text = message,
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .error,
+                    style =
+                        MaterialTheme
+                            .typography
+                            .bodySmall,
+                )
             }
         }
     }
@@ -253,28 +520,39 @@ private fun SecurityStatusCard(
 ) {
     val body = buildString {
         append(grantRecordCount)
-        append(" persisted module identities")
+        append(
+            " persisted module identities",
+        )
 
-        val requested = statuses.sumOf {
-            it.requestedCapabilities.size
-        }
-        val effective = statuses.sumOf {
-            it.effectiveGrants.size
-        }
+        val requested =
+            statuses.sumOf {
+                it.requestedCapabilities
+                    .size
+            }
+        val effective =
+            statuses.sumOf {
+                it.effectiveGrants.size
+            }
 
         append("\n")
         append(requested)
-        append(" requested Core capabilities · ")
+        append(
+            " requested Core capabilities · ",
+        )
         append(effective)
         append(" effective grants")
 
-        val unsupported = statuses.sumOf {
-            it.unsupportedRequests.size
-        }
+        val unsupported =
+            statuses.sumOf {
+                it.unsupportedRequests.size
+            }
+
         if (unsupported > 0) {
             append("\n")
             append(unsupported)
-            append(" unsupported capability requests")
+            append(
+                " unsupported capability requests",
+            )
         }
 
         loadError?.let { error ->
@@ -295,13 +573,27 @@ private fun EventBusStatusCard(
 ) {
     val body = buildString {
         append("Published sequence: ")
-        append(diagnostics.latestPublishedSequence)
+        append(
+            diagnostics
+                .latestPublishedSequence,
+        )
         append("\nDelivered sequence: ")
-        append(diagnostics.latestDeliveredSequence)
-        append("\nDropped before delivery: ")
-        append(diagnostics.droppedBeforeDelivery)
+        append(
+            diagnostics
+                .latestDeliveredSequence,
+        )
+        append(
+            "\nDropped before delivery: ",
+        )
+        append(
+            diagnostics
+                .droppedBeforeDelivery,
+        )
 
-        if (diagnostics.droppedBeforeDelivery > 0) {
+        if (
+            diagnostics
+                .droppedBeforeDelivery > 0
+        ) {
             append(
                 "\nSequence gaps require a state resync.",
             )
@@ -329,35 +621,51 @@ private fun CompositionStatusCard(
         append(contexts.size)
         append(" contexts")
 
-        val active = activeContext.context
+        val active =
+            activeContext.context
+
         if (active == null) {
-            append("\nNo active context")
+            append(
+                "\nNo active context",
+            )
         } else {
             append("\nActive: ")
             append(active.name)
             append(
-                if (activeContext.isReady) {
+                if (
+                    activeContext.isReady
+                ) {
                     " · ready"
                 } else {
                     " · degraded"
                 },
             )
 
-            activeContext.problems.forEach { problem ->
-                append("\n")
-                append(problem.capability.wireValue)
-                append(": ")
-                append(problem.detail)
-            }
+            activeContext
+                .problems
+                .forEach { problem ->
+                    append("\n")
+                    append(
+                        problem
+                            .capability
+                            .wireValue,
+                    )
+                    append(": ")
+                    append(problem.detail)
+                }
         }
 
         loadError?.let {
-            append("\nStorage error: ")
+            append(
+                "\nStorage error: ",
+            )
             append(it)
         }
 
         activationError?.let {
-            append("\nActivation error: ")
+            append(
+                "\nActivation error: ",
+            )
             append(it)
         }
     }
@@ -366,12 +674,16 @@ private fun CompositionStatusCard(
         title = "Composition",
         body = body,
         actionText =
-            if (activeContext.context != null) {
+            if (
+                activeContext
+                    .context != null
+            ) {
                 "Deactivate"
             } else {
                 null
             },
-        onAction = onDeactivateContext,
+        onAction =
+            onDeactivateContext,
     )
 }
 
@@ -381,47 +693,72 @@ private fun ContextCard(
     activeContext: ActiveContextState,
     onActivate: (String) -> Unit,
 ) {
-    val isActive = activeContext.context?.id == context.id
+    val isActive =
+        activeContext.context?.id ==
+            context.id
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier =
+            Modifier.fillMaxWidth(),
+    ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier =
+                Modifier.padding(16.dp),
             verticalArrangement =
                 Arrangement.spacedBy(6.dp),
         ) {
             Text(
                 context.name,
-                style = MaterialTheme.typography.titleSmall,
+                style =
+                    MaterialTheme
+                        .typography
+                        .titleSmall,
             )
             Text(
-                context.bindings.size.toString() +
+                context.bindings.size
+                    .toString() +
                     " capability bindings",
-                style = MaterialTheme.typography.bodySmall,
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodySmall,
             )
 
-            context.bindings.forEach { binding ->
-                Text(
-                    binding.capability.wireValue +
-                        " → " + binding.instanceId,
-                    style =
-                        MaterialTheme.typography.bodySmall,
-                )
-            }
+            context.bindings
+                .forEach { binding ->
+                    Text(
+                        binding
+                            .capability
+                            .wireValue +
+                            " → " +
+                            binding.instanceId,
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                    )
+                }
 
             if (isActive) {
                 Text(
-                    if (activeContext.isReady) {
+                    if (
+                        activeContext.isReady
+                    ) {
                         "Active · ready"
                     } else {
                         "Active · degraded"
                     },
                     style =
-                        MaterialTheme.typography.bodyMedium,
+                        MaterialTheme
+                            .typography
+                            .bodyMedium,
                 )
             } else {
                 Button(
                     onClick = {
-                        onActivate(context.id)
+                        onActivate(
+                            context.id,
+                        )
                     },
                 ) {
                     Text("Activate")
@@ -435,23 +772,37 @@ private fun ContextCard(
 private fun InstanceCard(
     instance: ModuleInstance,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier =
+            Modifier.fillMaxWidth(),
+    ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier =
+                Modifier.padding(16.dp),
             verticalArrangement =
                 Arrangement.spacedBy(6.dp),
         ) {
             Text(
                 instance.name,
-                style = MaterialTheme.typography.titleSmall,
+                style =
+                    MaterialTheme
+                        .typography
+                        .titleSmall,
             )
             Text(
-                "Provider: " + instance.providerId,
-                style = MaterialTheme.typography.bodySmall,
+                "Provider: " +
+                    instance.providerId,
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodySmall,
             )
             Text(
                 "ID: " + instance.id,
-                style = MaterialTheme.typography.bodySmall,
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodySmall,
             )
         }
     }
@@ -464,23 +815,35 @@ private fun StatusCard(
     actionText: String? = null,
     onAction: () -> Unit = {},
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier =
+            Modifier.fillMaxWidth(),
+    ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier =
+                Modifier.padding(16.dp),
             verticalArrangement =
                 Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 title,
-                style = MaterialTheme.typography.titleMedium,
+                style =
+                    MaterialTheme
+                        .typography
+                        .titleMedium,
             )
             Text(
                 body,
-                style = MaterialTheme.typography.bodyMedium,
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodyMedium,
             )
 
             if (actionText != null) {
-                Button(onClick = onAction) {
+                Button(
+                    onClick = onAction,
+                ) {
                     Text(actionText)
                 }
             }
@@ -491,143 +854,246 @@ private fun StatusCard(
 @Composable
 private fun ModuleCard(
     module: ModuleRecord,
-    securityStatus: ModuleSecurityStatus?,
+    securityStatus:
+        ModuleSecurityStatus?,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier =
+            Modifier.fillMaxWidth(),
+    ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier =
+                Modifier.padding(16.dp),
             verticalArrangement =
                 Arrangement.spacedBy(6.dp),
         ) {
             Text(
                 module.label,
-                style = MaterialTheme.typography.titleSmall,
+                style =
+                    MaterialTheme
+                        .typography
+                        .titleSmall,
             )
             Text(
-                module.component.flattenToShortString(),
-                style = MaterialTheme.typography.bodySmall,
+                module.component
+                    .flattenToShortString(),
+                style =
+                    MaterialTheme
+                        .typography
+                        .bodySmall,
             )
 
             Row(
                 horizontalArrangement =
-                    Arrangement.spacedBy(8.dp),
+                    Arrangement
+                        .spacedBy(8.dp),
             ) {
                 Text(
                     "Status: " +
-                        module.status.name.lowercase(),
+                        module.status
+                            .name
+                            .lowercase(),
                     style =
-                        MaterialTheme.typography.bodyMedium,
+                        MaterialTheme
+                            .typography
+                            .bodyMedium,
                 )
-                module.moduleVersion?.let { version ->
+
+                module.moduleVersion
+                    ?.let { version ->
+                        Text(
+                            "Version: " +
+                                version,
+                            style =
+                                MaterialTheme
+                                    .typography
+                                    .bodyMedium,
+                        )
+                    }
+            }
+
+            module.protocolVersion
+                ?.let { version ->
                     Text(
-                        "Version: " + version,
+                        "Protocol: " +
+                            version,
                         style =
-                            MaterialTheme.typography.bodyMedium,
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
                     )
                 }
-            }
 
-            module.protocolVersion?.let { version ->
-                Text(
-                    "Protocol: " + version,
-                    style = MaterialTheme.typography.bodySmall,
+            if (
+                module.capabilities
+                    .isNotEmpty()
+            ) {
+                Spacer(
+                    Modifier.height(2.dp),
                 )
-            }
-
-            if (module.capabilities.isNotEmpty()) {
-                Spacer(Modifier.height(2.dp))
                 HorizontalDivider()
                 Text(
-                    module.capabilities.joinToString(
-                        separator = "\n",
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
+                    module.capabilities
+                        .joinToString(
+                            separator = "\n",
+                        ),
+                    style =
+                        MaterialTheme
+                            .typography
+                            .bodySmall,
                 )
             }
 
-            if (module.requestedCoreCapabilities.isNotEmpty()) {
-                Spacer(Modifier.height(2.dp))
+            if (
+                module
+                    .requestedCoreCapabilities
+                    .isNotEmpty()
+            ) {
+                Spacer(
+                    Modifier.height(2.dp),
+                )
                 HorizontalDivider()
                 Text(
                     "Requests from Core:",
-                    style = MaterialTheme.typography.bodySmall,
+                    style =
+                        MaterialTheme
+                            .typography
+                            .bodySmall,
                 )
                 Text(
-                    module.requestedCoreCapabilities
-                        .joinToString(separator = "\n"),
-                    style = MaterialTheme.typography.bodySmall,
+                    module
+                        .requestedCoreCapabilities
+                        .joinToString(
+                            separator = "\n",
+                        ),
+                    style =
+                        MaterialTheme
+                            .typography
+                            .bodySmall,
                 )
             }
 
-            securityStatus?.let { security ->
-                val identity = security.identity
-                Text(
-                    buildString {
-                        append("Identity: ")
-                        append(
-                            if (security.sameSignerAsCore) {
-                                "official signer"
-                            } else {
-                                "external signer"
-                            },
-                        )
+            securityStatus
+                ?.let { security ->
+                    val identity =
+                        security.identity
 
-                        identity?.signerSha256
-                            ?.firstOrNull()
-                            ?.let { digest ->
-                                append(" · ")
-                                append(digest.take(12))
-                                append("…")
-                            }
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                    Text(
+                        buildString {
+                            append(
+                                "Identity: ",
+                            )
+                            append(
+                                if (
+                                    security
+                                        .sameSignerAsCore
+                                ) {
+                                    "official signer"
+                                } else {
+                                    "external signer"
+                                },
+                            )
 
-                Text(
-                    "Effective Core grants: " +
-                        if (security.effectiveGrants.isEmpty()) {
-                            "none"
-                        } else {
-                            security.effectiveGrants
-                                .sortedBy { it.wireValue }
-                                .joinToString {
-                                    it.wireValue
+                            identity
+                                ?.signerSha256
+                                ?.firstOrNull()
+                                ?.let {
+                                    digest ->
+                                    append(" · ")
+                                    append(
+                                        digest
+                                            .take(12),
+                                    )
+                                    append("…")
                                 }
                         },
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                if (security.unsupportedRequests.isNotEmpty()) {
-                    Text(
-                        "Unsupported requests: " +
-                            security.unsupportedRequests
-                                .sortedBy { it.wireValue }
-                                .joinToString {
-                                    it.wireValue
-                                },
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
                     )
+
+                    Text(
+                        "Effective Core grants: " +
+                            if (
+                                security
+                                    .effectiveGrants
+                                    .isEmpty()
+                            ) {
+                                "none"
+                            } else {
+                                security
+                                    .effectiveGrants
+                                    .sortedBy {
+                                        it.wireValue
+                                    }
+                                    .joinToString {
+                                        it.wireValue
+                                    }
+                            },
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                    )
+
+                    if (
+                        security
+                            .unsupportedRequests
+                            .isNotEmpty()
+                    ) {
+                        Text(
+                            "Unsupported requests: " +
+                                security
+                                    .unsupportedRequests
+                                    .sortedBy {
+                                        it.wireValue
+                                    }
+                                    .joinToString {
+                                        it.wireValue
+                                    },
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .error,
+                            style =
+                                MaterialTheme
+                                    .typography
+                                    .bodySmall,
+                        )
+                    }
+
+                    security.error
+                        ?.let { error ->
+                            Text(
+                                "Security identity error: " +
+                                    error,
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .error,
+                                style =
+                                    MaterialTheme
+                                        .typography
+                                        .bodySmall,
+                            )
+                        }
                 }
 
-                security.error?.let { error ->
+            module.error
+                ?.let { error ->
                     Text(
-                        "Security identity error: " + error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
+                        text = error,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .error,
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
                     )
                 }
-            }
-
-            module.error?.let { error ->
-                Text(
-                    text = error,
-                    color =
-                        MaterialTheme.colorScheme.error,
-                    style =
-                        MaterialTheme.typography.bodySmall,
-                )
-            }
         }
     }
 }

@@ -8,8 +8,6 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortItemParc
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortRequestParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortResultParcel
 import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 class AppSortClient(
     private val capabilityRouter: CapabilityRouter,
@@ -37,11 +35,15 @@ class AppSortClient(
             )
         }
 
+        if (apps.sumOf { it.key.packageName.length.toLong() + it.key.activityName.length + minOf(it.label.length, 512) } > 65_536) {
+            return Result.failure(IllegalArgumentException("Catalog exceeds Sort transport budget"))
+        }
+
         return capabilityRouter
             .acquireModuleBinder(route)
             .fold(
                 onSuccess = { binder ->
-                    withContext(Dispatchers.IO) {
+                    BoundedBinderCalls.call("sort:${route.component}") {
                         runCatching {
                             val capability =
                                 IAppSortCapability.Stub.asInterface(
@@ -60,7 +62,7 @@ class AppSortClient(
                                                 profileSerial =
                                                     app.key.profileSerial,
                                             ),
-                                            label = app.label,
+                                            label = app.label.take(512),
                                         )
                                     },
                                     localeTag = localeTag,
@@ -79,7 +81,7 @@ class AppSortClient(
                                 input = apps,
                                 orderedKeys = result.orderedKeys,
                             ).getOrThrow()
-                        }
+                        }.getOrThrow()
                     }
                 },
                 onFailure = { throwable ->

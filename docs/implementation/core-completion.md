@@ -23,6 +23,8 @@ brokering, after correcting Slice 8. Slice 8 fix 50ed456d passed full Android CI
 | MCP brokering | Authenticated loopback SDK endpoint, explicit mutation exposure, individually approved module tools/resources and bounded audit history |
 
 All rows describe implemented source, not a claim that final validation has passed.
+Composition and grant DataStores have one process-owned file owner; Activity
+recreation cancels only observers, avoiding an overlapping asynchronous close/reopen.
 See PR #9 for exact-HEAD CI state. The initial Drawer milestone afb6bb4 passed
 verification but its new emulator test was rejected by JUnit because Kotlin
 inferred a non-void return type. The test now explicitly uses runBlocking<Unit>.

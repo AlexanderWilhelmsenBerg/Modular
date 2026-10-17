@@ -12,8 +12,10 @@ class CoreActivitySmokeTest {
     @Test fun coreSettingsSurviveActivityRecreation() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { assertFalse(it.isFinishing) }
-            scenario.recreate()
-            scenario.onActivity { assertFalse(it.isFinishing) }
+            repeat(3) {
+                scenario.recreate()
+                scenario.onActivity { assertFalse(it.isFinishing) }
+            }
         }
     }
 }

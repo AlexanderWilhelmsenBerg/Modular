@@ -1,10 +1,9 @@
 package io.github.alexanderwilhelmsenberg.modular.security
 
 import android.content.Context
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStoreFile
+import io.github.alexanderwilhelmsenberg.modular.storage.ProcessPreferenceStores
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,14 +22,7 @@ class DataStoreModuleGrantStateStore(
     private val scope =
         CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val dataStore = PreferenceDataStoreFactory.create(
-        scope = scope,
-        produceFile = {
-            context.applicationContext.preferencesDataStoreFile(
-                fileName,
-            )
-        },
-    )
+    private val dataStore = ProcessPreferenceStores.get(context, fileName)
 
     private val stateKey =
         stringPreferencesKey("module_grant_state_json")

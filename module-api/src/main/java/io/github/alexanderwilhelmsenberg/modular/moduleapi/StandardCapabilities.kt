@@ -5,5 +5,6 @@ package io.github.alexanderwilhelmsenberg.modular.moduleapi
  */
 object StandardCapabilities {
     val SurfaceHome = CapabilityId("modular.surface.home", 1)
+    val SurfaceDrawer = CapabilityId("modular.surface.drawer", 1)
     val AppsSort = CapabilityId("modular.apps.sort", 1)
 }

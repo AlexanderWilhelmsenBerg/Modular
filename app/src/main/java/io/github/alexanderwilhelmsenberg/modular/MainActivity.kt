@@ -17,6 +17,8 @@ import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityProvider
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
 import io.github.alexanderwilhelmsenberg.modular.composition.ContextManager
+import io.github.alexanderwilhelmsenberg.modular.composition.LauncherCompositionSetup
+import io.github.alexanderwilhelmsenberg.modular.composition.CompositionProvider
 import io.github.alexanderwilhelmsenberg.modular.composition.DataStoreCompositionStateStore
 import io.github.alexanderwilhelmsenberg.modular.composition.InstanceStore
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventBus
@@ -32,6 +34,11 @@ import io.github.alexanderwilhelmsenberg.modular.security.DataStoreModuleGrantSt
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
 import io.github.alexanderwilhelmsenberg.modular.security.OfficialModuleBootstrapPolicy
 import io.github.alexanderwilhelmsenberg.modular.surface.HomeSurfaceClient
+import io.github.alexanderwilhelmsenberg.modular.surface.DrawerSurfaceClient
+import io.github.alexanderwilhelmsenberg.modular.ui.SurfaceRenderer
+import io.github.alexanderwilhelmsenberg.modular.ui.LauncherCompositionPanel
+import io.github.alexanderwilhelmsenberg.modular.ui.CoreManagementPanel
+import io.github.alexanderwilhelmsenberg.modular.security.ModuleAuthorizationContext
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
 import kotlinx.coroutines.launch
 
@@ -56,6 +63,8 @@ class MainActivity : ComponentActivity() {
     private var homeRoleHeld by mutableStateOf(false)
     private var homeSetupError by mutableStateOf<String?>(null)
     private var homeSetupInProgress by mutableStateOf(false)
+    private var managementBusy by mutableStateOf(false)
+    private var managementError by mutableStateOf<String?>(null)
 
     private val homeRoleLauncher =
         registerForActivityResult(
@@ -139,6 +148,22 @@ class MainActivity : ComponentActivity() {
 
             val homeSurfaceClient = remember {
                 HomeSurfaceClient(capabilityRouter)
+            }
+            val drawerClient = remember { DrawerSurfaceClient(capabilityRouter, securityManager) }
+            val launcherSetup = remember { LauncherCompositionSetup(compositionStore, capabilityRouter.routes) }
+            var drawerSurface by remember(activeContext.context?.id) { mutableStateOf<SurfaceDocumentParcel?>(null) }
+            var drawerError by remember(activeContext.context?.id) { mutableStateOf<String?>(null) }
+            var drawerRefresh by remember { mutableStateOf(0L) }
+            var drawerActionBusy by remember { mutableStateOf(false) }
+            LaunchedEffect(activeContext, appCatalog.generation, drawerRefresh, grantState) {
+                drawerSurface = null
+                drawerError = null
+                if (activeContext.routeFor(StandardCapabilities.SurfaceDrawer) != null) {
+                    drawerClient.render(activeContext, appCatalog.apps).fold(
+                        onSuccess = { drawerSurface = it },
+                        onFailure = { drawerError = it.message ?: "Drawer unavailable" },
+                    )
+                }
             }
             val homeProviderIds = capabilityRoutes
                 .asSequence()
@@ -253,9 +278,9 @@ class MainActivity : ComponentActivity() {
                 homeProviderIds = homeProviderIds,
                 homeSetupError = homeSetupError,
                 homeSetupInProgress =
-                    homeSetupInProgress,
+                    homeSetupInProgress || managementBusy,
                 onCreateHomeSetup = { providerId, name ->
-                    if (!homeSetupInProgress) {
+                    if (!homeSetupInProgress && !managementBusy) {
                         homeSetupInProgress = true
                         homeSetupError = null
 
@@ -332,6 +357,51 @@ class MainActivity : ComponentActivity() {
                         contextManager.deactivate()
                     }
                 },
+                additionalContent = {
+                    item {
+                        drawerSurface?.let { document ->
+                            SurfaceRenderer(document, onAction = { action ->
+                                if (!drawerActionBusy) {
+                                    drawerActionBusy = true
+                                    val target = activeContext
+                                    lifecycleScope.launch {
+                                        try {
+                                            drawerClient.performAction(target, action).fold(
+                                                onSuccess = { drawerRefresh++ },
+                                                onFailure = { drawerError = it.message ?: "Drawer action failed" },
+                                            )
+                                        } finally { drawerActionBusy = false }
+                                    }
+                                }
+                            })
+                        }
+                        drawerError?.let { androidx.compose.material3.Text(it) }
+                    }
+                    item {
+                        LauncherCompositionPanel(capabilityRoutes, appCatalog.profiles,
+                            managementBusy || homeSetupInProgress, managementError) { name, home, drawer, sorter, profile ->
+                            manage {
+                                launcherSetup.createAndActivate(name, listOf(
+                                    CompositionProvider(StandardCapabilities.SurfaceHome, home),
+                                    CompositionProvider(StandardCapabilities.SurfaceDrawer, drawer,
+                                        if (profile == null) "{}" else "{\"profileSerial\":$profile}"),
+                                    CompositionProvider(StandardCapabilities.AppsSort, sorter),
+                                ))
+                            }
+                        }
+                    }
+                    item {
+                        CoreManagementPanel(contexts, modules, securityStatuses, managementBusy,
+                            onRemoveContext = { id -> manage { launcherSetup.removeContext(id) } },
+                            onSetModuleEnabled = { module, enabled -> manage { moduleRegistry.setEnabled(module.component, enabled) } },
+                            onPermission = { status, capability, allowed -> manage {
+                                if (allowed) securityManager.grant(ModuleAuthorizationContext(
+                                    requireNotNull(status.identity), status.requestedCapabilities), capability)
+                                else securityManager.revoke(status.packageName, capability)
+                            } },
+                        )
+                    }
+                },
             )
         }
     }
@@ -349,6 +419,16 @@ class MainActivity : ComponentActivity() {
         }
         if (::appRepository.isInitialized) {
             appRepository.refresh()
+        }
+    }
+
+    private fun manage(operation: suspend () -> Result<*>) {
+        if (managementBusy || homeSetupInProgress) return
+        managementBusy = true
+        managementError = null
+        lifecycleScope.launch {
+            try { operation().onFailure { managementError = it.message ?: "Operation failed" } }
+            finally { managementBusy = false }
         }
     }
 

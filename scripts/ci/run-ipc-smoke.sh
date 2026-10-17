@@ -18,9 +18,11 @@ collect_diagnostics() {
       io.github.alexanderwilhelmsenberg.modular \
       io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical \
       io.github.alexanderwilhelmsenberg.modular.reference.home.minimal; do
+    # Reference drawer diagnostics are included by the dedicated package dump below.
       adb shell dumpsys package "$package_name" \
         > "$diagnostics_dir/package-${package_name##*.}.txt" 2>&1 || true
     done
+    adb shell dumpsys package io.github.alexanderwilhelmsenberg.modular.reference.drawer.basic > "$diagnostics_dir/package-drawer.txt" 2>&1 || true
     timeout 15s adb logcat -d -v threadtime -t 3000 \
       > "$diagnostics_dir/logcat.txt" 2>&1 || true
   fi
@@ -33,6 +35,7 @@ echo "::group::$stage"
 gradle \
   :reference-sort-alphabetical:assembleDebug \
   :reference-home-minimal:assembleDebug \
+  :reference-drawer-basic:assembleDebug \
   :app:assembleDebugAndroidTest \
   --stacktrace
 echo "::endgroup::"
@@ -48,6 +51,9 @@ echo "::group::$stage"
 adb install -r \
   reference-home-minimal/build/outputs/apk/debug/reference-home-minimal-debug.apk
 echo "::endgroup::"
+
+stage="install basic Drawer APK"
+adb install -r reference-drawer-basic/build/outputs/apk/debug/reference-drawer-basic-debug.apk
 
 stage="cross-APK instrumentation tests"
 echo "::group::$stage"

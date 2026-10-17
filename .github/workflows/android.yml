@@ -41,6 +41,7 @@ jobs:
           :app:compileDebugKotlin
           :reference-sort-alphabetical:compileDebugKotlin
           :reference-home-minimal:compileDebugKotlin
+          :reference-drawer-basic:compileDebugKotlin
           --stacktrace
 
       - name: Unit tests
@@ -50,6 +51,7 @@ jobs:
           :app:testDebugUnitTest
           :reference-sort-alphabetical:testDebugUnitTest
           :reference-home-minimal:testDebugUnitTest
+          :reference-drawer-basic:testDebugUnitTest
           --stacktrace
 
       - name: Lint
@@ -59,6 +61,7 @@ jobs:
           :app:lintDebug
           :reference-sort-alphabetical:lintDebug
           :reference-home-minimal:lintDebug
+          :reference-drawer-basic:lintDebug
           --stacktrace
 
       - name: Assemble debug and test APKs
@@ -68,6 +71,7 @@ jobs:
           :app:assembleDebugAndroidTest
           :reference-sort-alphabetical:assembleDebug
           :reference-home-minimal:assembleDebug
+          :reference-drawer-basic:assembleDebug
           --stacktrace
 
       - name: Upload verification diagnostics

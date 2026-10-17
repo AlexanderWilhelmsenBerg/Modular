@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Discovers external Modular module services and negotiates their root session.
@@ -41,6 +43,30 @@ class ModuleRegistry(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val connections = mutableMapOf<ComponentName, ServiceConnection>()
     private val sessions = ConcurrentHashMap<ComponentName, SessionBinding>()
+    private val preferences = appContext.getSharedPreferences("module-policy", Context.MODE_PRIVATE)
+    private var disabled = preferences.getStringSet("disabled", emptySet()).orEmpty().toSet()
+    private val policyLock = Mutex()
+
+    suspend fun setEnabled(component: ComponentName, enabled: Boolean): Result<Unit> =
+        withContext(Dispatchers.Main.immediate) {
+            policyLock.withLock {
+                runCatching {
+                    val key = component.flattenToString()
+                    val next = if (enabled) disabled - key else disabled + key
+                    withContext(Dispatchers.IO) {
+                        check(preferences.edit().putStringSet("disabled", next).commit()) { "Module policy could not be saved" }
+                    }
+                    disabled = next
+                    if (!enabled) {
+                        unbind(component)
+                        update(component) { it.copy(status = ModuleConnectionStatus.DISABLED, sessionId = null) }
+                    } else {
+                        update(component) { it.copy(status = ModuleConnectionStatus.DISCOVERED, error = null) }
+                        refresh()
+                    }
+                }
+            }
+        }
 
     private val _modules = MutableStateFlow<List<ModuleRecord>>(emptyList())
     val modules: StateFlow<List<ModuleRecord>> = _modules.asStateFlow()
@@ -64,11 +90,14 @@ class ModuleRegistry(
             .forEach(::unbind)
 
         _modules.value = discovered.map { candidate ->
-            previousByComponent[candidate.component] ?: candidate
+            val record = previousByComponent[candidate.component] ?: candidate
+            if (candidate.component.flattenToString() in disabled) {
+                record.copy(status = ModuleConnectionStatus.DISABLED, sessionId = null)
+            } else record
         }
 
         discovered.forEach { candidate ->
-            if (candidate.component !in connections) {
+            if (candidate.component !in connections && candidate.component.flattenToString() !in disabled) {
                 bind(candidate.component)
             }
         }
@@ -139,6 +168,7 @@ class ModuleRegistry(
 
         val connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName, service: IBinder) {
+                val boundConnection = this
                 val remote = IModularModuleService.Stub.asInterface(service)
 
                 scope.launch {
@@ -150,6 +180,13 @@ class ModuleRegistry(
 
                     result.fold(
                         onSuccess = { handshake ->
+                            if (connections[name] !== boundConnection || name.flattenToString() in disabled) {
+                                handshake.coreHostSession?.revoke()
+                                handshake.sessionId?.let { sessionId ->
+                                    withContext(Dispatchers.IO) { runCatching { remote.closeSession(sessionId) } }
+                                }
+                                return@fold
+                            }
                             if (handshake.record.status ==
                                 ModuleConnectionStatus.CONNECTED &&
                                 handshake.sessionId != null &&
@@ -171,6 +208,7 @@ class ModuleRegistry(
                             replace(name, handshake.record)
                         },
                         onFailure = { throwable ->
+                            if (connections[name] !== boundConnection) return@fold
                             update(name) {
                                 it.copy(
                                     status = ModuleConnectionStatus.FAILED,
@@ -419,7 +457,7 @@ class ModuleRegistry(
     private fun replace(component: ComponentName, replacement: ModuleRecord) {
         _modules.update { records ->
             records.map { record ->
-                if (record.component == component) replacement else record
+                if (record.component == component && component.flattenToString() !in disabled) replacement else record
             }
         }
     }
@@ -430,7 +468,11 @@ class ModuleRegistry(
     ) {
         _modules.update { records ->
             records.map { record ->
-                if (record.component == component) transform(record) else record
+                if (record.component == component) {
+                    if (component.flattenToString() in disabled) {
+                        record.copy(status = ModuleConnectionStatus.DISABLED, sessionId = null)
+                    } else transform(record)
+                } else record
             }
         }
     }

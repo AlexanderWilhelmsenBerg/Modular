@@ -8,6 +8,7 @@ import io.github.alexanderwilhelmsenberg.modular.capabilities.*
 import io.github.alexanderwilhelmsenberg.modular.composition.*
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
 import io.github.alexanderwilhelmsenberg.modular.security.*
+import io.modelcontextprotocol.kotlin.sdk.types.LATEST_PROTOCOL_VERSION
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -40,13 +41,17 @@ class McpBrokerInstrumentedTest {
             val token = requireNotNull(broker.state.value.token)
             assertEquals(401, request(endpoint, null, rpc(1, "tools/list")).first)
             val initialized = request(endpoint, token, rpc(2, "initialize", buildJsonObject {
-                put("protocolVersion", "2025-11-25"); put("capabilities", JsonObject(emptyMap()))
+                put("protocolVersion", LATEST_PROTOCOL_VERSION); put("capabilities", JsonObject(emptyMap()))
                 put("clientInfo", buildJsonObject { put("name", "Core instrumentation"); put("version", "1") })
             }))
             assertEquals(200, initialized.first)
             assertNotNull(Json.parseToJsonElement(initialized.second).jsonObject["result"])
-            val listed = request(endpoint, token, rpc(3, "tools/list")).second
-            assertTrue(listed.contains("launcher.context.current"))
+            assertEquals(LATEST_PROTOCOL_VERSION, Json.parseToJsonElement(initialized.second).jsonObject
+                .getValue("result").jsonObject.getValue("protocolVersion").jsonPrimitive.content)
+            val discovery = request(endpoint, token, rpc(3, "tools/list"))
+            assertEquals("tools/list: " + discovery.second, 200, discovery.first)
+            val listed = discovery.second
+            assertTrue("tools/list: $listed", listed.contains("launcher.context.current"))
             assertFalse(listed.contains("launcher.context.activate"))
             val denied = Json.parseToJsonElement(request(endpoint, token, rpc(4, "tools/call", buildJsonObject {
                 put("name", "launcher.context.activate")
@@ -91,7 +96,7 @@ class McpBrokerInstrumentedTest {
         connection.connectTimeout = 5000; connection.readTimeout = 10000
         connection.setRequestProperty("Content-Type", "application/json")
         connection.setRequestProperty("Accept", "application/json, text/event-stream")
-        connection.setRequestProperty("MCP-Protocol-Version", "2025-11-25")
+        connection.setRequestProperty("MCP-Protocol-Version", LATEST_PROTOCOL_VERSION)
         if (token != null) connection.setRequestProperty("Authorization", "Bearer $token")
         if (origin != null) connection.setRequestProperty("Origin", origin)
         connection.doOutput = true

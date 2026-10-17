@@ -71,7 +71,11 @@ a timeout can mean an unknown result rather than cancellation.
 
 Official Kotlin MCP SDK server 0.9.0 and Ktor 3.2.3 match Kotlin 2.2 metadata and
 serialization 1.9 used by this Android project. SDK 0.15.0 uses Kotlin 2.4; it was
-not silently substituted into the current toolchain. DNS rebinding protection,
+not silently substituted into the current toolchain.
+The pinned SDK negotiates MCP 2025-06-18 (or its supported older revisions);
+clients must use the version returned by initialize in subsequent HTTP headers.
+The test uses the SDK's protocol constant rather than assuming a newer revision.
+DNS rebinding protection,
 origin/host validation and authentication are explicitly enabled rather than
 relying on that older SDK's defaults. Each stateless request explicitly closes
 its official SDK server/session because the 0.9 convenience route omits cleanup.

@@ -1,6 +1,5 @@
 package io.github.alexanderwilhelmsenberg.modular.surface
 
-import io.github.alexanderwilhelmsenberg.modular.capabilities.BoundedBinderCalls
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRoute
 import io.github.alexanderwilhelmsenberg.modular.capabilities.BoundedBinderCalls
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter

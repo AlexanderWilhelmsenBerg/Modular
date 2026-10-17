@@ -35,6 +35,10 @@ class AppSortClient(
             )
         }
 
+        if (apps.sumOf { it.key.packageName.length.toLong() + it.key.activityName.length + minOf(it.label.length, 512) } > 65_536) {
+            return Result.failure(IllegalArgumentException("Catalog exceeds Sort transport budget"))
+        }
+
         return capabilityRouter
             .acquireModuleBinder(route)
             .fold(
@@ -58,7 +62,7 @@ class AppSortClient(
                                                 profileSerial =
                                                     app.key.profileSerial,
                                             ),
-                                            label = app.label,
+                                            label = app.label.take(512),
                                         )
                                     },
                                     localeTag = localeTag,

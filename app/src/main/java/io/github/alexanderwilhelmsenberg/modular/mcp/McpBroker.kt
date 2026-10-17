@@ -31,6 +31,7 @@ import kotlinx.serialization.json.*
 data class BrokerAudit(
     val time: Long, val correlationId: String, val client: String,
     val tool: String, val decision: String, val durationMs: Long,
+    val targetModule: String? = null, val targetInstance: String? = null,
 )
 
 data class BrokerState(
@@ -200,14 +201,17 @@ class McpBroker(
     internal suspend fun execute(tool: String, args: JsonObject, credential: String? = null): String {
         val began = System.nanoTime()
         val correlation = UUID.randomUUID().toString()
+        val target = if (tool == "launcher.module.invoke") state.value.tools.singleOrNull {
+            it.approvalKey == (args["approvalKey"] as? JsonPrimitive)?.contentOrNull
+        } else null
         fun authorized(): Boolean = state.value.endpoint != null && state.value.policy.allows(tool) &&
             (credential == null || credential == "Bearer " + state.value.token)
         if (!authorized()) {
-            audit(tool, "denied", 0, correlation)
+            audit(tool, "denied", 0, correlation, target)
             throw SecurityException("Tool is not exposed by local policy")
         }
         // Persist an attempt before executing, without payloads, secrets or labels.
-        audit(tool, "attempt", 0, correlation)
+        audit(tool, "attempt", 0, correlation, target)
         return try {
             if (!authorized()) throw SecurityException("Credential or policy was revoked")
             val result = when (tool) {
@@ -260,11 +264,11 @@ class McpBroker(
                 else -> throw SecurityException("Unsupported tool")
             }
             require(result.length <= 65_536) { "Response exceeds the broker budget" }
-            audit(tool, "success", (System.nanoTime() - began) / 1_000_000, correlation)
+            audit(tool, "success", (System.nanoTime() - began) / 1_000_000, correlation, target)
             result
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) {
-            audit(tool, if (failure is SecurityException) "denied" else "failed", (System.nanoTime() - began) / 1_000_000, correlation)
+            audit(tool, if (failure is SecurityException) "denied" else "failed", (System.nanoTime() - began) / 1_000_000, correlation, target)
             throw failure
         }
     }
@@ -280,18 +284,22 @@ class McpBroker(
             val item = value.jsonObject
             BrokerAudit(item.getValue("time").jsonPrimitive.long, item.getValue("correlationId").jsonPrimitive.content,
                 item.getValue("client").jsonPrimitive.content, item.getValue("tool").jsonPrimitive.content,
-                item.getValue("decision").jsonPrimitive.content, item.getValue("durationMs").jsonPrimitive.long)
+                item.getValue("decision").jsonPrimitive.content, item.getValue("durationMs").jsonPrimitive.long,
+                item["targetModule"]?.jsonPrimitive?.contentOrNull, item["targetInstance"]?.jsonPrimitive?.contentOrNull)
         }
     }.getOrDefault(emptyList())
 
-    private suspend fun audit(tool: String, decision: String, duration: Long, correlation: String = UUID.randomUUID().toString()) = auditLock.withLock {
+    private suspend fun audit(tool: String, decision: String, duration: Long,
+        correlation: String = UUID.randomUUID().toString(), target: ModuleToolCandidate? = null) = auditLock.withLock {
         val entry = BrokerAudit(System.currentTimeMillis(), correlation, "local-paired-client",
-            tool.take(96), decision, duration)
+            tool.take(96), decision, duration, target?.providerId, target?.instanceId)
         val entries = (state.value.audit + entry).takeLast(128)
         withContext(Dispatchers.IO) {
             val json = buildJsonArray { entries.forEach { item -> add(buildJsonObject {
                 put("time", item.time); put("correlationId", item.correlationId); put("client", item.client)
                 put("tool", item.tool); put("decision", item.decision); put("durationMs", item.durationMs)
+                item.targetModule?.let { put("targetModule", it) }
+                item.targetInstance?.let { put("targetInstance", it) }
             }) } }
             check(prefs.edit().putString("audit", json.toString()).commit()) { "Audit could not be saved" }
         }

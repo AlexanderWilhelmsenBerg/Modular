@@ -248,7 +248,216 @@ class ModuleRegistry(
                 unbind(name, closeSession = false)
             }
 
-            override fun onNullBinding(n…1906 tokens truncated…ectionStatus.FAILED,
+            override fun onNullBinding(name: ComponentName) {
+                update(name) {
+                    it.copy(
+                        status = ModuleConnectionStatus.FAILED,
+                        sessionId = null,
+                        error = "Module returned a null binding",
+                    )
+                }
+                unbind(name, closeSession = false)
+            }
+        }
+
+        connections[component] = connection
+
+        val bound = try {
+            appContext.bindService(
+                Intent(ModuleContract.SERVICE_ACTION).setComponent(component),
+                connection,
+                Context.BIND_AUTO_CREATE,
+            )
+        } catch (securityException: SecurityException) {
+            update(component) {
+                it.copy(
+                    status = ModuleConnectionStatus.FAILED,
+                    error = securityException.message ?: "SecurityException",
+                )
+            }
+            false
+        }
+
+        if (!bound) {
+            connections.remove(component)
+            update(component) {
+                it.copy(
+                    status = ModuleConnectionStatus.FAILED,
+                    error = "Android refused the service binding",
+                )
+            }
+        }
+    }
+
+    private suspend fun performHandshake(
+        component: ComponentName,
+        remote: IModularModuleService,
+    ): HandshakeResult {
+        val metadata = BoundedBinderCalls.call("handshake:$component") {
+            val protocol = remote.protocolVersion
+            val capabilities = remote.capabilities?.toList().orEmpty()
+            val requested = if (ModuleContract.supportsCoreCapabilityRequests(protocol)) {
+                remote.requestedCoreCapabilities?.toList().orEmpty()
+            } else emptyList()
+            require(capabilities.size <= 128 && requested.size <= 128)
+            require((capabilities + requested).all { it.length <= 128 })
+            val id = remote.moduleId
+            val version = remote.moduleVersion
+            require((id?.length ?: 0) <= 256 && (version?.length ?: 0) <= 256)
+            ModuleMetadata(protocol, id, version, capabilities, requested)
+        }.getOrThrow()
+        val protocolVersion = metadata.protocol
+        val supported = ModuleContract.isProtocolSupported(protocolVersion)
+
+        val capabilities = metadata.capabilities
+            .distinct()
+            .sorted()
+
+        val invalidCapabilities = capabilities.filter {
+            CapabilityId.parse(it) == null
+        }
+
+        if (invalidCapabilities.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "Invalid capability identifiers: " +
+                    invalidCapabilities.joinToString(),
+            )
+        }
+
+        val requestedCoreCapabilities =
+            if (
+                ModuleContract
+                    .supportsCoreCapabilityRequests(
+                        protocolVersion,
+                    )
+            ) {
+                metadata.requested
+                    .distinct()
+                    .sorted()
+            } else {
+                emptyList()
+            }
+
+        val invalidCoreRequests =
+            requestedCoreCapabilities.filter {
+                CapabilityId.parse(it) == null
+            }
+
+        if (invalidCoreRequests.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "Invalid requested Core capabilities: " +
+                    invalidCoreRequests.joinToString(),
+            )
+        }
+
+        val requestedCoreCapabilityIds =
+            requestedCoreCapabilities
+                .map { wireValue ->
+                    requireNotNull(
+                        CapabilityId.parse(wireValue),
+                    )
+                }
+                .toSet()
+
+        if (!supported) {
+            return HandshakeResult(
+                record = ModuleRecord(
+                    component = component,
+                    moduleId = metadata.id,
+                    moduleVersion = metadata.version,
+                    protocolVersion = protocolVersion,
+                    capabilities = capabilities,
+                    requestedCoreCapabilities =
+                        requestedCoreCapabilities,
+                    sessionId = null,
+                    status = ModuleConnectionStatus.INCOMPATIBLE,
+                    error = "Unsupported protocol version " + protocolVersion,
+                ),
+                sessionId = null,
+                coreHostSession = null,
+            )
+        }
+
+        var coreHostSession: CoreHostSession? = null
+
+        val sessionId = if (ModuleContract.supportsSessions(protocolVersion)) {
+            UUID.randomUUID().toString().also { id ->
+                coreHostSession = hostFactory.create(
+                    component = component,
+                    sessionId = id,
+                    requestedCapabilities =
+                        requestedCoreCapabilityIds,
+                )
+
+                try {
+                    BoundedBinderCalls.call("open:$component") {
+                        remote.openSession(id, requireNotNull(coreHostSession).host)
+                    }.getOrThrow()
+                } catch (throwable: Throwable) {
+                    coreHostSession?.revoke()
+                    BoundedBinderCalls.forget("close:$component:$id") { remote.closeSession(id) }
+                    throw throwable
+                }
+            }
+        } else {
+            null
+        }
+
+        return HandshakeResult(
+            record = ModuleRecord(
+                component = component,
+                moduleId = metadata.id,
+                moduleVersion = metadata.version,
+                protocolVersion = protocolVersion,
+                capabilities = capabilities,
+                requestedCoreCapabilities =
+                    requestedCoreCapabilities,
+                sessionId = sessionId,
+                status = ModuleConnectionStatus.CONNECTED,
+                error = null,
+            ),
+            sessionId = sessionId,
+            coreHostSession = coreHostSession,
+        )
+    }
+
+    private fun establishSessionDeathTracking(
+        component: ComponentName,
+        remote: IModularModuleService,
+        sessionId: String,
+        coreHostSession: CoreHostSession,
+    ): Boolean {
+        val binder = remote.asBinder()
+        val deathRecipient = IBinder.DeathRecipient {
+            scope.launch {
+                dropDeadSession(component)
+                update(component) {
+                    it.copy(
+                        status = ModuleConnectionStatus.DISCONNECTED,
+                        sessionId = null,
+                        error = "Module process died",
+                    )
+                }
+            }
+        }
+
+        return try {
+            binder.linkToDeath(deathRecipient, 0)
+            sessions[component] = SessionBinding(
+                remote = remote,
+                sessionId = sessionId,
+                deathRecipient = deathRecipient,
+                coreHostSession = coreHostSession,
+            )
+            true
+        } catch (remoteException: RemoteException) {
+            coreHostSession.revoke()
+            BoundedBinderCalls.forget("close:$component:$sessionId") {
+                remote.closeSession(sessionId)
+            }
+            update(component) {
+                it.copy(
+                    status = ModuleConnectionStatus.FAILED,
                     sessionId = null,
                     error = remoteException.message
                         ?: "Module died while opening session",

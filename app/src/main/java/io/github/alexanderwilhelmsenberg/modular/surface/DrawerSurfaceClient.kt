@@ -37,6 +37,9 @@ class DrawerSurfaceClient(private val router: CapabilityRouter, private val secu
         }
         val binder = router.acquireModuleBinder(drawer.route).getOrThrow()
         BoundedBinderCalls.call("drawer:${drawer.route.component}") {
+            require(CoreCapabilities.AppsCatalog in security.status(
+                packageName, router.requestedCoreCapabilities(drawer.route),
+            ).effectiveGrants) { "Drawer app catalog permission was revoked" }
             val document = ISurfaceDrawerCapability.Stub.asInterface(binder).render(
                 drawer.instance.id, drawer.instance.configurationJson,
                 AppSortRequestParcel(items, Locale.getDefault().toLanguageTag()),

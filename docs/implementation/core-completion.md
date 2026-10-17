@@ -52,7 +52,7 @@ policy mutation, terminal, scripts and arbitrary Binder calls have no remote too
 
 Modules advertise modular.mcp.tools/v1. The broker accepts bounded descriptors
 with primitive argument schemas and a readOnly declaration, then requires local
-approval for each export. Approval binds signing identity, module version,
+approval for each export. Approval binds signing identity, Android package update generation, module version,
 instance and the full descriptor. The declaration is a module claim, not a proof
 about the module's internal behavior; the approval dialog makes that explicit.
 Current grants, active composition, route availability, identity and schema are
@@ -61,7 +61,7 @@ MCP resources. The Basic Drawer contributes drawer.status as the reference proof
 Revocation or a changed descriptor requires new approval.
 
 Audit retains the last 128 attempt/outcome events with a shared correlation ID,
-credential principal, timestamp, tool, decision and duration. It omits tokens,
+credential principal, timestamp, tool, target module/instance, decision and duration. It omits tokens,
 argument bodies, result bodies and app labels. Policy and audit survive restart;
 the endpoint and credential do not. A bound provider call that times out keeps its
 slot until the native transaction returns. Actions are not automatically retried:
@@ -73,7 +73,10 @@ Official Kotlin MCP SDK server 0.9.0 and Ktor 3.2.3 match Kotlin 2.2 metadata an
 serialization 1.9 used by this Android project. SDK 0.15.0 uses Kotlin 2.4; it was
 not silently substituted into the current toolchain. DNS rebinding protection,
 origin/host validation and authentication are explicitly enabled rather than
-relying on that older SDK's defaults. Android compatibility must pass the real
+relying on that older SDK's defaults. Each stateless request explicitly closes
+its official SDK server/session because the 0.9 convenience route omits cleanup.
+Unsupported argument-schema constraints are rejected rather than silently ignored.
+Android compatibility must pass the real
 HTTP instrumentation test; it is not assumed from the SDK's JVM sample.
 
 Sources:
@@ -94,7 +97,7 @@ advanced JSON fallback without changing Core ownership.
 
 ## Validation
 
-Twenty-five focused JVM tests passed locally using cached Kotlin/coroutine/JSON
+Twenty-six focused JVM tests passed locally using cached Kotlin/coroutine/JSON
 dependencies. These cover the Slice 8 atomic setup, Surface validation, Drawer
 paging/profile isolation, MCP approval/argument policy and native-call timeout
 slot retention. This supplements, rather than replaces, the repository's full

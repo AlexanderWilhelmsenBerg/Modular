@@ -14,6 +14,7 @@ import io.ktor.server.plugins.bodylimit.RequestBodyLimit
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.header
 import io.ktor.server.response.respondText
+import io.ktor.server.routing.*
 import io.ktor.serialization.kotlinx.json.json
 import io.modelcontextprotocol.kotlin.sdk.server.*
 import io.modelcontextprotocol.kotlin.sdk.types.*
@@ -113,11 +114,29 @@ class McpBroker(
                     }
                 }
             }
-            mcpStatelessStreamableHttp(
-                path = "/mcp", enableDnsRebindingProtection = true,
-                allowedHosts = listOf("127.0.0.1", "localhost", "127.0.0.1:*", "localhost:*"),
-                allowedOrigins = emptyList(),
-            ) { server(call.request.header(HttpHeaders.Authorization)) }
+            routing {
+                route("/mcp") {
+                    post {
+                        val transport = StreamableHttpServerTransport(StreamableHttpServerTransport.Configuration(
+                            enableJsonResponse = true, enableDnsRebindingProtection = true,
+                            allowedHosts = listOf("127.0.0.1:$boundPort", "localhost:$boundPort"),
+                            // SDK 0.9 rejects an absent Origin for any non-null list.
+                            // The outer interceptor rejects every supplied Origin.
+                            allowedOrigins = null,
+                        )).also { it.setSessionIdGenerator(null) }
+                        val handler = server(call.request.header(HttpHeaders.Authorization))
+                        try {
+                            handler.createSession(transport)
+                            transport.handleRequest(null, call)
+                        } finally {
+                            // SDK 0.9's stateless convenience route omits this cleanup.
+                            withContext(NonCancellable) { handler.close() }
+                        }
+                    }
+                    get { call.respondText("Method not allowed", status = HttpStatusCode.MethodNotAllowed) }
+                    delete { call.respondText("Method not allowed", status = HttpStatusCode.MethodNotAllowed) }
+                }
+            }
         }
         try {
             withContext(Dispatchers.IO) { engine.start(wait = false) }

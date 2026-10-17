@@ -28,15 +28,22 @@ object McpModulePolicy {
             val description = tool["description"]?.jsonPrimitive?.content.orEmpty()
             require(description.length <= 512)
             val schema = tool.getValue("inputSchema").jsonObject
+            require(schema.keys.all { it in setOf("type", "properties", "required", "additionalProperties", "description") }) {
+                "Unsupported module schema constraint"
+            }
             require(schema["type"]?.jsonPrimitive?.content == "object")
             require(schema["additionalProperties"]?.jsonPrimitive?.booleanOrNull == false)
             val properties = schema["properties"]?.jsonObject ?: JsonObject(emptyMap())
             require(properties.size <= 16)
             properties.forEach { (key, rule) ->
                 require(key.matches(Regex("^[A-Za-z][A-Za-z0-9_]{0,63}$")))
+                require(rule.jsonObject.keys.all { it in setOf("type", "description") }) {
+                    "Unsupported module argument constraint"
+                }
                 require(rule.jsonObject["type"]?.jsonPrimitive?.content in setOf("string", "integer", "number", "boolean"))
             }
             val required = schema["required"]?.jsonArray.orEmpty().map { it.jsonPrimitive.content }
+            require(required.distinct().size == required.size)
             require(required.all { it in properties })
             val capabilities = tool["requiredCapabilities"]?.jsonArray.orEmpty().map {
                 requireNotNull(CapabilityId.parse(it.jsonPrimitive.content))

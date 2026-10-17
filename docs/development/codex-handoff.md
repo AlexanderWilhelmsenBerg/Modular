@@ -1,4 +1,4 @@
-# Codex takeover — 16 October 2026
+# Codex takeover — updated 17 October 2026
 
 ## Refreshed source and evidence
 Repository: https://github.com/AlexanderWilhelmsenBerg/Modular
@@ -7,7 +7,7 @@ At takeover main/base is 48579b5b82579abde87d0bacdd7b2959b74adb55.
 The previously validated PR HEAD is 7e24c1d8cdf3b172a1d03dbddf8070743aa9b041.
 Android CI https://github.com/AlexanderWilhelmsenBerg/Modular/actions/runs/38759088657 is completed/success:
 verify (production compilation, unit tests, lint, APK assembly) and ipc-smoke (syntax, cross-APK instrumentation) both succeeded; diagnostic uploads succeeded.
-This handoff commit changes guidance/config only. The earlier run does not certify the new commit. Do not rerun it manually. Do not merge; Slice 8 still needs user acceptance before Slice 9.
+Slice 8's cancellation defect was fixed at 50ed456de68d9a5fa1f965ab59a734586c5379be. Exact-HEAD CI 38913780111 passed verification and device tests. PR #8 remains unmerged. The user subsequently instructed fixing Slice 8 and continuing through all Core product requirements, explicitly including MCP brokering. Follow-on implementation is in draft PR #9, based on #8; no merge approval was supplied. Technical validation does not constitute user acceptance.
 
 ## Verified tools
 Both connections were actually called from this Codex chat:
@@ -38,7 +38,9 @@ Project configuration is loaded by compatible Codex clients for trusted projects
 codex -C <trusted-checkout> --model gpt-6.1-sol -c model_reasoning_effort=high -c agents.max_concurrent_threads_per_session=1 -c agents.default_subagent_model=gpt-6-luna -c agents.default_subagent_reasoning_effort=low
 Keep existing sandbox/approval settings.
 
-## User setup and next action
-The current folder is a ChatGPT source mirror, not a Git checkout; sources and synced AGENTS.md remain read-only. Local AGENTS.override.md supplies guidance to future sessions in this mirror; repository files are staged separately under codex-handoff for review.
-For repository development, open a trusted checkout of AlexanderWilhelmsenBerg/Modular at phase-1/slice-8-surface-home in Codex, retaining these two plugin connections. Reload/start a session to load project config; verify effective concurrency/model settings there. If the app lacks selectors, apply the explicit CLI options above or keep bounded work in the coordinator.
-Next development action is a Slice 8 acceptance review using the existing implementation document, PR diff and passing exact-SHA CI evidence. Obtain explicit Slice 8 acceptance and separate merge authorization before merging or beginning Slice 9. This setup task does not supply either approval.
+## Verified checkout and next action
+The actual checkout is the Modular subdirectory of the original ChatGPT project mirror. Its full path is C:/Users/co_abe/.codex/.chatgpt-projects/g-p-6ac945793164819182ef3e4afcaf3322/Modular. The mirror's sources and synced AGENTS.md remain untouched.
+
+The user explicitly approved trusting this exact checkout after automatic approval review required authorization for the security-setting change. A strict-config app-server config/read probe with this cwd and no overrides verified that its project layer is enabled, agents.enabled=true, max_concurrent_threads_per_session=1, and default_subagent_model/reasoning_effort=gpt-6-luna/low. The user-level model default remained gpt-6-astra/low. A new compatible session loads these defaults; this running managed session uses sequential instructions. A bounded Luna specialist also successfully called both exact code-intelligence connections. No credentials or duplicate server definitions were added.
+
+Continue PR #9 on phase-1/slice-9-drawer and reuse its exact-HEAD CI evidence. See [Core completion](../implementation/core-completion.md) for implementation scope, endpoint setup and validation limitations. Keep both PRs unmerged pending user acceptance/review and explicit merge approval; #9 contains unmerged #8 ancestry. Do not claim indexed helpers contain these changes until their full SHA is independently verified.

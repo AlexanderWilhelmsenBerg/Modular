@@ -77,6 +77,12 @@ class DrawerSurfaceCrossApkSmokeTest {
                 assertTrue(runCatching { broker.execute("launcher.module.invoke", arguments) }.isFailure)
                 broker.setPolicy(BrokerPolicy(approvedModuleTools = setOf(proposal.approvalKey)))
                 assertTrue(broker.execute("launcher.module.invoke", arguments).contains("ready"))
+                val successfulCall = broker.state.value.audit.last { it.decision == "success" }
+                assertEquals(proposal.providerId, successfulCall.targetModule)
+                assertEquals(proposal.instanceId, successfulCall.targetInstance)
+                assertTrue(broker.state.value.audit.any {
+                    it.correlationId == successfulCall.correlationId && it.decision == "attempt"
+                })
                 broker.setPolicy(BrokerPolicy())
                 assertTrue(runCatching { broker.execute("launcher.module.invoke", arguments) }.isFailure)
             } finally { broker.stop() }

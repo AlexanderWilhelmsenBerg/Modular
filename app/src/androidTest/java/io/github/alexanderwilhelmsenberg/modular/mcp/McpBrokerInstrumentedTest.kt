@@ -75,6 +75,7 @@ class McpBrokerInstrumentedTest {
             assertTrue(restored.state.value.audit.isNotEmpty())
             assertNull(restored.state.value.token)
             restored.close()
+            assertTrue(runCatching { restored.start(0) }.isFailure)
         } finally {
             broker.stop()
             contexts.close(); store.close(); router.close(); registry.close(); grants.close(); repository.close()

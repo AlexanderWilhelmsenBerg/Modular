@@ -34,4 +34,12 @@ class McpModulePolicyTest {
             "signer", "instance", "module"); fail("Must reject mutating exports") }
         catch (_: IllegalArgumentException) { }
     }
+
+    @Test fun unsupportedSchemaConstraintsAreRejectedRatherThanIgnored() {
+        val constrained = descriptor.replace("\"type\":\"integer\"", "\"type\":\"integer\",\"minimum\":10")
+        try {
+            McpModulePolicy.descriptors(constrained, "signer", "instance", "module")
+            fail("A constraint the broker cannot enforce must not be advertised")
+        } catch (_: IllegalArgumentException) { }
+    }
 }

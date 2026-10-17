@@ -108,6 +108,11 @@ class DrawerSurfaceCrossApkSmokeTest {
             } }
             client.render(work, repository.catalog.value.apps).getOrThrow()
             setup.removeBinding(work.context!!.id, StandardCapabilities.SurfaceDrawer).getOrThrow()
+            withTimeout(5000) { store.state.first { state ->
+                state.activeContextId == null && state.contexts.single { it.id == work.context!!.id }.bindings.none {
+                    it.capability == StandardCapabilities.SurfaceDrawer
+                }
+            } }
             assertNull(store.state.value.activeContextId)
             assertTrue(router.providersFor(StandardCapabilities.SurfaceDrawer).isNotEmpty())
             assertFalse(store.state.value.contexts.single { it.id == work.context!!.id }.bindings.any {

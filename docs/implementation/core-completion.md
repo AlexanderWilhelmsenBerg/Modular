@@ -111,8 +111,9 @@ advanced JSON fallback without changing Core ownership.
 
 ## Validation
 
-Twenty-six focused JVM tests passed locally using cached Kotlin/coroutine/JSON
+Thirty focused JVM tests passed locally using cached Kotlin/coroutine/JSON
 dependencies. These cover the Slice 8 atomic setup, Surface validation, Drawer
 paging/profile isolation, MCP approval/argument policy and native-call timeout
-slot retention. This supplements, rather than replaces, the repository's full
+slot retention, plus atomic composition creation/removal and shared-instance
+isolation. This supplements, rather than replaces, the repository's full
 Gradle verification and device tests at the final published SHA.

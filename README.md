@@ -1,20 +1,18 @@
 # Modular
 
-**Modular** is a deliberately minimal Android launcher framework in which almost all visible behavior is provided by independently installable modules.
-
-The launcher Core owns lifecycle, module discovery, capability routing, state, security, context activation, Android HOME integration, and MCP brokering. App drawers, home screens, sorting, automation, terminal access, script runtimes, integrations, and other behavior belong outside the Core.
+**Modular** is a complete, minimal Android launcher with optional add-ons for helper functions and enhancements.
 
 ## Product idea
 
-A clean installation should be intentionally bare:
+Installing the Core APK provides:
 
-- Android HOME integration
-- a settings/recovery shell
-- module management
-- context/profile selection
-- the minimum services required to discover and run modules
+- a Home screen with a vertical alphabetical app list;
+- app icons, profile-aware discovery, and tap-to-launch;
+- Android HOME integration;
+- secondary Settings and reliable recovery;
+- accessibility and automatic app-list updates.
 
-Everything else is optional.
+Home opens immediately. No extra APK, network, account, or context setup is required. Add-ons extend the finished Core with filtering, alternative sorting/presentation, automation, scripts, and integrations. Built-in Home remains available when an add-on fails.
 
 A single module implementation may have multiple configured **instances**. For example, one App Drawer module can have a **Work** instance and a **Personal** instance with different filters, sort providers, layouts, and rules.
 
@@ -22,7 +20,7 @@ A **Context** composes module instances into the active launcher configuration.
 
 ## Architecture principles
 
-1. If functionality can reasonably be removed, it does not belong in Core.
+1. Core delivers a complete baseline launcher; optional helper functions and enhancements belong in add-ons.
 2. Modules advertise capabilities rather than being hard-coded into a closed list of module types.
 3. Module code and module instances are separate concepts.
 4. External modules run as separate Android applications/processes rather than injecting arbitrary code into Core.
@@ -73,18 +71,11 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 - [Language and toolchain ADR](docs/decisions/ADR-0001-language-and-toolchain.md)
 - [Module packaging and IPC ADR](docs/decisions/ADR-0002-module-packaging-and-ipc.md)
 - [Automation/scripting boundary ADR](docs/decisions/ADR-0003-scripting-boundary.md)
+- [Complete Core launcher ADR](docs/decisions/ADR-0004-complete-core-launcher.md)
 - [Initial roadmap](docs/roadmap.md)
 
-## Phase 1
+## Delivery order
 
-Phase 1 is the Core launcher and proof of the external module boundary:
+First complete Core Home, alphabetical ordering, launching, settings navigation, accessibility, and lifecycle/failure handling. Then validate optional helper add-ons and advanced contexts. External Home/Drawer modules are optional presentation replacements.
 
-- Android HOME role;
-- module discovery/IPC;
-- capability routing;
-- contexts and instances;
-- app repository;
-- minimal security/grants;
-- Minimal Home, Basic Drawer, and Alphabetical Sort reference modules.
-
-Automation, Python, MCP script authoring, and terminal capabilities are deliberately later phases. Phase 1 must only ensure its contracts do not prevent them.
+Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). These specifications describe the target; the current implementation still needs baseline Home work.

@@ -1,23 +1,23 @@
 # Modular — Product Specification
 
-Status: **Initial specification**
+Status: **Revised product direction — complete Core launcher (2026-11-04)**
 
 This document captures the product intent established before implementation. Items marked **Open** are deliberately unresolved rather than guessed.
 
 ## 1. Product vision
 
-Modular is an Android replacement launcher whose base application is a barebones framework. The launcher itself provides only the infrastructure necessary to host, compose, configure, secure, and route between modules.
+Modular is a complete, minimal Android launcher. Installing the Core APK provides a usable Home screen with an alphabetical app list and app launching. Add-ons provide optional helper functions, integrations, and enhancements.
 
-Visible launcher features are modules.
-
-The goal is not a monolithic launcher with an extension API added later. Modularity is the primary product model.
+Core usability never depends on installing or configuring an add-on. See [ADR-0004](../decisions/ADR-0004-complete-core-launcher.md).
 
 ## 2. Core requirements
 
 Core shall provide:
 
 - Android HOME/default-launcher integration.
-- a minimal settings surface.
+- a production Home screen with a vertical alphabetical app list, app icons, profile identification, and tap-to-launch.
+- built-in locale-aware alphabetical ordering.
+- a secondary settings surface and reliable Home/Back navigation.
 - module discovery, registration, enable/disable, compatibility validation, and removal from the active configuration.
 - module-instance configuration.
 - capability registration and routing.
@@ -26,18 +26,17 @@ Core shall provide:
 - persistent Core state.
 - context creation, storage, selection, and activation.
 - security policy and capability grants.
-- MCP brokering.
+- a policy boundary for optional, later-phase MCP brokering.
 - shared Android launcher abstractions where one authoritative system view is preferable, including application discovery/launching.
 
-Core shall not directly implement a production app drawer, rich home screen, app sorting strategy, terminal, script library, automation rule engine, weather, integrations, or similar end-user features.
+Core owns the complete baseline launcher, including Home, app discovery, alphabetical ordering, launching, settings, accessibility, and recovery. Terminal, script runtimes, automation, weather, integrations, and richer presentation are optional add-ons. A separate app drawer is not required: the default Home is the app list.
 
 ## 3. Modules established so far
 
 Initial module concepts include:
 
-- Home surface.
-- App drawer surface.
-- App sorting.
+- Optional alternative Home or drawer presentation.
+- Alternative app sorting.
 - App filtering/classification.
 - Context switching/automation.
 - Terminal.
@@ -90,7 +89,7 @@ Example:
 - work-oriented sorting
 - work scripts/integrations
 
-Contexts shall be manually switchable.
+Contexts are optional advanced configuration and shall be manually switchable when configured. Core initializes a default configuration automatically; basic use requires no context or module instance setup. Activation validates the new configuration before committing and preserves the previous usable configuration on failure.
 
 Automation modules may request a context change based on conditions such as time. Future trigger providers may include other device signals, subject to Android permissions and user policy.
 
@@ -111,7 +110,7 @@ The model must be capable of representing:
 - enabled/available state;
 - changes over time.
 
-Filtering, tagging, grouping, searching, and sorting are modular transformations over the shared model.
+Alphabetical ordering is built into Core. Optional filtering, tagging, grouping, searching, and alternative sorting extend the shared model.
 
 Android's `LauncherApps` API is the primary platform abstraction to evaluate for profile-aware launcher operations.
 
@@ -135,11 +134,11 @@ For launcher-embedded surfaces, the initial architectural direction is a version
 
 A module may own separate Android Activities for module-specific administration where appropriate, but the primary Home/Drawer composition must remain governed by the launcher contract.
 
-The precise v0 surface schema is **Open** and requires a focused design spike before implementation.
+The external surface schema requires a focused design spike before external UI add-ons are implemented. It does not gate Core Home, which is trusted application UI. Initial external nodes should cover bounded lists, app rows, actions, loading/error states, accessibility, and incremental updates.
 
 ## 9. MCP product requirements
 
-Core provides an MCP broker/policy boundary.
+MCP is optional and deferred until the complete local launcher works. Core provides its policy boundary when enabled; no network listener or remote exposure is enabled merely by installing Core.
 
 MCP use cases include:
 
@@ -169,20 +168,21 @@ Potential future providers include:
 
 No elevated backend is assumed by this specification.
 
-Script-language/runtime selection is intentionally deferred. Shell commands, JavaScript/Lua-style embedded runtimes, or other engines may be evaluated later as module implementations without changing Core.
+Python is the preferred first optional scripting runtime, consistent with ADR-0003 and the automation specification. Additional runtimes may be added through the same contract.
 
-## 11. Initial UX
+## 11. Baseline Home and navigation
 
-A fresh installation may legitimately show no launcher content until a surface module is available.
-
-Minimum UX:
-
-- Settings
-- Modules
-- Contexts
-- diagnostics/status
-
-Reference modules should be supplied during development so the product remains usable while preserving the architectural rule that those features are not Core.
+- Installing only the Core APK shall provide Home without a network connection, account, extra APK, optional permission, or setup wizard.
+- Cold launch and explicit app-icon or Android HOME intents shall show Home. A non-blocking Make default action may request the Android HOME role.
+- Home is a vertically scrolling list of launchable activities, sorted by displayed label using the device locale. Equal labels have deterministic component/profile tie-breakers.
+- Each row displays an icon and label, identifies the profile where needed, and launches the exact component in that profile. Duplicate labels must not collapse distinct activities.
+- Disabled or unavailable activities must not appear actionable. Paused profiles and launch failures receive clear feedback without crashing Home or bypassing Android restrictions.
+- Package and profile changes refresh the list. Loading, empty catalog, and discovery failure are distinct states; failures offer retry.
+- Settings is explicitly reachable from Home. Back from Settings returns to Home. Back on baseline Home leaves Home visible. A HOME intent while Settings is open returns to Home, including reuse of the existing activity.
+- Ordinary return from a launched app preserves Home scroll position where possible. Rotation/process recreation restores appropriate UI state; a newly delivered HOME or app-icon intent takes precedence and shows Home.
+- TalkBack semantics, large text, adequate touch targets, contrast, and system insets are baseline requirements.
+- Optional add-on failure shall retain or restore built-in Home and alphabetical ordering. Settings and add-on disable controls remain reachable.
+- Search, favorites, an alphabet index, widgets, themes, and alternative layouts are optional enhancements; no separate drawer is required for baseline acceptance.
 
 ## 12. Non-goals for the first implementation slice
 
@@ -200,20 +200,17 @@ The first slice does not need:
 - weather;
 - cloud account system.
 
-The first slice exists to prove that the module boundary is real.
+The first slice delivers a complete, reliable Core launcher. External add-on proof follows baseline acceptance.
 
-## 13. First architecture acceptance scenario
+## 13. Acceptance
 
-The architecture is considered proven when a build can:
+1. Install only the Core APK with no network and no add-ons. Open it and launch an app from the alphabetical Home list.
+2. Set Modular as default. HOME from another app and from Settings shows Home.
+3. Verify locale ordering, duplicate labels, exact activity/profile launch, unavailable profiles, and launch-error feedback.
+4. Install, remove, and rename apps; verify the displayed catalog updates.
+5. Verify rotation, process recreation, repeated HOME intents, and accessible navigation with TalkBack and large text.
+6. Disable, remove, crash, or revoke authority from an optional add-on. Built-in Home, app launching, and Settings remain usable.
+7. Attempt an invalid context activation; verify the previous usable configuration survives.
+8. Separately prove a helper add-on can negotiate the versioned contract and be enabled, replaced, and removed without changing Core source.
 
-1. become the Android HOME application;
-2. discover separately packaged reference modules;
-3. activate a Home module instance;
-4. obtain the app model from Core;
-5. pass it through an alphabetical Sort capability;
-6. render it through a basic Drawer surface;
-7. create two independently configured drawer instances;
-8. switch between Personal and Work contexts without rebuilding Core;
-9. disable/replace a module without modifying Core source.
-
-MCP follows after the local capability boundary is demonstrated.
+These are required outcomes, not claims that the current implementation already passes.

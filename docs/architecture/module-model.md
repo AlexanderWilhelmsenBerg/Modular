@@ -1,12 +1,12 @@
 # Module Model and Contract
 
-Status: **Initial contract direction**
+Status: **Contract direction aligned with complete Core launcher — 2026-11-04**
 
 ## 1. Terminology
 
 ### Module package
 
-An independently installable Android APK that implements the Modular service contract.
+An optional independently installable Android APK that implements the Modular service contract. The complete Core launcher is usable without any module packages. Built-in Home and alphabetical ordering are Core components, not required external modules.
 
 ### Module provider
 
@@ -22,7 +22,7 @@ A named, versioned behavior contract.
 
 ### Context
 
-A named composition of module instances.
+An optional named composition of Core settings and module instances. A default Core configuration exists without module instances.
 
 ## 2. Discovery
 
@@ -90,15 +90,15 @@ This is conceptual, not final AIDL syntax.
 
 ## 6. Capability composition
 
-Core builds pipelines by capability.
+Core can extend its built-in behavior with optional capability pipelines. The default path uses Core's app repository, alphabetical ordering, and Home.
 
 Example:
 
 ```text
 apps source
-   → filter instance
-   → sort instance
-   → drawer surface instance
+   → optional filter instance
+   → optional sort instance (built-in alphabetical default)
+   → Core Home (optional external surface replacement)
 ```
 
 A module may implement several related capabilities, but Core does not require them to be bundled.
@@ -113,7 +113,7 @@ Sensitive module-owned secrets should not be copied into generic Core configurat
 
 ## 8. UI-capable modules
 
-For embedded launcher surfaces, modules return a declarative, versioned surface model rather than arbitrary executable UI.
+Core Home is trusted built-in UI. Optional external presentation modules return a declarative, versioned surface model rather than arbitrary executable UI.
 
 Desired properties:
 
@@ -160,7 +160,7 @@ Core must handle:
 
 A failed optional module should degrade the affected capability rather than crash the launcher.
 
-Recovery behavior for a missing required home surface is **Open**. A safe minimal fallback/recovery screen in Core is likely necessary even though it must not become a full Home implementation.
+Core shall restore its production built-in Home and alphabetical ordering if an optional surface or helper fails. No external Home provider is required. Settings remains reachable, invalid output is rejected, and failed context activation preserves the previous usable configuration. Provider removal or revocation must not leave a blank screen or diagnostics-only launcher.
 
 ## 11. Module development language
 

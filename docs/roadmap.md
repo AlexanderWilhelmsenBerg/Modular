@@ -1,56 +1,41 @@
-# Initial Roadmap
+# Delivery Roadmap
 
-This is sequencing, not a release-date commitment.
+This is sequencing, not a release-date commitment. Target requirements are defined in the product specification and ADR-0004; listing a feature here does not mean it is implemented.
 
-## Phase 0 — Architecture and contracts
+## Phase 0 — Align the product boundary
 
-- product specification;
-- language/toolchain decisions;
-- Core/module protocol design;
-- module discovery contract;
-- AIDL handshake design;
-- capability identifiers/versioning;
-- process-death behavior;
-- declarative Surface Protocol design spike;
-- caller identity/security design spike;
-- automation/scripting boundary.
+- Complete Core launcher; optional helper add-ons.
+- Define Home/navigation, app identity, accessibility, and recovery acceptance.
+- Preserve versioned IPC and security contracts for external add-ons.
 
-Exit: implementation-ready contracts for the first Core slice.
+## Phase 1 — Complete and reliable Core
 
-## Phase 1 — Core launcher and module proof
+- Built-in Home with one vertical app list, icons, and profile identification.
+- Built-in locale-aware alphabetical ordering and exact activity/profile launching.
+- Non-blocking Android HOME role request.
+- Settings navigation and cold/warm HOME intent handling.
+- Loading, empty, unavailable-profile, and failure states.
+- Package/profile updates, rotation, process recreation, and scroll restoration.
+- TalkBack, large text, touch targets, contrast, and system insets.
+- Default configuration without external modules or manual context creation.
 
-Build the launcher kernel first.
+Acceptance: install only Core offline; open Home, launch apps, use Settings/Back/HOME, and pass product-spec acceptance cases 1–5. No external surface protocol is a prerequisite.
 
-### Core
+## Phase 1b — Optional add-on reliability
 
-- Android HOME role.
-- Core settings/recovery surface.
-- Module Registry.
-- Capability Router.
-- Instance Store.
-- Context Manager.
-- App Repository using launcher APIs.
-- event bus.
-- base security/grant infrastructure.
+- Validate existing registry, routing, grants, events, and instance infrastructure.
+- Demonstrate an optional helper such as alternative sorting/filtering.
+- Retain the existing Alphabetical Sort APK as an optional IPC contract example.
+- Handle provider death/removal, timeouts, invalid output, incompatible updates, and revocation with usable built-in Home.
+- Validate context activation atomically; preserve the previous usable configuration on failure.
 
-### Reference modules
-
-- Minimal Home.
-- Basic App Drawer.
-- Alphabetical Sort.
-
-### Acceptance
-
-- separate APK modules negotiate the versioned contract;
-- apps can be displayed/launched through modules rather than Core-owned drawer logic;
-- Work and Personal can be separate instances of the same Drawer module;
-- manual context switching changes active composition;
-- module process death/removal is recoverable;
-- Core does not need modification to replace a reference capability provider.
+Acceptance: product-spec cases 6–8; external add-ons remain separately packaged and subject to live grant checks.
 
 ## Phase 2 — Module UX and richer composition
 
 - module configuration schemas.
+- bounded external surface protocol and optional alternative Home/Drawer modules.
+- optional search, favorites, alphabet index, and alternative layouts.
 - richer instance configuration.
 - add/remove/enable/disable flows.
 - compatibility UX.

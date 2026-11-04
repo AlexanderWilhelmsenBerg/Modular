@@ -17,6 +17,8 @@ Two broad Android options are:
 
 Use **independently installed Android APKs** as the primary plugin model.
 
+Scope clarification (2026-11-04): this governs optional external add-ons. Core's production Home and alphabetical ordering ship in the main APK, as established by [ADR-0004](ADR-0004-complete-core-launcher.md).
+
 Use **Binder/AIDL** for Core-to-module IPC.
 
 Do not use Play Dynamic Feature modules as the public plugin architecture.
@@ -58,7 +60,7 @@ A third-party module must not depend on Core dynamically loading Kotlin classes 
 
 Arbitrary Compose lambdas/classes cannot be the cross-process UI contract.
 
-Embedded Home/Drawer modules therefore need a declarative surface protocol or another explicitly designed remote-surface mechanism.
+Optional external Home/Drawer modules therefore need a declarative surface protocol or another explicitly designed remote-surface mechanism.
 
 v0 should prefer a small declarative protocol because it is inspectable, versionable, testable, and compatible with Core-side policy/accessibility rendering.
 

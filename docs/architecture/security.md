@@ -6,7 +6,7 @@ Status: **Phase-1 base security/grant infrastructure implemented; richer policy 
 
 Every external module APK is outside Core's process and UID trust boundary.
 
-Installation does not imply unrestricted authority.
+Installation does not imply unrestricted authority. Built-in Home and alphabetical ordering are trusted Core code and require no external module grant. This distinction does not exempt official external APKs from identity and grant checks.
 
 Core treats module identity, requested capabilities, and granted capabilities as separate concepts.
 
@@ -129,4 +129,4 @@ Security failures fail closed:
 - malformed payload → reject;
 - ambiguous caller identity → reject.
 
-The launcher should continue to provide a recovery/settings path when possible.
+Denied or failed optional capabilities must leave the production built-in Home, app launching, and Settings usable. Falling back to Core does not restore a revoked external grant or silently re-enable a failed module.

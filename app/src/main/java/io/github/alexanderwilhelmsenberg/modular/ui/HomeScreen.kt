@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import java.text.Collator
-import java.util.Locale
+import androidx.compose.ui.platform.LocalConfiguration
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,8 +61,9 @@ fun HomeScreen(
             }
         }
     }
-    val sortedApps = remember(catalog.apps, Locale.getDefault()) {
-        val collator = Collator.getInstance(Locale.getDefault())
+    val locale = LocalConfiguration.current.locales[0]
+    val sortedApps = remember(catalog.apps, locale) {
+        val collator = Collator.getInstance(locale)
         collator.strength = Collator.PRIMARY
         catalog.apps.sortedWith { left, right ->
             val byLabel = collator.compare(left.label, right.label)

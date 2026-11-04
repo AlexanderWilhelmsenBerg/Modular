@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <queries>
+        <!-- Discover launchable apps beyond packages automatically visible to Core. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
         <intent>
             <action android:name="io.github.alexanderwilhelmsenberg.modular.action.MODULE" />
         </intent>
@@ -32,3 +37,4 @@
     </application>
 
 </manifest>
+

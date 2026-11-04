@@ -10,7 +10,7 @@ This is sequencing, not a release-date commitment. Target requirements are defin
 
 ## Phase 1 — Complete and reliable Core
 
-- Built-in Home with one vertical app list, icons, and profile identification.
+- Built-in Home with one vertical text-only app list.
 - Built-in locale-aware alphabetical ordering and exact activity/profile launching.
 - Non-blocking Android HOME role request.
 - Settings navigation and cold/warm HOME intent handling.
@@ -130,3 +130,4 @@ Terminal is not the Python scripting architecture and must not become a shortcut
 - optional desktop module-development/test tooling;
 - additional script-runtime profiles;
 - isolated execution for untrusted third-party scripts.
+

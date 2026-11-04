@@ -7,7 +7,7 @@
 Installing the Core APK provides:
 
 - a Home screen with a vertical alphabetical app list;
-- app icons, profile-aware discovery, and tap-to-launch;
+- text-only app names, profile-aware discovery, and tap-to-launch;
 - Android HOME integration;
 - secondary Settings and reliable recovery;
 - accessibility and automatic app-list updates.
@@ -79,3 +79,6 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 First complete Core Home, alphabetical ordering, launching, settings navigation, accessibility, and lifecycle/failure handling. Then validate optional helper add-ons and advanced contexts. External Home/Drawer modules are optional presentation replacements.
 
 Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). These specifications describe the target; the current implementation still needs baseline Home work.
+
+Product clarification (2026-11-04): default Home rows contain only app-name text. Icons and profile labels require an explicitly enabled presentation add-on. Core retains profile identity internally for correct launching.
+

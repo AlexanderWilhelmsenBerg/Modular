@@ -1,7 +1,5 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
-import android.content.pm.LauncherApps
-import android.os.UserManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -24,7 +22,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
@@ -45,22 +42,6 @@ fun HomeScreen(
     showMakeDefault: Boolean = true,
     listState: LazyListState = rememberLazyListState(),
 ) {
-    val context = LocalContext.current
-    val userManager = remember(context) { context.getSystemService(UserManager::class.java) }
-    val launcherApps = remember(context) { context.getSystemService(LauncherApps::class.java) }
-    val primarySerial = remember(userManager) {
-        runCatching { userManager?.getSerialNumberForUser(android.os.Process.myUserHandle()) }
-            .getOrNull()
-    }
-    val profiles = remember(catalog.profiles, primarySerial) {
-        catalog.profiles.associate { profile ->
-            profile.serialNumber to when {
-                profile.quietModeEnabled -> "Work profile · paused"
-                profile.serialNumber == primarySerial -> "Personal profile"
-                else -> "Profile ${profile.serialNumber}"
-            }
-        }
-    }
     val locale = LocalConfiguration.current.locales[0]
     val sortedApps = remember(catalog.apps, locale) {
         val collator = Collator.getInstance(locale)
@@ -120,15 +101,10 @@ fun HomeScreen(
                     }
                 }
                 items(sortedApps, key = { it.key.stableId }) { app ->
-                    val profileName = profiles[app.key.profileSerial] ?: "Other profile"
                     val quiet = catalog.profiles.firstOrNull { it.serialNumber == app.key.profileSerial }?.quietModeEnabled == true
                     HomeAppRow(
                         app = app,
-                        profileName = profileName,
-                        launcherApps = launcherApps,
-                        userManager = userManager,
                         enabled = app.enabled && !quiet,
-                        catalogGeneration = catalog.generation,
                         onClick = { onLaunch(app) },
                     )
                 }

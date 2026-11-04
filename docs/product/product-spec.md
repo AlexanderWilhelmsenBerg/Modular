@@ -15,7 +15,7 @@ Core usability never depends on installing or configuring an add-on. See [ADR-00
 Core shall provide:
 
 - Android HOME/default-launcher integration.
-- a production Home screen with a vertical alphabetical app list, app icons, profile identification, and tap-to-launch.
+- a production Home screen with a vertical alphabetical text-only app list and tap-to-launch.
 - built-in locale-aware alphabetical ordering.
 - a secondary settings surface and reliable Home/Back navigation.
 - module discovery, registration, enable/disable, compatibility validation, and removal from the active configuration.
@@ -97,7 +97,7 @@ Core exposes context activation. Trigger logic remains outside Core.
 
 ## 6. Application model
 
-Core owns an application repository abstraction over Android launcher APIs.
+Core owns an application repository abstraction over Android launcher APIs. Its package visibility declaration must cover MAIN/LAUNCHER activities so ordinary installed launchable apps are discoverable, not only automatically visible system packages. The baseline must not apply a fixed app-count limit or optional filter. Android profile access restrictions still apply.
 
 Modules consume a stable app model rather than directly defining independent package-discovery behavior.
 
@@ -175,7 +175,7 @@ Python is the preferred first optional scripting runtime, consistent with ADR-00
 - Installing only the Core APK shall provide Home without a network connection, account, extra APK, optional permission, or setup wizard.
 - Cold launch and explicit app-icon or Android HOME intents shall show Home. A non-blocking Make default action may request the Android HOME role.
 - Home is a vertically scrolling list of launchable activities, sorted by displayed label using the device locale. Equal labels have deterministic component/profile tie-breakers.
-- Each row displays an icon and label, identifies the profile where needed, and launches the exact component in that profile. Duplicate labels must not collapse distinct activities.
+- Each default row displays only the app name and launches the exact component in its profile. Icons, profile subtitles, badges, and grouping are opt-in add-on presentation; Core must not show them by default. Profile identity remains internal for correct launching and availability checks. Duplicate labels must not collapse distinct activities.
 - Disabled or unavailable activities must not appear actionable. Paused profiles and launch failures receive clear feedback without crashing Home or bypassing Android restrictions.
 - Package and profile changes refresh the list. Loading, empty catalog, and discovery failure are distinct states; failures offer retry.
 - Settings is explicitly reachable from Home. Back from Settings returns to Home. Back on baseline Home leaves Home visible. A HOME intent while Settings is open returns to Home, including reuse of the existing activity.
@@ -214,3 +214,4 @@ The first slice delivers a complete, reliable Core launcher. External add-on pro
 8. Separately prove a helper add-on can negotiate the versioned contract and be enabled, replaced, and removed without changing Core source.
 
 These are required outcomes, not claims that the current implementation already passes.
+

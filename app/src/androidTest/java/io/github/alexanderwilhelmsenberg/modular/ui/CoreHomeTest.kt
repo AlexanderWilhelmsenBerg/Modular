@@ -1,6 +1,12 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.onAllNodes
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -141,6 +147,27 @@ class CoreHomeTest {
         composeRule.onNodeWithText("Repository unavailable").assertIsDisplayed()
         composeRule.onNodeWithTag("home-retry").performClick()
         composeRule.runOnIdle { assertEquals(1, refreshes) }
+    }
+
+    @Test
+    fun defaultRowsContainOnlyAppNameText() {
+        val entry = app("plain.pkg", "Plain app")
+        composeRule.setContent {
+            HomeScreen(
+                catalog = AppCatalog(apps = listOf(entry), profiles = listOf(AppProfile(0L, false))),
+                onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+            )
+        }
+        composeRule.onAllNodes(
+            hasAnyAncestor(hasTestTag("app-row:${entry.key.stableId}")) and
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.Text),
+            useUnmergedTree = true,
+        ).assertCountEquals(1)
+        composeRule.onAllNodes(
+            hasAnyAncestor(hasTestTag("app-row:${entry.key.stableId}")) and
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription),
+            useUnmergedTree = true,
+        ).assertCountEquals(0)
     }
 
     private fun app(

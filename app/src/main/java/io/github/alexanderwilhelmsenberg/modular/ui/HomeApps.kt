@@ -30,7 +30,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import kotlinx.coroutines.Dispatchers
@@ -43,11 +42,12 @@ internal fun HomeAppRow(
     launcherApps: LauncherApps?,
     userManager: UserManager?,
     enabled: Boolean,
+    catalogGeneration: Long,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
     var iconBitmap by remember(app.key.stableId) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(app.key.stableId, launcherApps, userManager) {
+    LaunchedEffect(app.key.stableId, catalogGeneration, launcherApps, userManager) {
         iconBitmap = withContext(Dispatchers.IO) {
             runCatching {
                 val user = userManager?.getUserForSerialNumber(app.key.profileSerial)
@@ -103,8 +103,10 @@ internal fun HomeAppRow(
             }
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(app.label, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val detail = if (app.loadingProgress != null && app.loadingProgress < 1f) {
+            Text(app.label, style = MaterialTheme.typography.bodyLarge)
+            val detail = if (!enabled) {
+                "$profileName · Unavailable"
+            } else if (app.loadingProgress != null && app.loadingProgress < 1f) {
                 "$profileName · Installing"
             } else {
                 profileName

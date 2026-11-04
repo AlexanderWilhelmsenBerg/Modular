@@ -150,51 +150,51 @@ class MainActivity : ComponentActivity() {
                     onOpenSettings = { settingsVisible = true },
                 )
             } else {
-            val securityStatuses = modules.map { module ->
-                val requested =
-                    module.requestedCoreCapabilities
-                        .mapNotNull { wireValue ->
-                            CapabilityId.parse(wireValue)
+                val securityStatuses = modules.map { module ->
+                    val requested =
+                        module.requestedCoreCapabilities
+                            .mapNotNull { wireValue ->
+                                CapabilityId.parse(wireValue)
+                            }
+                            .toSet()
+
+                    securityManager.status(
+                        packageName =
+                            module.component.packageName,
+                        requestedCapabilities = requested,
+                    )
+                }
+
+                ModularApp(
+                    onBack = { settingsVisible = false },
+                    homeRoleAvailable = homeRoleAvailable,
+                    homeRoleHeld = homeRoleHeld,
+                    modules = modules,
+                    appCatalog = appCatalog,
+                    instances = instances,
+                    contexts = contexts,
+                    activeContext = activeContext,
+                    compositionLoadError = compositionLoadError,
+                    contextActivationError = activationError,
+                    eventBusDiagnostics = eventDiagnostics,
+                    moduleSecurity = securityStatuses,
+                    grantRecordCount =
+                        grantState.records.size,
+                    grantLoadError = grantLoadError,
+                    onRequestHomeRole = ::requestHomeRole,
+                    onRefreshModules = moduleRegistry::refresh,
+                    onRefreshApps = appRepository::refresh,
+                    onActivateContext = { contextId ->
+                        lifecycleScope.launch {
+                            contextManager.activate(contextId)
                         }
-                        .toSet()
-
-                securityManager.status(
-                    packageName =
-                        module.component.packageName,
-                    requestedCapabilities = requested,
+                    },
+                    onDeactivateContext = {
+                        lifecycleScope.launch {
+                            contextManager.deactivate()
+                        }
+                    },
                 )
-            }
-
-            ModularApp(
-                onBack = { settingsVisible = false },
-                homeRoleAvailable = homeRoleAvailable,
-                homeRoleHeld = homeRoleHeld,
-                modules = modules,
-                appCatalog = appCatalog,
-                instances = instances,
-                contexts = contexts,
-                activeContext = activeContext,
-                compositionLoadError = compositionLoadError,
-                contextActivationError = activationError,
-                eventBusDiagnostics = eventDiagnostics,
-                moduleSecurity = securityStatuses,
-                grantRecordCount =
-                    grantState.records.size,
-                grantLoadError = grantLoadError,
-                onRequestHomeRole = ::requestHomeRole,
-                onRefreshModules = moduleRegistry::refresh,
-                onRefreshApps = appRepository::refresh,
-                onActivateContext = { contextId ->
-                    lifecycleScope.launch {
-                        contextManager.activate(contextId)
-                    }
-                },
-                onDeactivateContext = {
-                    lifecycleScope.launch {
-                        contextManager.deactivate()
-                    }
-                },
-            )
             }
         }
     }

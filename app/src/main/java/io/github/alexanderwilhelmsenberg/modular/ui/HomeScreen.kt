@@ -127,6 +127,7 @@ fun HomeScreen(
                         launcherApps = launcherApps,
                         userManager = userManager,
                         enabled = app.enabled && !quiet,
+                        catalogGeneration = catalog.generation,
                         onClick = { onLaunch(app) },
                     )
                 }

@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
 import android.content.Intent
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -37,7 +38,10 @@ class CoreNavigationTest {
                 .addCategory(Intent.CATEGORY_HOME)
                 .setClass(composeRule.activity, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            composeRule.activity.startActivity(homeIntent)
+            // Deliver to the existing activity without turning the test task into
+            // Android's HOME task, which ActivityScenario cannot tear down.
+            InstrumentationRegistry.getInstrumentation()
+                .callActivityOnNewIntent(composeRule.activity, homeIntent)
         }
 
         composeRule.onNodeWithText("Apps").assertIsDisplayed()

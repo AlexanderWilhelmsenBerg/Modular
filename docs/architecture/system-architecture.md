@@ -1,12 +1,12 @@
 # System Architecture
 
-Status: **Initial architecture**
+Status: **Revised for complete Core launcher — 2026-11-04**
 
 ## 1. Architectural style
 
 Modular uses a microkernel/plugin architecture adapted to Android's application sandbox.
 
-Core is the microkernel. Modules are independently installed Android applications that communicate with Core over a versioned IPC contract.
+Core contains the complete baseline launcher and an extension kernel. Built-in Home, alphabetical ordering, launching, Settings, accessibility, and recovery ship in the Core APK as trusted application code. Add-ons are independently installed Android applications communicating over versioned IPC. See ADR-0004.
 
 ```text
 Android
@@ -16,6 +16,8 @@ Android
 │              Modular Core             │
 │                                       │
 │ HOME role / lifecycle                 │
+│ Built-in Home / alphabetical list     │
+│ Settings / accessibility / recovery   │
 │ Module Registry                       │
 │ Capability Router                     │
 │ Instance Store                        │
@@ -24,19 +26,19 @@ Android
 │ Event Bus                             │
 │ Security / Grants                     │
 │ Surface Renderer                      │
-│ MCP Broker                            │
+│ MCP policy boundary (optional)        │
 └───────────────┬───────────────────────┘
                 │ Binder/AIDL
        ┌────────┼─────────────┐
        ▼        ▼             ▼
-    Home APK  Drawer APK   Sort APK ...
+    Filter APK  Helper APK   Sort APK ...
 ```
 
 ## 2. Core components
 
 ### Home integration
 
-Core qualifies for and requests Android's HOME role and provides the Activity/lifecycle required of the default launcher.
+Core qualifies for and requests Android's HOME role and provides the Activity/lifecycle required of the default launcher. Cold launch, app-icon launch, and HOME intents route to built-in Home by default. Settings is secondary. New intents must also route an already-running activity to Home. Default-role setup never blocks the app list.
 
 ### Module Registry
 
@@ -46,7 +48,7 @@ Discovers compatible module services, performs handshake/version checks, records
 
 Resolves a requested capability to an enabled provider/instance.
 
-Examples:
+Illustrative shorthand follows; wire identifiers use the namespaced, versioned form documented in module-model.md (for example `modular.apps.sort/v1`). These examples do not claim every capability is implemented.
 
 - `surface.home`
 - `surface.drawer`
@@ -74,7 +76,7 @@ An instance contains:
 
 ### Context Manager
 
-Stores named launcher compositions and atomically activates one.
+Stores optional named launcher compositions and atomically activates one after validation. Initialize a default configuration without external providers. Failed activation preserves the previous usable configuration; missing providers cannot prevent baseline Home.
 
 Core owns the current-context state. Modules may request activation when granted the capability; they do not mutate Core storage directly.
 
@@ -102,36 +104,23 @@ Renders a versioned declarative surface model returned by UI-capable modules.
 
 The module describes presentation/state/actions. Core performs the actual embedded launcher rendering.
 
-Full details are deferred to the Surface Protocol design spike.
+This renderer is for optional external UI. Core Home does not depend on external surface negotiation. Before enabling external surfaces, specify bounded list/app-row/action nodes, resource policy, accessibility, updates, timeouts, and validation.
 
 ### MCP Broker
 
 Maps explicitly exported, policy-approved launcher/module capabilities into MCP tools/resources and can host MCP client connections on behalf of modules/policies.
 
-MCP is not the internal plugin transport.
+MCP is optional and deferred; baseline launching works without it or network access. It is not the internal plugin transport.
 
-## 3. Data flow example: app drawer
+## 3. Baseline and optional data flows
 
-```text
-LauncherApps
-    │
-    ▼
-Core App Repository
-    │
-    ▼
-Work Filter instance
-    │
-    ▼
-Alphabetical Sort instance
-    │
-    ▼
-Basic Drawer instance
-    │
-    ▼
-Core Surface Renderer
-```
+Baseline: Android LauncherApps → Core App Repository → built-in locale-aware alphabetical ordering → Core Home → profile-aware launch.
 
-A Personal context can use the same Drawer module with a different filter and sorter.
+Optional: Core App Repository → enabled filter/sort helper → Core Home. External surface replacements may be supported later through the declarative protocol.
+
+Keep presentation and ordering internally separated for testing and extension. Do not require Binder, another APK, or an external grant for built-in behavior. The existing Alphabetical Sort APK remains an optional contract example.
+
+On helper failure, reject invalid output and restore built-in ordering/presentation. On external surface failure, restore built-in Home with a concise notice and reachable Settings. Do not make optional service startup block the first Home render.
 
 ## 4. Process model
 
@@ -215,4 +204,6 @@ Before production implementation, resolve:
 5. capability grant persistence and UX;
 6. module update compatibility behavior;
 7. package distribution/install UX;
-8. whether any official modules should also be build-time modules for recovery/fallback purposes while still using the public contract.
+8. external surface replacement UX and bounded failure-recovery timing.
+
+Resolved by ADR-0004: baseline Home and alphabetical ordering are built into Core. External surface design and distribution questions do not block baseline delivery.

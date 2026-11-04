@@ -1,6 +1,11 @@
 package io.github.alexanderwilhelmsenberg.modular
 
 import android.os.Bundle
+import android.content.Intent
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.lazy.rememberLazyListState
+import io.github.alexanderwilhelmsenberg.modular.ui.HomeScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -44,6 +49,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var securityManager:
         ModuleSecurityManager
 
+    private var settingsVisible by mutableStateOf(false)
+
     private var homeRoleAvailable by mutableStateOf(false)
     private var homeRoleHeld by mutableStateOf(false)
 
@@ -56,6 +63,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        settingsVisible = savedInstanceState?.getBoolean("settingsVisible") ?: false
 
         homeRoleController = HomeRoleController(this)
         appRepository = AndroidAppRepository(this)
@@ -121,6 +129,27 @@ class MainActivity : ComponentActivity() {
             val grantLoadError by
                 grantStore.loadError.collectAsState()
 
+            val homeListState = rememberLazyListState()
+            BackHandler { settingsVisible = false }
+
+            if (!settingsVisible) {
+                HomeScreen(
+                    catalog = appCatalog,
+                    listState = homeListState,
+                    showMakeDefault = homeRoleAvailable && !homeRoleHeld,
+                    onLaunch = { app ->
+                        lifecycleScope.launch {
+                            appRepository.launch(app.key).onFailure {
+                                Toast.makeText(this@MainActivity, "Unable to open ${app.label}", Toast.LENGTH_LONG).show()
+                                appRepository.refresh()
+                            }
+                        }
+                    },
+                    onRefresh = appRepository::refresh,
+                    onMakeDefault = ::requestHomeRole,
+                    onOpenSettings = { settingsVisible = true },
+                )
+            } else {
             val securityStatuses = modules.map { module ->
                 val requested =
                     module.requestedCoreCapabilities
@@ -137,6 +166,7 @@ class MainActivity : ComponentActivity() {
             }
 
             ModularApp(
+                onBack = { settingsVisible = false },
                 homeRoleAvailable = homeRoleAvailable,
                 homeRoleHeld = homeRoleHeld,
                 modules = modules,
@@ -165,6 +195,21 @@ class MainActivity : ComponentActivity() {
                     }
                 },
             )
+            }
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("settingsVisible", settingsVisible)
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == Intent.ACTION_MAIN &&
+            (intent.hasCategory(Intent.CATEGORY_HOME) || intent.hasCategory(Intent.CATEGORY_LAUNCHER))) {
+            settingsVisible = false
         }
     }
 
@@ -225,3 +270,4 @@ class MainActivity : ComponentActivity() {
             ?.let(homeRoleLauncher::launch)
     }
 }
+

@@ -52,11 +52,19 @@ fun ModularApp(
     onRefreshApps: () -> Unit,
     onActivateContext: (String) -> Unit,
     onDeactivateContext: () -> Unit,
+    onBack: () -> Unit = {},
 ) {
     MaterialTheme {
         Scaffold(
             topBar = {
-                TopAppBar(title = { Text("Modular Core") })
+                TopAppBar(
+                    title = { Text("Settings") },
+                    navigationIcon = {
+                        androidx.compose.material3.TextButton(onClick = onBack) {
+                            Text("Back")
+                        }
+                    },
+                )
             },
         ) { padding ->
             LazyColumn(
@@ -196,11 +204,8 @@ fun ModularApp(
 
                 item {
                     StatusCard(
-                        title = "Recovery surface",
-                        body = "No Home surface module is active yet. " +
-                            "This screen is Core's minimal " +
-                            "recovery/settings UI, not the " +
-                            "production home screen.",
+                        title = "Home",
+                        body = "Home is built in and works without add-ons.",
                     )
                 }
 
@@ -631,3 +636,4 @@ private fun ModuleCard(
         }
     }
 }
+

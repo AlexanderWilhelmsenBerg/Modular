@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
 import android.os.Build
 import android.os.Handler
@@ -49,7 +50,7 @@ class AndroidAppRepository(context: Context) : AppRepository {
     private var generation = 0L
     private var profileReceiverRegistered = false
 
-    private val _catalog = MutableStateFlow(AppCatalog())
+    private val _catalog = MutableStateFlow(AppCatalog(isRefreshing = true))
     override val catalog: StateFlow<AppCatalog> = _catalog.asStateFlow()
 
     private val launcherCallback = object : LauncherApps.Callback() {
@@ -62,6 +63,14 @@ class AndroidAppRepository(context: Context) : AppRepository {
         }
 
         override fun onPackageChanged(packageName: String, user: UserHandle) {
+            refresh()
+        }
+
+        override fun onPackagesSuspended(packageNames: Array<out String>, user: UserHandle) {
+            refresh()
+        }
+
+        override fun onPackagesUnsuspended(packageNames: Array<out String>, user: UserHandle) {
             refresh()
         }
 
@@ -194,7 +203,8 @@ class AndroidAppRepository(context: Context) : AppRepository {
                                 ),
                                 label = activity.label.toString(),
                                 firstInstallTime = activity.firstInstallTime,
-                                enabled = activity.applicationInfo.enabled,
+                                enabled = activity.applicationInfo.enabled &&
+                                    (activity.applicationInfo.flags and ApplicationInfo.FLAG_SUSPENDED) == 0,
                                 loadingProgress =
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                         activity.loadingProgress
@@ -221,6 +231,7 @@ class AndroidAppRepository(context: Context) : AppRepository {
 
     private fun registerProfileReceiver() {
         val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_LOCALE_CHANGED)
             addAction(Intent.ACTION_MANAGED_PROFILE_ADDED)
             addAction(Intent.ACTION_MANAGED_PROFILE_REMOVED)
             addAction(Intent.ACTION_MANAGED_PROFILE_AVAILABLE)
@@ -277,3 +288,4 @@ class AndroidAppRepository(context: Context) : AppRepository {
         val apps: List<LaunchableApp>,
     )
 }
+

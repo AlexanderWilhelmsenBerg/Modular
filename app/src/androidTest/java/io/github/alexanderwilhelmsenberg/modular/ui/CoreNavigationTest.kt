@@ -30,20 +30,23 @@ class CoreNavigationTest {
 
     @Test
     fun warmHomeIntentReturnsExistingActivityToHome() {
-        composeRule.onNodeWithTag("home-settings").performClick()
-        composeRule.onNodeWithText("Launcher role").assertIsDisplayed()
-
-        composeRule.runOnIdle {
-            val homeIntent = Intent(Intent.ACTION_MAIN)
-                .addCategory(Intent.CATEGORY_HOME)
-                .setClass(composeRule.activity, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            // Deliver to the existing activity without turning the test task into
-            // Android's HOME task, which ActivityScenario cannot tear down.
-            InstrumentationRegistry.getInstrumentation()
-                .callActivityOnNewIntent(composeRule.activity, homeIntent)
+        val originalIntent = composeRule.activity.intent
+        try {
+            composeRule.onNodeWithTag("home-settings").performClick()
+            composeRule.onNodeWithText("Launcher role").assertIsDisplayed()
+            composeRule.runOnIdle {
+                val homeIntent = Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_HOME)
+                    .setClass(composeRule.activity, MainActivity::class.java)
+                InstrumentationRegistry.getInstrumentation()
+                    .callActivityOnNewIntent(composeRule.activity, homeIntent)
+            }
+            composeRule.onNodeWithText("Apps").assertIsDisplayed()
+        } finally {
+            // ActivityScenario matches lifecycle events using its launch intent.
+            // MainActivity correctly stores HOME, so restore the harness intent
+            // only after asserting the production navigation behavior.
+            composeRule.runOnIdle { composeRule.activity.intent = originalIntent }
         }
-
-        composeRule.onNodeWithText("Apps").assertIsDisplayed()
     }
 }

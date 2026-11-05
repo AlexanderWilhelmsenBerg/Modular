@@ -9,6 +9,7 @@ enum class ModuleConnectionStatus {
     INCOMPATIBLE,
     DISCONNECTED,
     FAILED,
+    DISABLED,
 }
 
 data class ModuleRecord(
@@ -20,8 +21,10 @@ data class ModuleRecord(
     val requestedCoreCapabilities: List<String> = emptyList(),
     val sessionId: String? = null,
     val status: ModuleConnectionStatus = ModuleConnectionStatus.DISCOVERED,
+    val enabled: Boolean = true,
     val error: String? = null,
 ) {
     val label: String
         get() = moduleId ?: component.flattenToShortString()
 }
+

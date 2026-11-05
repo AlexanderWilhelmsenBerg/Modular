@@ -4,17 +4,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -27,8 +24,9 @@ import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.composition.LauncherContext
 import io.github.alexanderwilhelmsenberg.modular.composition.ModuleInstance
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventBusDiagnostics
-import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
+import io.github.alexanderwilhelmsenberg.modular.modules.ModuleManagementEvent
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,6 +51,14 @@ fun ModularApp(
     onActivateContext: (String) -> Unit,
     onDeactivateContext: () -> Unit,
     onBack: () -> Unit = {},
+    managementEvents: List<ModuleManagementEvent> = emptyList(),
+    onSetModuleEnabled: (ModuleRecord, Boolean) -> Unit = { _, _ -> },
+    onRetryModule: (ModuleRecord) -> Unit = {},
+    onUninstallModule: (ModuleRecord) -> Unit = {},
+    onSetGrant: (ModuleRecord, CapabilityId, Boolean) -> Unit = { _, _, _ -> },
+    onClearModuleEvents: () -> Unit = {},
+    compositionContent: @Composable () -> Unit = {},
+    corePackageName: String = "io.github.alexanderwilhelmsenberg.modular",
 ) {
     MaterialTheme {
         Scaffold(
@@ -75,6 +81,53 @@ fun ModularApp(
                 verticalArrangement =
                     Arrangement.spacedBy(12.dp),
             ) {
+                item {
+                    Text(
+                        "Add-on modules",
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                }
+
+                item {
+                    ModuleEventLog(
+                        events = managementEvents,
+                        modules = modules,
+                        onClear = onClearModuleEvents,
+                    )
+                }
+
+                item {
+                    androidx.compose.material3.TextButton(onClick = onRefreshModules) {
+                        Text("Refresh module list")
+                    }
+                }
+
+                items(
+                    items = modules,
+                    key = { it.component.flattenToString() },
+                ) { module ->
+                    ModuleManagementCard(
+                        module = module,
+                        securityStatus = moduleSecurity.firstOrNull {
+                            it.packageName == module.component.packageName
+                        },
+                        corePackageName = corePackageName,
+                        onSetEnabled = onSetModuleEnabled,
+                        onRetry = onRetryModule,
+                        onUninstall = onUninstallModule,
+                        onSetGrant = onSetGrant,
+                    )
+                }
+
+                if (modules.isEmpty()) {
+                    item {
+                        Text(
+                            "No compatible module services discovered.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+
                 item {
                     StatusCard(
                         title = "Launcher role",
@@ -100,106 +153,7 @@ fun ModularApp(
                 }
 
                 item {
-                    val connected = modules.count {
-                        it.status ==
-                            ModuleConnectionStatus.CONNECTED
-                    }
-
-                    StatusCard(
-                        title = "Module registry",
-                        body = modules.size.toString() +
-                            " discovered · " +
-                            connected.toString() +
-                            " connected",
-                        actionText = "Refresh",
-                        onAction = onRefreshModules,
-                    )
-                }
-
-                item {
-                    val appStatus = buildString {
-                        append(appCatalog.apps.size)
-                        append(" launchable activities · ")
-                        append(appCatalog.profiles.size)
-                        append(" profiles")
-
-                        if (appCatalog.isRefreshing) {
-                            append(" · refreshing")
-                        }
-
-                        appCatalog.lastError?.let { error ->
-                            append("\nError: ")
-                            append(error)
-                        }
-                    }
-
-                    StatusCard(
-                        title = "App repository",
-                        body = appStatus,
-                        actionText = "Refresh",
-                        onAction = onRefreshApps,
-                    )
-                }
-
-                item {
-                    CompositionStatusCard(
-                        instances = instances,
-                        contexts = contexts,
-                        activeContext = activeContext,
-                        loadError = compositionLoadError,
-                        activationError = contextActivationError,
-                        onDeactivateContext = onDeactivateContext,
-                    )
-                }
-
-                item {
-                    SecurityStatusCard(
-                        statuses = moduleSecurity,
-                        grantRecordCount = grantRecordCount,
-                        loadError = grantLoadError,
-                    )
-                }
-
-                item {
-                    EventBusStatusCard(eventBusDiagnostics)
-                }
-
-                if (contexts.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = "Contexts",
-                            style =
-                                MaterialTheme.typography.titleMedium,
-                        )
-                    }
-
-                    items(
-                        items = contexts,
-                        key = { it.id },
-                    ) { context ->
-                        ContextCard(
-                            context = context,
-                            activeContext = activeContext,
-                            onActivate = onActivateContext,
-                        )
-                    }
-                }
-
-                if (instances.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = "Saved module instances",
-                            style =
-                                MaterialTheme.typography.titleMedium,
-                        )
-                    }
-
-                    items(
-                        items = instances,
-                        key = { it.id },
-                    ) { instance ->
-                        InstanceCard(instance)
-                    }
+                    compositionContent()
                 }
 
                 item {
@@ -209,49 +163,33 @@ fun ModularApp(
                     )
                 }
 
-                if (modules.isEmpty()) {
-                    item {
-                        Text(
-                            text =
-                                "No compatible module services discovered.",
-                            style =
-                                MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                } else {
-                    item {
-                        Text(
-                            text = "Discovered modules",
-                            style =
-                                MaterialTheme.typography.titleMedium,
-                        )
-                    }
-
-                    items(
-                        items = modules,
-                        key = {
-                            it.component.flattenToString()
-                        },
-                    ) { module ->
-                        ModuleCard(
-                            module = module,
-                            securityStatus =
-                                moduleSecurity
-                                    .firstOrNull {
-                                        it.packageName ==
-                                            module.component
-                                                .packageName
-                                    },
-                        )
-                    }
+                item {
+                    DiagnosticsSection(
+                        modules = modules,
+                        appCatalog = appCatalog,
+                        instances = instances,
+                        contexts = contexts,
+                        activeContext = activeContext,
+                        compositionLoadError = compositionLoadError,
+                        contextActivationError = contextActivationError,
+                        eventBusDiagnostics = eventBusDiagnostics,
+                        moduleSecurity = moduleSecurity,
+                        grantRecordCount = grantRecordCount,
+                        grantLoadError = grantLoadError,
+                        onRefreshModules = onRefreshModules,
+                        onRefreshApps = onRefreshApps,
+                        onActivateContext = onActivateContext,
+                        onDeactivateContext = onDeactivateContext,
+                    )
                 }
+
             }
         }
     }
 }
 
 @Composable
-private fun SecurityStatusCard(
+internal fun SecurityStatusCard(
     statuses: List<ModuleSecurityStatus>,
     grantRecordCount: Int,
     loadError: String?,
@@ -295,7 +233,7 @@ private fun SecurityStatusCard(
 }
 
 @Composable
-private fun EventBusStatusCard(
+internal fun EventBusStatusCard(
     diagnostics: CoreEventBusDiagnostics,
 ) {
     val body = buildString {
@@ -320,7 +258,7 @@ private fun EventBusStatusCard(
 }
 
 @Composable
-private fun CompositionStatusCard(
+internal fun CompositionStatusCard(
     instances: List<ModuleInstance>,
     contexts: List<LauncherContext>,
     activeContext: ActiveContextState,
@@ -381,7 +319,7 @@ private fun CompositionStatusCard(
 }
 
 @Composable
-private fun ContextCard(
+internal fun ContextCard(
     context: LauncherContext,
     activeContext: ActiveContextState,
     onActivate: (String) -> Unit,
@@ -437,7 +375,7 @@ private fun ContextCard(
 }
 
 @Composable
-private fun InstanceCard(
+internal fun InstanceCard(
     instance: ModuleInstance,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -463,7 +401,7 @@ private fun InstanceCard(
 }
 
 @Composable
-private fun StatusCard(
+internal fun StatusCard(
     title: String,
     body: String,
     actionText: String? = null,
@@ -492,148 +430,3 @@ private fun StatusCard(
         }
     }
 }
-
-@Composable
-private fun ModuleCard(
-    module: ModuleRecord,
-    securityStatus: ModuleSecurityStatus?,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement =
-                Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                module.label,
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                module.component.flattenToShortString(),
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            Row(
-                horizontalArrangement =
-                    Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    "Status: " +
-                        module.status.name.lowercase(),
-                    style =
-                        MaterialTheme.typography.bodyMedium,
-                )
-                module.moduleVersion?.let { version ->
-                    Text(
-                        "Version: " + version,
-                        style =
-                            MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
-
-            module.protocolVersion?.let { version ->
-                Text(
-                    "Protocol: " + version,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-
-            if (module.capabilities.isNotEmpty()) {
-                Spacer(Modifier.height(2.dp))
-                HorizontalDivider()
-                Text(
-                    module.capabilities.joinToString(
-                        separator = "\n",
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-
-            if (module.requestedCoreCapabilities.isNotEmpty()) {
-                Spacer(Modifier.height(2.dp))
-                HorizontalDivider()
-                Text(
-                    "Requests from Core:",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    module.requestedCoreCapabilities
-                        .joinToString(separator = "\n"),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-
-            securityStatus?.let { security ->
-                val identity = security.identity
-                Text(
-                    buildString {
-                        append("Identity: ")
-                        append(
-                            if (security.sameSignerAsCore) {
-                                "official signer"
-                            } else {
-                                "external signer"
-                            },
-                        )
-
-                        identity?.signerSha256
-                            ?.firstOrNull()
-                            ?.let { digest ->
-                                append(" · ")
-                                append(digest.take(12))
-                                append("…")
-                            }
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                Text(
-                    "Effective Core grants: " +
-                        if (security.effectiveGrants.isEmpty()) {
-                            "none"
-                        } else {
-                            security.effectiveGrants
-                                .sortedBy { it.wireValue }
-                                .joinToString {
-                                    it.wireValue
-                                }
-                        },
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                if (security.unsupportedRequests.isNotEmpty()) {
-                    Text(
-                        "Unsupported requests: " +
-                            security.unsupportedRequests
-                                .sortedBy { it.wireValue }
-                                .joinToString {
-                                    it.wireValue
-                                },
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-
-                security.error?.let { error ->
-                    Text(
-                        "Security identity error: " + error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-
-            module.error?.let { error ->
-                Text(
-                    text = error,
-                    color =
-                        MaterialTheme.colorScheme.error,
-                    style =
-                        MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-    }
-}
-

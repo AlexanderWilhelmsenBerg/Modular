@@ -1,6 +1,6 @@
 # Modular — Product Specification
 
-Status: **Revised product direction — complete Core launcher (2026-11-04)**
+Status: **Core requirements and agreed follow-up specifications (2026-11-05)**
 
 This document captures the product intent established before implementation. Items marked **Open** are deliberately unresolved rather than guessed.
 
@@ -110,7 +110,7 @@ The model must be capable of representing:
 - enabled/available state;
 - changes over time.
 
-Alphabetical ordering is built into Core. Optional filtering, tagging, grouping, searching, and alternative sorting extend the shared model.
+Alphabetical ordering is built into Core. Optional filtering, tagging, grouping, and alternative sorting extend the shared model. Built-in search is an agreed follow-up requirement (section 15).
 
 Android's `LauncherApps` API is the primary platform abstraction to evaluate for profile-aware launcher operations.
 
@@ -182,7 +182,7 @@ Python is the preferred first optional scripting runtime, consistent with ADR-00
 - Ordinary return from a launched app preserves Home scroll position where possible. Rotation/process recreation restores appropriate UI state; a newly delivered HOME or app-icon intent takes precedence and shows Home.
 - TalkBack semantics, large text, adequate touch targets, contrast, and system insets are baseline requirements.
 - Optional add-on failure shall retain or restore built-in Home and alphabetical ordering. Settings and add-on disable controls remain reachable.
-- Search, favorites, an alphabet index, widgets, themes, and alternative layouts are optional enhancements; no separate drawer is required for baseline acceptance.
+- No separate drawer is required. Built-in search and theme selection are agreed follow-up Core requirements (section 15); favorites, an alphabet index, widgets, and alternative layouts remain optional enhancements.
 
 ## 12. Non-goals for the first implementation slice
 
@@ -215,3 +215,31 @@ The first slice delivers a complete, reliable Core launcher. External add-on pro
 
 These are required outcomes, not claims that the current implementation already passes.
 
+
+
+## 14. Module management and recovery
+
+These requirements complete the management surface around the existing module runtime:
+
+- Settings lists discovered services with enabled state, connection status, compatibility information, and the most recent failure reason. Enable/disable persists across Core restarts. Disabling releases the session and its Core authority while retaining saved configuration.
+- Discovery does not imply a permanent service connection. Settings may connect enabled modules for inspection; outside Settings only providers selected by the active context need a connection. Core Home needs no module. Previously unknown providers are inspected in Settings before selection.
+- Retry explicitly tears down a failed attempt and starts a fresh connection. Deadlines cover binding and handshake. Late callbacks/results cannot revive a disabled, superseded, or removed module. A blocked Binder call must not cause an unbounded sequence of retries or freeze Home.
+- A bounded, persistent local event history records timestamp, affected service/package, lifecycle stage, outcome, and actionable error details. Show newest entries first, support an errors filter, copying, and explicit clearing. Retain the latest 200 entries; exclude app catalogs, configuration payloads, and credentials. This diagnostic history is distinct from the transient launcher event bus.
+- Instance management supports creation, renaming, configuration editing, and deletion. Provider identity is immutable for an existing instance. Invalid JSON or an instance referenced by a context must produce an error without losing the saved configuration.
+- Context management supports creation, editing bindings, deletion, activation, and deactivation. Active bindings require deactivation before editing. Failed activation preserves the previous selection. Missing/disabled providers produce a visible degraded state without breaking Home.
+- Permission controls display requested, supported Core capabilities and allow explicit grants/revocations using the installed signing identity. Authority is checked live; permissions apply to the package identity, not independently to each service in the same APK.
+- “Uninstall” invokes Android's package removal confirmation and explains that every module in the APK is removed. Core cannot uninstall itself through this screen. Cancellation or platform refusal leaves the installed package and saved state intact. Refresh after returning from Android; report actual installed state rather than assuming success.
+- Disabling a module, deleting an instance/context, and uninstalling its APK are distinct operations. Uninstall does not silently erase saved instances or contexts; unresolved references remain visible and can be repaired or explicitly deleted.
+
+Acceptance: disable/re-enable and restart Core; retry a failed/blocked handshake; simulate stale callbacks, service death, and an incompatible module; restart and inspect retained events; clear history; edit invalid/referenced configuration; reject an invalid context switch; revoke permission during a session; cancel uninstall and then confirm uninstall. Home and Settings must remain reachable throughout.
+
+## 15. Agreed next phase: Home controls and themes
+
+These requirements are approved but are not part of the module-management implementation:
+
+- Remove the “Apps” title from Home.
+- Add a search control beside a settings gear icon, both with a 48 dp resting height and adequate touch targets. Search expands horizontally when focused, keeps the entered text/caret visible, and keeps Settings accessible. Keyboard Back dismisses editing before Home navigation. Clearing search restores the full alphabetical list; show an explicit no-results state.
+- Use a gear icon with the accessible label “Settings” in place of the text button.
+- Provide persisted Light, Dark, and AMOLED themes in Settings and apply them consistently to Home, Settings, dialogs, and system bars. AMOLED uses a true-black background with readable controls and text.
+- Define a bounded theme extension contract before adding themes from external add-ons. Losing an add-on theme falls back to a built-in theme without blocking Home.
+- Verify compact widths, font scaling, TalkBack, keyboard/insets, and contrast in all built-in themes. Do not add app icons or profile subtitles to the default list.

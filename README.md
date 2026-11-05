@@ -72,13 +72,14 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 - [Module packaging and IPC ADR](docs/decisions/ADR-0002-module-packaging-and-ipc.md)
 - [Automation/scripting boundary ADR](docs/decisions/ADR-0003-scripting-boundary.md)
 - [Complete Core launcher ADR](docs/decisions/ADR-0004-complete-core-launcher.md)
-- [Initial roadmap](docs/roadmap.md)
+- [Delivery roadmap](docs/roadmap.md)
+- [Module management implementation and remaining acceptance](docs/implementation/module-management.md)
 
 ## Delivery order
 
 First complete Core Home, alphabetical ordering, launching, settings navigation, accessibility, and lifecycle/failure handling. Then validate optional helper add-ons and advanced contexts. External Home/Drawer modules are optional presentation replacements.
 
-Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). These specifications describe the target; the current implementation still needs baseline Home work.
+Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). The text-only Core Home and Settings module management are implemented. The specifications still include future work: Home search/gear controls, built-in themes, applying optional helper output to Home, and external presentation contracts. Device acceptance remains part of completion.
 
 Product clarification (2026-11-04): default Home rows contain only app-name text. Icons and profile labels require an explicitly enabled presentation add-on. Core retains profile identity internally for correct launching.
 

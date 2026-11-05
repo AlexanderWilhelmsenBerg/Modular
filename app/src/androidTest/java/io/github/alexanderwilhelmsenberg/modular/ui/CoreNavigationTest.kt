@@ -19,7 +19,7 @@ class CoreNavigationTest {
     fun settingsBackReturnsToHome() {
         composeRule.onNodeWithText("Apps").assertIsDisplayed()
         composeRule.onNodeWithTag("home-settings").performClick()
-        composeRule.onNodeWithText("Launcher role").assertIsDisplayed()
+        composeRule.onNodeWithText("Back").assertIsDisplayed()
 
         composeRule.runOnIdle {
             composeRule.activity.onBackPressedDispatcher.onBackPressed()
@@ -33,7 +33,7 @@ class CoreNavigationTest {
         val originalIntent = composeRule.activity.intent
         try {
             composeRule.onNodeWithTag("home-settings").performClick()
-            composeRule.onNodeWithText("Launcher role").assertIsDisplayed()
+            composeRule.onNodeWithText("Back").assertIsDisplayed()
             composeRule.runOnIdle {
                 val homeIntent = Intent(Intent.ACTION_MAIN)
                     .addCategory(Intent.CATEGORY_HOME)

@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: android-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -16,18 +20,28 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle 9.6
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "9.6.0"
+          add-job-summary: on-failure
+
+      - name: Compile production sources
+        run: >
+          gradle
+          :module-api:compileDebugKotlin
+          :app:compileDebugKotlin
+          :reference-sort-alphabetical:compileDebugKotlin
+          :reference-home-minimal:compileDebugKotlin
+          --stacktrace
 
       - name: Unit tests
         run: >
@@ -35,6 +49,7 @@ jobs:
           :module-api:testDebugUnitTest
           :app:testDebugUnitTest
           :reference-sort-alphabetical:testDebugUnitTest
+          :reference-home-minimal:testDebugUnitTest
           --stacktrace
 
       - name: Lint
@@ -43,6 +58,7 @@ jobs:
           :module-api:lintDebug
           :app:lintDebug
           :reference-sort-alphabetical:lintDebug
+          :reference-home-minimal:lintDebug
           --stacktrace
 
       - name: Assemble debug and test APKs
@@ -51,7 +67,21 @@ jobs:
           :app:assembleDebug
           :app:assembleDebugAndroidTest
           :reference-sort-alphabetical:assembleDebug
+          :reference-home-minimal:assembleDebug
           --stacktrace
+
+      - name: Upload verification diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: verify-diagnostics-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            **/build/test-results/**/*.xml
+            **/build/reports/tests/**
+            **/build/reports/lint-results-*.html
+            **/build/reports/lint-results-*.xml
 
   ipc-smoke:
     needs: verify
@@ -60,18 +90,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle 9.6
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "9.6.0"
+          add-job-summary: on-failure
 
       - name: Enable KVM
         run: |
@@ -79,6 +110,9 @@ jobs:
             sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+
+      - name: Validate smoke script syntax
+        run: bash -n scripts/ci/run-ipc-smoke.sh
 
       - name: Cross-APK Binder smoke test
         uses: reactivecircus/android-emulator-runner@v2.38.0
@@ -93,7 +127,27 @@ jobs:
             -noaudio
             -no-boot-anim
             -camera-back none
-          script: |
-            gradle :reference-sort-alphabetical:assembleDebug :app:assembleDebugAndroidTest --stacktrace
-            adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
-            gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; exit 1; }
+          script: bash scripts/ci/run-ipc-smoke.sh
+
+      - name: Capture emulator state on failure
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p build/ci-diagnostics
+          adb devices -l > build/ci-diagnostics/adb-devices.txt 2>&1 || true
+          adb shell getprop sys.boot_completed > build/ci-diagnostics/boot-completed.txt 2>&1 || true
+          if [ ! -e build/ci-diagnostics/logcat.txt ]; then
+            timeout 15s adb logcat -d -v threadtime -t 3000 > build/ci-diagnostics/logcat.txt 2>&1 || true
+          fi
+
+      - name: Upload emulator test results and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ipc-smoke-diagnostics-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            build/ci-diagnostics/**
+            app/build/outputs/androidTest-results/connected/**
+            app/build/reports/androidTests/connected/**

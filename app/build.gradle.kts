@@ -4,6 +4,15 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// Local/PR builds use Android's disposable debug signer. The manual signed
+// workflow supplies the persistent private keystore through environment variables.
+val modularKeystorePath = providers.environmentVariable("MODULAR_KEYSTORE_PATH").orNull
+val modularKeystorePassword = providers.environmentVariable("MODULAR_KEYSTORE_PASSWORD").orNull
+if (modularKeystorePath != null) {
+    require(!modularKeystorePassword.isNullOrBlank()) { "MODULAR_KEYSTORE_PASSWORD is required" }
+    require(file(modularKeystorePath).isFile) { "MODULAR_KEYSTORE_PATH must point to a keystore" }
+}
+
 android {
     namespace = "io.github.alexanderwilhelmsenberg.modular"
     compileSdk = 37
@@ -19,6 +28,36 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    signingConfigs {
+        if (modularKeystorePath != null) {
+            create("persistentDebug") {
+                storeFile = file(modularKeystorePath)
+                storePassword = modularKeystorePassword
+                keyAlias = "modular-debug"
+                keyPassword = modularKeystorePassword
+                storeType = "PKCS12"
+            }
+            create("persistentRelease") {
+                storeFile = file(modularKeystorePath)
+                storePassword = modularKeystorePassword
+                keyAlias = "modular-release"
+                keyPassword = modularKeystorePassword
+                storeType = "PKCS12"
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            if (modularKeystorePath != null) signingConfig = signingConfigs.getByName("persistentDebug")
+        }
+        getByName("release") {
+            if (modularKeystorePath != null) signingConfig = signingConfigs.getByName("persistentRelease")
+        }
     }
 
     compileOptions {
@@ -60,4 +99,5 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
 

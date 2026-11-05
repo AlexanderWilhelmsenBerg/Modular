@@ -8,3 +8,14 @@ captures/
 .externalNativeBuild/
 .cxx/
 **/build/
+
+
+# Private Android signing material must never enter git.
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.password
+*.b64
+keystore.properties
+signing-private/

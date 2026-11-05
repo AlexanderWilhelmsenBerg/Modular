@@ -73,6 +73,7 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 - [Automation/scripting boundary ADR](docs/decisions/ADR-0003-scripting-boundary.md)
 - [Complete Core launcher ADR](docs/decisions/ADR-0004-complete-core-launcher.md)
 - [Delivery roadmap](docs/roadmap.md)
+- [Android signing and parallel debug/release installation](docs/android-signing.md)
 - [Module management implementation and remaining acceptance](docs/implementation/module-management.md)
 
 ## Delivery order

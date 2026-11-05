@@ -56,7 +56,7 @@ jobs:
       - name: Upload Core debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: modular-core-debug
+          name: modular-core-debug-ci
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
@@ -71,6 +71,9 @@ jobs:
             reference-sort-alphabetical/build/reports/
 
   ipc-smoke:
+    env:
+      MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-ci-signing.p12
+      MODULAR_KEYSTORE_PASSWORD: modular-ci-only
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -89,6 +92,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.6.0"
+
+      - name: Create disposable signing identities for variant checks
+        run: bash scripts/create-ci-keystore.sh
 
       - name: Enable KVM
         run: |
@@ -111,10 +117,20 @@ jobs:
             -no-boot-anim
             -camera-back none
           script: |
-            gradle :reference-sort-alphabetical:assembleDebug :test-launcher-app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+            gradle :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease :test-launcher-app:assembleDebug :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --stacktrace
+            python3 scripts/verify-signed-apks.py
+            adb install -r app/build/outputs/apk/release/app-release.apk
             adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
             adb install -r test-launcher-app/build/outputs/apk/debug/test-launcher-app-debug.apk
             gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; exit 1; }
+
+            adb install -r reference-sort-alphabetical/build/outputs/apk/release/reference-sort-alphabetical-release.apk
+            adb shell pm path io.github.alexanderwilhelmsenberg.modular
+            adb shell pm path io.github.alexanderwilhelmsenberg.modular.debug
+
+      - name: Remove disposable keystore
+        if: always()
+        run: rm -f -- "$MODULAR_KEYSTORE_PATH"
 
       - name: Upload device test reports
         if: always()
@@ -122,4 +138,5 @@ jobs:
         with:
           name: device-test-reports
           path: app/build/reports/androidTests/
+
 

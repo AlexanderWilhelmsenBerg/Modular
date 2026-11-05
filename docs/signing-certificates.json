@@ -1,0 +1,10 @@
+{
+  "debug": {
+    "alias": "modular-debug",
+    "sha256": "46b606c91a9a69f803ed798ec3e016eeb813eb59db0a50fdb0da1e945717af50"
+  },
+  "release": {
+    "alias": "modular-release",
+    "sha256": "43aa42aecfe008e3ed3c75840d8397909fb2b064d24120ba71d8f12047550600"
+  }
+}

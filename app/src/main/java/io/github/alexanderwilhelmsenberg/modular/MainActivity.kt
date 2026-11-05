@@ -349,8 +349,9 @@ class MainActivity : ComponentActivity() {
 
     private fun recordManagementResult(component: String, stage: String, result: Result<Unit>, success: String) {
         val error = result.exceptionOrNull()
-        moduleRegistry.managementStore.record(component, stage, error?.message ?: success, error != null)
-        if (error != null) Toast.makeText(this, error.message ?: "Action failed", Toast.LENGTH_LONG).show()
+        val message = if (error == null) success else error.message ?: error.javaClass.simpleName
+        moduleRegistry.managementStore.record(component, stage, message, error != null)
+        if (error != null) Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
     private fun uninstallModule(module: ModuleRecord) {

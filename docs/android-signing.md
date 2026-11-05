@@ -1,7 +1,7 @@
 # Android signing and parallel installation
 
-Debug and release use different application IDs **and** separate persistent signing
-identities. Certificate differences alone do not allow two installations of the
+Debug and release use different application IDs **and** distinct persistent signing
+certificates. Certificate differences alone do not allow two installations of the
 same application ID.
 
 | Variant | Core application ID | Display name | Keystore alias |
@@ -9,7 +9,11 @@ same application ID.
 | Debug | `io.github.alexanderwilhelmsenberg.modular.debug` | Modular Debug | `modular-debug` |
 | Release | `io.github.alexanderwilhelmsenberg.modular` | Modular | `modular-release` |
 
-Both keys/certificates live in one private PKCS12 keystore. The reference sort
+One private RSA-3072 key is reused under two aliases in one PKCS12 keystore.
+Each alias has a different self-signed certificate; their SHA-256 certificate
+fingerprints differ, while their public-key fingerprints match. This is the
+requested shared-key setup: possession of the private key enables signing both
+variants. The reference sort
 module also has a `.debug` ID suffix and uses the matching variant's signing key,
 so Core's same-signer trust policy continues to work. With both reference variants
 installed, the module registry can discover both; enable the intended variant and

@@ -20,3 +20,4 @@ captures/
 keystore.properties
 signing-private/
 modular-signing-private*
+modular-shared-key-signing*

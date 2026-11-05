@@ -28,11 +28,18 @@ def main():
     ):
         for variant in ("debug", "release"):
             apk = Path(module) / f"build/outputs/apk/{variant}/{module}-{variant}.apk"
-            output = subprocess.check_output([android_tool("apksigner"), "verify", "--print-certs", apk], text=True)
-            digests = re.findall(r"Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]+)", output)
-            if len(digests) != 1:
-                raise SystemExit(f"Expected exactly one APK signer: {apk}")
-            digest = digests[0].lower()
+            output = subprocess.check_output([android_tool("apksigner"), "verify", "--verbose", "--print-certs", apk], text=True)
+            # A signer can be reported for multiple signing schemes / SDK ranges.
+            # Require one identity, rather than assuming exactly one matching line.
+            matches = re.findall(r"^Signer #(\d+).*?certificate SHA-256 digest:\s*([a-fA-F0-9:]+)\s*$", output, re.MULTILINE)
+            identities = {(number, digest.replace(":", "").lower()) for number, digest in matches}
+            if len(identities) != 1 or next(iter(identities))[0] != "1":
+                # apksigner prints certificates and public fingerprints, never private keys.
+                print(output)
+                raise SystemExit(f"Expected one distinct APK signing identity: {apk}")
+            digest = next(iter(identities))[1]
+            if len(digest) != 64:
+                raise SystemExit(f"Invalid SHA-256 signer fingerprint: {apk}")
             if expected and digest != expected[variant]["sha256"]:
                 raise SystemExit(f"Unexpected {variant} signing certificate: {apk}")
             if variant in signers and signers[variant] != digest:

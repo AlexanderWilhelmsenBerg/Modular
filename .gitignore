@@ -19,3 +19,4 @@ captures/
 *.b64
 keystore.properties
 signing-private/
+modular-signing-private*

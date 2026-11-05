@@ -72,7 +72,6 @@ jobs:
 
   ipc-smoke:
     env:
-      MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-ci-signing.p12
       MODULAR_KEYSTORE_PASSWORD: modular-ci-only
     needs: verify
     runs-on: ubuntu-latest
@@ -94,7 +93,11 @@ jobs:
           gradle-version: "9.6.0"
 
       - name: Create disposable signing identities for variant checks
-        run: bash scripts/create-ci-keystore.sh
+        env:
+          MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-ci-signing.p12
+        run: |
+          echo "MODULAR_KEYSTORE_PATH=$MODULAR_KEYSTORE_PATH" >> "$GITHUB_ENV"
+          bash scripts/create-ci-keystore.sh
 
       - name: Enable KVM
         run: |

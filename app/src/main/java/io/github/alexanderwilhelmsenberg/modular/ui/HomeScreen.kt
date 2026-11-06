@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -96,8 +95,7 @@ fun HomeScreen(
         }
     }
 
-    var editing by rememberSaveable { mutableStateOf(false) }
-    val expanded = editing || query.isNotEmpty()
+    var editing by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -107,9 +105,6 @@ fun HomeScreen(
         focusManager.clearFocus()
     }
 
-    LaunchedEffect(editing) {
-        if (editing) focusRequester.requestFocus()
-    }
     BackHandler(enabled = editing) { endEditing() }
 
     Scaffold(
@@ -124,93 +119,71 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (expanded) {
-                    Surface(
-                        modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_home_search),
-                                contentDescription = null,
-                                modifier = Modifier.padding(start = 12.dp).size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            BasicTextField(
-                                value = query,
-                                onValueChange = updateQuery,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(start = 8.dp)
-                                    .focusRequester(focusRequester)
-                                    .onFocusChanged { if (it.isFocused) editing = true }
-                                    .semantics { contentDescription = "Search apps" }
-                                    .testTag("home-search-field"),
-                                singleLine = true,
-                                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                ),
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                keyboardActions = KeyboardActions(onSearch = { endEditing() }),
-                                decorationBox = { innerTextField ->
-                                    Box(contentAlignment = Alignment.CenterStart) {
-                                        if (query.isEmpty()) {
-                                            Text(
-                                                "Search apps",
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                style = MaterialTheme.typography.bodyLarge,
-                                            )
-                                        }
-                                        innerTextField()
-                                    }
-                                },
-                            )
-                            if (query.isNotEmpty()) {
-                                IconButton(
-                                    onClick = {
-                                        updateQuery("")
-                                        editing = true
-                                        focusRequester.requestFocus()
-                                    },
-                                    modifier = Modifier.size(48.dp).testTag("home-search-clear")
-                                        .semantics { contentDescription = "Clear search" },
+                Surface(
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("home-search"),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    BasicTextField(
+                        value = query,
+                        onValueChange = updateQuery,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .focusRequester(focusRequester)
+                            .onFocusChanged { editing = it.isFocused }
+                            .semantics { contentDescription = "Search apps" }
+                            .testTag("home-search-field"),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { endEditing() }),
+                        decorationBox = { innerTextField ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_home_search),
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(start = 12.dp).size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Box(
+                                    modifier = Modifier.weight(1f).padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+                                    contentAlignment = Alignment.CenterStart,
                                 ) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.ic_home_clear),
-                                        contentDescription = null,
-                                    )
+                                    if (query.isEmpty()) {
+                                        Text(
+                                            "Search apps",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    innerTextField()
                                 }
-                            } else {
-                                Spacer(Modifier.size(12.dp))
+                                if (query.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = {
+                                            updateQuery("")
+                                            focusRequester.requestFocus()
+                                        },
+                                        modifier = Modifier.size(48.dp).testTag("home-search-clear")
+                                            .semantics { contentDescription = "Clear search" },
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(R.drawable.ic_home_clear),
+                                            contentDescription = null,
+                                        )
+                                    }
+                                } else {
+                                    // Reserve the clear button's space so typing never resizes the field.
+                                    Spacer(Modifier.size(48.dp))
+                                }
                             }
-                        }
-                    }
-                } else {
-                    Spacer(Modifier.weight(1f))
-                    Surface(
-                        onClick = { editing = true },
-                        modifier = Modifier.widthIn(min = 112.dp).heightIn(min = 48.dp).testTag("home-search")
-                            .semantics { contentDescription = "Search" },
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_home_search),
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Text("Search", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
+                        },
+                    )
                 }
                 IconButton(
                     onClick = {

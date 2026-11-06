@@ -3,6 +3,11 @@ package io.github.alexanderwilhelmsenberg.modular.ui
 import android.content.Intent
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -32,7 +37,7 @@ class CoreNavigationTest {
 
     @Test
     fun focusedSearchBackKeepsHomeVisibleAndPreservesQuery() {
-        composeRule.onNodeWithTag("home-search").performClick()
+        composeRule.onNodeWithTag("home-search-field").performClick()
         composeRule.onNodeWithTag("home-search-field").performTextInput("zz unlikely app")
         composeRule.onNodeWithTag("home-search-field").assertTextContains("zz unlikely app")
 
@@ -46,22 +51,22 @@ class CoreNavigationTest {
     }
 
     @Test
-    fun backFromEmptySearchClosesEditingBeforeHomeNavigation() {
-        composeRule.onNodeWithTag("home-search").performClick()
+    fun backFromEmptySearchEndsEditingAndKeepsPersistentBar() {
+        composeRule.onNodeWithTag("home-search-field").performClick()
         composeRule.onNodeWithTag("home-search-field").assertIsDisplayed()
 
         composeRule.runOnIdle {
             composeRule.activity.onBackPressedDispatcher.onBackPressed()
         }
 
-        composeRule.onNodeWithTag("home-search-field").assertDoesNotExist()
+        composeRule.onNodeWithTag("home-search-field").assertIsDisplayed().assertIsNotFocused().assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
         composeRule.onNodeWithTag("home-search").assertIsDisplayed()
         composeRule.onNodeWithTag("home-settings").assertIsDisplayed()
     }
 
     @Test
     fun searchQuerySurvivesSettingsAndActivityRecreation() {
-        composeRule.onNodeWithTag("home-search").performClick()
+        composeRule.onNodeWithTag("home-search-field").performClick()
         composeRule.onNodeWithTag("home-search-field").performTextInput("zz unlikely app")
         composeRule.onNodeWithTag("home-search-field").assertTextContains("zz unlikely app")
 
@@ -77,7 +82,7 @@ class CoreNavigationTest {
     fun warmHomeIntentReturnsExistingActivityToHome() {
         val originalIntent = composeRule.activity.intent
         try {
-            composeRule.onNodeWithTag("home-search").performClick()
+            composeRule.onNodeWithTag("home-search-field").performClick()
             composeRule.onNodeWithTag("home-search-field").performTextInput("zz unlikely app")
             composeRule.onNodeWithTag("home-settings").performClick()
             composeRule.onNodeWithText("Back").assertIsDisplayed()
@@ -89,7 +94,7 @@ class CoreNavigationTest {
                     .callActivityOnNewIntent(composeRule.activity, homeIntent)
             }
             composeRule.onNodeWithTag("home-search").assertIsDisplayed()
-            composeRule.onNodeWithTag("home-search-field").assertDoesNotExist()
+            composeRule.onNodeWithTag("home-search-field").assertIsDisplayed().assertIsNotFocused().assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
         } finally {
             // ActivityScenario matches lifecycle events using its launch intent.
             // MainActivity correctly stores HOME, so restore the harness intent

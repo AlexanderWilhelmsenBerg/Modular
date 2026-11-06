@@ -9,7 +9,7 @@ Installing the Core APK provides:
 - a Home screen with a vertical alphabetical app list;
 - text-only app names, profile-aware discovery, and tap-to-launch;
 - Android HOME integration;
-- expanding app search and a settings gear;
+- persistent full-width app search and a settings gear;
 - persisted Light, Dark, and true-black AMOLED themes;
 - secondary Settings with add-on controls, retained failure history, and Android-confirmed uninstall;
 - accessibility and automatic app-list updates.
@@ -82,7 +82,7 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 
 First complete Core Home, alphabetical ordering, launching, settings navigation, accessibility, and lifecycle/failure handling. Then validate optional helper add-ons and advanced contexts. External Home/Drawer modules are optional presentation replacements.
 
-Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). Core includes text-only Home, search/gear controls, built-in themes, Settings module management, and selected optional sort-helper output with alphabetical fallback. External presentation and external theme loading remain future work. See [Core completion](docs/implementation/core-completion.md) for test evidence and remaining physical-device acceptance.
+Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). Core includes text-only Home, search/gear controls, built-in themes, Settings module management, and selected optional sort-helper output with alphabetical fallback. External presentation and external theme loading remain future work. See [Core completion](docs/implementation/core-completion.md) for test evidence, remaining instance/discovery contract work, and physical-device acceptance.
 
 Product clarification (2026-11-04): default Home rows contain only app-name text. Icons and profile labels require an explicitly enabled presentation add-on. Core retains profile identity internally for correct launching.
 

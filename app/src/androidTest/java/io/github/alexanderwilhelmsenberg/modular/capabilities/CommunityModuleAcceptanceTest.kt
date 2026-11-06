@@ -27,6 +27,7 @@ import io.github.alexanderwilhelmsenberg.modular.security.DataStoreModuleGrantSt
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
 import io.github.alexanderwilhelmsenberg.modular.security.OfficialModuleBootstrapPolicy
 import java.util.UUID
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -163,8 +164,13 @@ class CommunityModuleAcceptanceTest {
 
             registry.setEnabled(component, false)
             disabled = true
-            assertTrue("Disabled session left old endpoint callable",
-                runCatching { binderAtDisable.sort(sortRequest()) }.isFailure)
+            // Core revokes its host immediately, then closes the remote session
+            // on a cleanup worker. Wait for that close before checking the old endpoint.
+            withTimeout(10_000) {
+                while (runCatching { binderAtDisable.sort(sortRequest()) }.isSuccess) {
+                    delay(25)
+                }
+            }
             withTimeout(15_000) {
                 router.routes.first { routes -> routes.none { it.component == component } }
                 homeController.orderedApps.first { it.map(LaunchableApp::label) == CORE_ORDER }
@@ -211,7 +217,9 @@ class CommunityModuleAcceptanceTest {
     )
 
     private class FakeAppRepository(apps: List<LaunchableApp>) : AppRepository {
-        override val catalog: StateFlow<AppCatalog> = MutableStateFlow(AppCatalog(1, apps))
+        override val catalog: StateFlow<AppCatalog> = MutableStateFlow(
+            AppCatalog(generation = 1, apps = apps),
+        )
         override fun refresh() = Unit
         override suspend fun launch(key: AppKey): Result<Unit> = Result.success(Unit)
         override fun close() = Unit

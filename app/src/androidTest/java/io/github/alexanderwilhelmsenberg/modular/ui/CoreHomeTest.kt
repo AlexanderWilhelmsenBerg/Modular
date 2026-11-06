@@ -188,7 +188,8 @@ class CoreHomeTest {
 
         composeRule.onNodeWithTag("home-search").assertIsDisplayed().performClick()
         composeRule.onNodeWithTag("home-search-field").assertIsDisplayed().performTextInput("Alpha")
-        composeRule.onNodeWithText("Alpha").assertIsDisplayed()
+        val alphaKey = app("alpha.pkg", "Alpha").key.stableId
+        composeRule.onNodeWithTag("app-row:$alphaKey").assertIsDisplayed()
         composeRule.onNodeWithTag("home-settings").assertIsDisplayed()
     }
 

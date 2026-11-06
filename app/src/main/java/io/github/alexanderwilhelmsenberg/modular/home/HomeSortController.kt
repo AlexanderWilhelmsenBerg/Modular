@@ -6,6 +6,7 @@ import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityProviderKind
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRoute
 import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
+import io.github.alexanderwilhelmsenberg.modular.composition.ResolvedContextBinding
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import android.os.RemoteException
 import java.text.Collator
@@ -30,7 +31,7 @@ class HomeSortController(
     private val catalog: StateFlow<AppCatalog>,
     private val activeContext: StateFlow<ActiveContextState>,
     private val routes: StateFlow<List<CapabilityRoute>>,
-    private val sort: suspend (CapabilityRoute, List<LaunchableApp>, String) -> Result<List<LaunchableApp>>,
+    private val sort: suspend (CapabilityRoute, ResolvedContextBinding, List<LaunchableApp>, String) -> Result<List<LaunchableApp>>,
     localeTag: String = Locale.getDefault().toLanguageTag(),
     private val timeoutMillis: Long = 1_500L,
     private val onFailure: (CapabilityRoute, String) -> Unit = { _, _ -> },
@@ -41,7 +42,7 @@ class HomeSortController(
     private val localeTags = MutableStateFlow(localeTag)
     private val _orderedApps = MutableStateFlow<List<LaunchableApp>>(emptyList())
     val orderedApps: StateFlow<List<LaunchableApp>> = _orderedApps.asStateFlow()
-    private var failedRoute: CapabilityRoute? = null
+    private var failedBinding: Pair<CapabilityRoute, String>? = null
 
     init {
         require(timeoutMillis > 0) { "Sort timeout must be positive" }
@@ -52,20 +53,22 @@ class HomeSortController(
                 val source = snapshot.catalog.apps
                 _orderedApps.value = alphabetical(source, snapshot.localeTag)
 
-                val route = snapshot.activeContext
+                val binding = snapshot.activeContext
                     .takeIf { it.isReady }
-                    ?.routeFor(StandardCapabilities.AppsSort)
-                    ?.takeIf { it.providerKind == CapabilityProviderKind.MODULE && it in snapshot.routes }
+                    ?.resolvedBindings
+                    ?.firstOrNull { it.capability == StandardCapabilities.AppsSort }
+                    ?.takeIf { it.route.providerKind == CapabilityProviderKind.MODULE && it.route in snapshot.routes }
                     ?: run {
-                        failedRoute = null
+                        failedBinding = null
                         return@collectLatest
                     }
+                val route = binding.route
 
                 if (source.isEmpty()) return@collectLatest
 
                 val response = try {
                     withTimeoutOrNull(timeoutMillis) {
-                        sort(route, source, snapshot.localeTag)
+                        sort(route, binding, source, snapshot.localeTag)
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -80,7 +83,7 @@ class HomeSortController(
                     localeTags.value == snapshot.localeTag) {
                     val result = response?.getOrNull()
                     if (result == null) {
-                        reportFailure(route, if (response == null) {
+                        reportFailure(route, binding, if (response == null) {
                             "Sort helper timed out. Retry its connection in Settings."
                         } else {
                             "Sort helper failed (${failureCategory(response.exceptionOrNull())}). " +
@@ -93,10 +96,11 @@ class HomeSortController(
                     val original = originalAppsInOrder(source, result)
                     if (original == null) reportFailure(
                         route,
+                        binding,
                         "Sort helper returned an invalid app order. Retry its connection in Settings.",
                     )
                     else {
-                        failedRoute = null
+                        failedBinding = null
                         _orderedApps.value = original
                     }
                 }
@@ -112,9 +116,10 @@ class HomeSortController(
         job.cancel()
     }
 
-    private fun reportFailure(route: CapabilityRoute, message: String) {
-        if (failedRoute == route) return
-        failedRoute = route
+    private fun reportFailure(route: CapabilityRoute, binding: ResolvedContextBinding, message: String) {
+        val key = route to (binding.instance.id + "\u0000" + binding.instance.configurationJson)
+        if (failedBinding == key) return
+        failedBinding = key
         runCatching { onFailure(route, message) }
     }
 

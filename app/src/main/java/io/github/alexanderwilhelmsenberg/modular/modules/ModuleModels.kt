@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.modules
 
 import android.content.ComponentName
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleDescriptor
 
 enum class ModuleConnectionStatus {
     DISCOVERED,
@@ -23,8 +24,12 @@ data class ModuleRecord(
     val status: ModuleConnectionStatus = ModuleConnectionStatus.DISCOVERED,
     val enabled: Boolean = true,
     val error: String? = null,
+    val descriptor: ModuleDescriptor? = null,
+    val descriptorError: String? = null,
+    val descriptorFingerprint: String? = null,
 ) {
     val label: String
-        get() = moduleId ?: component.flattenToShortString()
+        get() = descriptor?.displayName?.takeIf { it.isNotBlank() }
+            ?: moduleId ?: component.flattenToShortString()
 }
 

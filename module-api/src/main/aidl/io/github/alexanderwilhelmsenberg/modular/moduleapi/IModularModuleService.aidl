@@ -10,6 +10,8 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularHost;
  * Protocol v2 adds session exchange and capability Binder acquisition.
  * Protocol v3 adds explicit declaration of Core capabilities requested by the
  * module. Providing a capability and requesting Core authority remain separate.
+ * Protocol v4 adds a bounded descriptor and instance-specific Binder acquisition.
+ * Transaction codes 1-8 remain unchanged.
  */
 interface IModularModuleService {
     int getProtocolVersion() = 1;
@@ -36,4 +38,20 @@ interface IModularModuleService {
      * grants for the module's verified package/signing identity.
      */
     String[] getRequestedCoreCapabilities() = 8;
+
+    /** Returns the same validated descriptor declared in manifest metadata. */
+    String getDescriptorJson() = 9;
+
+    /**
+     * Returns an endpoint for one Core-owned instance. Core passes normalized
+     * configuration JSON after validating it against the descriptor. The
+     * endpoint is valid only while its session and instance remain active.
+     */
+    @nullable IBinder getInstanceCapabilityBinder(
+        String sessionId,
+        String instanceId,
+        String configurationJson,
+        String capabilityId
+    ) = 10;
 }
+

@@ -31,6 +31,7 @@ enum class ContextResolutionProblemKind {
     MISSING_INSTANCE,
     PROVIDER_UNAVAILABLE,
     PROVIDER_AMBIGUOUS,
+    CONFIGURATION_INVALID,
 }
 
 data class ContextResolutionProblem(
@@ -63,3 +64,4 @@ data class ActiveContextState(
         val NONE = ActiveContextState()
     }
 }
+

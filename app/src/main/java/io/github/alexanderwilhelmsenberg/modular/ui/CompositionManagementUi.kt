@@ -36,7 +36,9 @@ import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.composition.ContextCapabilityBinding
 import io.github.alexanderwilhelmsenberg.modular.composition.LauncherContext
 import io.github.alexanderwilhelmsenberg.modular.composition.ModuleInstance
+import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRoute
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleDescriptor
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
 import java.util.UUID
 import kotlinx.coroutines.launch
@@ -49,6 +51,7 @@ fun CompositionManagement(
     contexts: List<LauncherContext>,
     modules: List<ModuleRecord>,
     activeContext: ActiveContextState,
+    routes: List<CapabilityRoute> = emptyList(),
     onSaveInstance: suspend (ModuleInstance) -> Result<Unit>,
     onDeleteInstance: suspend (String) -> Result<Unit>,
     onSaveContext: suspend (LauncherContext) -> Result<Unit>,
@@ -60,6 +63,18 @@ fun CompositionManagement(
     var contextEditor by remember { mutableStateOf<LauncherContext?>(null) }
     var deleteInstance by remember { mutableStateOf<ModuleInstance?>(null) }
     var deleteContext by remember { mutableStateOf<LauncherContext?>(null) }
+    val providerDescriptors = remember(modules, routes) {
+        buildMap<String, ModuleDescriptor> {
+            modules.forEach { record ->
+                val id = record.moduleId
+                val descriptor = record.descriptor
+                if (id != null && descriptor != null) put(id, descriptor)
+            }
+            routes.forEach { route ->
+                route.descriptor?.let { put(route.providerId, it) }
+            }
+        }
+    }
     val capabilities = remember(modules, contexts) {
         (modules.flatMap { record ->
             record.capabilities.mapNotNull(CapabilityId::parse)
@@ -153,11 +168,26 @@ fun CompositionManagement(
                 val referencedBy = contexts.filter { context ->
                     context.bindings.any { it.instanceId == instance.id }
                 }.map { it.name }
+                val isUsedByActiveContext = activeContext.context?.bindings?.any {
+                    it.instanceId == instance.id
+                } == true
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(instance.name, style = MaterialTheme.typography.titleMedium)
-                        Text("Provider: ${instance.providerId}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Configuration: ${instance.configurationJson}", style = MaterialTheme.typography.bodySmall)
+                        val descriptor = providerDescriptors[instance.providerId]
+                        Text(
+                            "Provider: ${descriptor?.displayName ?: instance.providerId}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        descriptor?.description?.takeIf { it.isNotBlank() }?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (descriptor == null) Text(
+                            if (routes.any { it.providerId == instance.providerId })
+                                "This provider supports only {} configuration."
+                            else "Provider details are unavailable. Saved configuration is retained.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                         if (referencedBy.isNotEmpty()) Text(
                             "Used by: ${referencedBy.joinToString()}",
                             style = MaterialTheme.typography.bodySmall,
@@ -165,6 +195,7 @@ fun CompositionManagement(
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(
                                 modifier = Modifier.testTag("edit-instance-${instance.id}"),
+                                enabled = !isUsedByActiveContext,
                                 onClick = { instanceEditor = instance },
                             ) { Text("Edit") }
                             TextButton(
@@ -172,6 +203,10 @@ fun CompositionManagement(
                                 onClick = { deleteInstance = instance },
                             ) { Text("Delete") }
                         }
+                        if (isUsedByActiveContext) Text(
+                            "Deactivate the active context before editing this instance.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
@@ -183,6 +218,8 @@ fun CompositionManagement(
             initial = initial,
             providerIds = (modules.mapNotNull { it.moduleId } + instances.map { it.providerId })
                 .distinct().sorted(),
+            providerDescriptors = providerDescriptors,
+            legacyProviderIds = routes.filter { it.descriptor == null }.map { it.providerId }.toSet(),
             onDismiss = { instanceEditor = null },
             onSave = onSaveInstance,
             onSaved = { instanceEditor = null },
@@ -218,6 +255,8 @@ fun CompositionManagement(
 private fun InstanceEditorDialog(
     initial: ModuleInstance,
     providerIds: List<String>,
+    providerDescriptors: Map<String, ModuleDescriptor>,
+    legacyProviderIds: Set<String>,
     onDismiss: () -> Unit,
     onSave: suspend (ModuleInstance) -> Result<Unit>,
     onSaved: () -> Unit,
@@ -228,6 +267,7 @@ private fun InstanceEditorDialog(
     var error by remember(initial.id) { mutableStateOf<String?>(null) }
     var saving by remember(initial.id) { mutableStateOf(false) }
     var providerExpanded by remember { mutableStateOf(false) }
+    val descriptor = providerDescriptors[providerId.trim()]
     val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = { if (!saving) onDismiss() },
@@ -258,7 +298,7 @@ private fun InstanceEditorDialog(
                         ) {
                             providerIds.forEach { id ->
                                 DropdownMenuItem(
-                                    text = { Text(id) },
+                                    text = { Text(providerDescriptors[id]?.displayName?.let { "$it · $id" } ?: id) },
                                     onClick = { providerId = id; providerExpanded = false },
                                 )
                             }
@@ -275,9 +315,33 @@ private fun InstanceEditorDialog(
                         readOnly = initial.providerId.isNotBlank(),
                     )
                 }
+                descriptor?.let { selected ->
+                    Text(selected.displayName, style = MaterialTheme.typography.titleSmall)
+                    if (selected.description.isNotBlank()) Text(
+                        selected.description,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (selected.configurationFields.isEmpty()) {
+                        Text("This provider has no configuration fields.", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text("Configuration fields", style = MaterialTheme.typography.labelLarge)
+                        selected.configurationFields.forEach { field ->
+                            Text(
+                                "${field.title} (${field.key}) · ${field.type} · default: ${field.defaultValue}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+                if (descriptor == null && providerId.trim() in legacyProviderIds) Text(
+                    "This provider supports only {} configuration.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 OutlinedTextField(
-                    json, { json = it }, Modifier.fillMaxWidth(), label = { Text("Configuration JSON") },
-                    supportingText = { Text("Use a JSON object, for example {}.") }, minLines = 4,
+                    json, { json = it }, Modifier.fillMaxWidth(),
+                    label = { Text("Configuration JSON") },
+                    supportingText = { Text("Use a JSON object. Defaults are applied when the provider is available.") },
+                    minLines = 4,
                 )
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }

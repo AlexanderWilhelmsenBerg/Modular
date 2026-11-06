@@ -49,6 +49,9 @@ class CapabilityRouter(
                                     providerId = module.moduleId
                                         ?: module.component.flattenToShortString(),
                                     component = module.component,
+                                    descriptor = module.descriptor,
+                                    protocolVersion = module.protocolVersion,
+                                    sessionId = module.sessionId,
                                 )
                             }
                     }
@@ -76,6 +79,8 @@ class CapabilityRouter(
 
     suspend fun acquireModuleBinder(
         route: CapabilityRoute,
+        instanceId: String? = null,
+        configurationJson: String = "{}",
     ): Result<IBinder> {
         if (route.providerKind != CapabilityProviderKind.MODULE) {
             return Result.failure(
@@ -88,9 +93,16 @@ class CapabilityRouter(
                 IllegalStateException("Module route has no component"),
             )
 
+        if (route !in routes.value) {
+            return Result.failure(IllegalStateException("Module route is no longer active"))
+        }
+
         return moduleRegistry.acquireCapabilityBinder(
             component = component,
             capability = route.capability,
+            instanceId = instanceId,
+            configurationJson = configurationJson,
+            expectedSessionId = route.sessionId,
         )
     }
 
@@ -111,3 +123,4 @@ class CapabilityRouter(
         const val CORE_PROVIDER_ID = "modular.core"
     }
 }
+

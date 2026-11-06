@@ -7,6 +7,8 @@ import android.content.ServiceConnection
 import android.content.pm.ApplicationInfo
 import android.content.pm.ResolveInfo
 import android.content.pm.ServiceInfo
+import android.os.Bundle
+import android.os.Binder
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
@@ -15,6 +17,8 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularHost
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularModuleService
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleGrantState
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleGrantStateStore
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleIdentity
@@ -84,6 +88,8 @@ class ModuleRegistryLifecycleTest {
             override fun closeSession(sessionId: String?) = Unit
             override fun getCapabilityBinder(sessionId: String?, capabilityId: String?) = null
             override fun getRequestedCoreCapabilities(): Array<String> = emptyArray()
+            override fun getDescriptorJson() = ""
+            override fun getInstanceCapabilityBinder(sessionId: String?, instanceId: String?, configurationJson: String?, capabilityId: String?) = null
         }
 
         try {
@@ -121,6 +127,8 @@ class ModuleRegistryLifecycleTest {
             override fun closeSession(sessionId: String?) { closeCalls.value += 1 }
             override fun getCapabilityBinder(sessionId: String?, capabilityId: String?) = null
             override fun getRequestedCoreCapabilities(): Array<String> = emptyArray()
+            override fun getDescriptorJson() = ""
+            override fun getInstanceCapabilityBinder(sessionId: String?, instanceId: String?, configurationJson: String?, capabilityId: String?) = null
         }
 
         try {
@@ -141,6 +149,81 @@ class ModuleRegistryLifecycleTest {
         }
     }
 
+    @Test
+    fun v4WithoutPackagedDescriptorIsVisibleButCannotConnect() = runBlocking {
+        val bindings = CopyOnWriteArrayList<ServiceConnection>()
+        val registry = newRegistry(RegistryContext(baseContext), 2_000L, bindings)
+        val service = object : IModularModuleService.Stub() {
+            override fun getProtocolVersion() = 4
+            override fun getModuleId() = "sample.module"
+            override fun getModuleVersion() = "1.0"
+            override fun getCapabilities(): Array<String> = arrayOf("apps.sort/v1")
+            override fun getRequestedCoreCapabilities(): Array<String> = emptyArray()
+            override fun getDescriptorJson() = "{}"
+            override fun openSession(sessionId: String?, host: IModularHost?) = Unit
+            override fun closeSession(sessionId: String?) = Unit
+            override fun getCapabilityBinder(sessionId: String?, capabilityId: String?) = null
+            override fun getInstanceCapabilityBinder(sessionId: String?, instanceId: String?, configurationJson: String?, capabilityId: String?) = null
+        }
+        try {
+            withContext(Dispatchers.Main) { registry.refresh() }
+            withContext(Dispatchers.Main) { bindings.single().onServiceConnected(COMPONENT, service) }
+            awaitStatus(registry, ModuleConnectionStatus.INCOMPATIBLE)
+            assertTrue(registry.modules.value.single().error.orEmpty().contains("packaged module descriptor"))
+            assertEquals(null, registry.modules.value.single().sessionId)
+        } finally {
+            withContext(Dispatchers.Main) { registry.close() }
+        }
+    }
+
+    @Test
+    fun malformedDescriptorMetadataStaysVisibleAndIsNeverBound() = runBlocking {
+        val metadata = Bundle().apply { putString(ModuleContract.MODULE_DESCRIPTOR_METADATA_KEY, "not a resource") }
+        val bindings = CopyOnWriteArrayList<ServiceConnection>()
+        val registry = newRegistry(RegistryContext(baseContext), 2_000L, bindings, metadata)
+        try {
+            withContext(Dispatchers.Main) { registry.refresh() }
+            val record = registry.modules.value.single()
+            assertEquals(ModuleConnectionStatus.INCOMPATIBLE, record.status)
+            assertTrue(record.error.orEmpty().contains("raw JSON resource"))
+            assertTrue(bindings.isEmpty())
+        } finally {
+            withContext(Dispatchers.Main) { registry.close() }
+        }
+    }
+
+    @Test
+    fun legacyHelperAcceptsEmptyConfigurationAndRejectsNonemptyConfiguration() = runBlocking {
+        val bindings = CopyOnWriteArrayList<ServiceConnection>()
+        val registry = newRegistry(RegistryContext(baseContext), 2_000L, bindings)
+        var binderCalls = 0
+        val service = object : IModularModuleService.Stub() {
+            override fun getProtocolVersion() = 2
+            override fun getModuleId() = "sample.module"
+            override fun getModuleVersion() = "1.0"
+            override fun getCapabilities(): Array<String> = arrayOf("apps.sort/v1")
+            override fun getRequestedCoreCapabilities(): Array<String> = emptyArray()
+            override fun getDescriptorJson() = ""
+            override fun openSession(sessionId: String?, host: IModularHost?) = Unit
+            override fun closeSession(sessionId: String?) = Unit
+            override fun getCapabilityBinder(sessionId: String?, capabilityId: String?) = Binder().also { binderCalls++ }
+            override fun getInstanceCapabilityBinder(sessionId: String?, instanceId: String?, configurationJson: String?, capabilityId: String?) = null
+        }
+        try {
+            withContext(Dispatchers.Main) { registry.refresh() }
+            withContext(Dispatchers.Main) { bindings.single().onServiceConnected(COMPONENT, service) }
+            awaitStatus(registry, ModuleConnectionStatus.CONNECTED)
+            val sessionId = registry.modules.value.single().sessionId
+            assertTrue(registry.acquireCapabilityBinder(COMPONENT, StandardCapabilities.AppsSort,
+                "instance", " { } ", sessionId).isSuccess)
+            assertTrue(registry.acquireCapabilityBinder(COMPONENT, StandardCapabilities.AppsSort,
+                "instance", "{\"setting\":true}", sessionId).isFailure)
+            assertEquals(1, binderCalls)
+        } finally {
+            withContext(Dispatchers.Main) { registry.close() }
+        }
+    }
+
     private suspend fun awaitStatus(registry: ModuleRegistry, status: ModuleConnectionStatus) {
         withTimeout(3_000L) {
             while (registry.modules.value.singleOrNull()?.status != status) delay(10)
@@ -151,19 +234,21 @@ class ModuleRegistryLifecycleTest {
         context: Context,
         timeoutMillis: Long,
         bindings: MutableList<ServiceConnection>,
+        metadata: Bundle? = null,
     ): ModuleRegistry = ModuleRegistry(
         context = context,
         hostFactory = createHostFactory(context),
         handshakeTimeoutMillis = timeoutMillis,
-        serviceDiscoveryOverride = { listOf(resolveInfo()) },
+        serviceDiscoveryOverride = { listOf(resolveInfo(metadata)) },
         serviceBindingOverride = { _, connection, _ -> bindings += connection; true },
     )
 
-    private fun resolveInfo() = ResolveInfo().apply {
+    private fun resolveInfo(metadata: Bundle? = null) = ResolveInfo().apply {
         serviceInfo = ServiceInfo().apply {
             packageName = COMPONENT.packageName
             name = COMPONENT.className
             applicationInfo = ApplicationInfo()
+            metaData = metadata
         }
     }
 

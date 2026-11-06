@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.capabilities
 
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
+import io.github.alexanderwilhelmsenberg.modular.composition.ResolvedContextBinding
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.IAppSortCapability
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppKeyParcel
@@ -28,6 +29,7 @@ class AppSortClient(
 
     suspend fun sort(
         route: CapabilityRoute,
+        binding: ResolvedContextBinding,
         apps: List<LaunchableApp>,
         localeTag: String = Locale.getDefault().toLanguageTag(),
     ): Result<List<LaunchableApp>> {
@@ -38,6 +40,11 @@ class AppSortClient(
                         StandardCapabilities.AppsSort.wireValue,
                 ),
             )
+        }
+
+        if (binding.route != route || binding.capability != route.capability ||
+            binding.instance.providerId != route.providerId) {
+            return Result.failure(IllegalArgumentException("Sort binding does not match its route"))
         }
 
         if (apps.size > AppSortRequestParcel.MAX_ITEMS) {
@@ -54,29 +61,33 @@ class AppSortClient(
         return suspendCancellableCoroutine { continuation ->
             val call = PendingCall(continuation) {
                 runCatching {
-                        val binder = runBlocking {
-                            capabilityRouter.acquireModuleBinder(route).getOrThrow()
-                        }
-                        val capability = IAppSortCapability.Stub.asInterface(binder)
-                        val response = capability.sort(
-                            AppSortRequestParcel(
-                                items = apps.map { app ->
-                                    AppSortItemParcel(
-                                        key = AppKeyParcel(
-                                            packageName = app.key.packageName,
-                                            activityName = app.key.activityName,
-                                            profileSerial = app.key.profileSerial,
-                                        ),
-                                        label = app.label,
-                                    )
-                                },
-                                localeTag = localeTag,
-                            ),
-                        )
-                        require(response.status == AppSortResultParcel.STATUS_SUCCESS) {
-                            response.message ?: "Sort provider failed"
-                        }
-                        AppSortResultValidator.apply(apps, response.orderedKeys).getOrThrow()
+                    val binder = runBlocking {
+                        capabilityRouter.acquireModuleBinder(
+                            route,
+                            binding.instance.id,
+                            binding.instance.configurationJson,
+                        ).getOrThrow()
+                    }
+                    val capability = IAppSortCapability.Stub.asInterface(binder)
+                    val response = capability.sort(
+                        AppSortRequestParcel(
+                            items = apps.map { app ->
+                                AppSortItemParcel(
+                                    key = AppKeyParcel(
+                                        packageName = app.key.packageName,
+                                        activityName = app.key.activityName,
+                                        profileSerial = app.key.profileSerial,
+                                    ),
+                                    label = app.label,
+                                )
+                            },
+                            localeTag = localeTag,
+                        ),
+                    )
+                    require(response.status == AppSortResultParcel.STATUS_SUCCESS) {
+                        response.message ?: "Sort provider failed"
+                    }
+                    AppSortResultValidator.apply(apps, response.orderedKeys).getOrThrow()
                 }
             }
             calls.add(call)

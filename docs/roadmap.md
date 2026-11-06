@@ -41,16 +41,21 @@ Acceptance: product-spec cases 6–8; external add-ons remain separately package
 
 These requirements are implemented in the Core completion change. Validation and device acceptance are tracked in [Core completion](implementation/core-completion.md).
 
-## Remaining Core contract work
+## Phase 1d — Core add-on framework
 
-- Carry bounded instance identity/configuration through versioned module requests;
-  prove independently configured instances of the same provider.
-- Implement and validate the agreed manifest discovery descriptor metadata.
-- Complete physical-device acceptance. See product-spec section 17.
+- Protocol v4 carries bounded, validated instance identity and configuration.
+- Packaged discovery descriptors are validated against the runtime handshake.
+- Public API/SDK AARs support independently signed add-ons and a standalone example.
+- Automated acceptance covers two configurations of one provider, incompatible
+  descriptors, caller trust, revocation, and alphabetical fallback.
+
+Implementation and commit-specific verification are tracked in
+[Core framework acceptance](implementation/core-framework.md). Physical-device
+acceptance remains open; see product-spec section 17 and the device checklist.
 
 ## Phase 2 — Module UX and richer composition
 
-- module configuration schemas.
+- richer schema-driven configuration forms.
 - bounded external surface protocol and optional alternative Home/Drawer modules.
 - optional favorites, alphabet index, and alternative layouts.
 - richer instance configuration.

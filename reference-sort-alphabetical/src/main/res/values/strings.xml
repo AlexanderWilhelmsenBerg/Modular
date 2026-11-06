@@ -2,5 +2,5 @@
 <resources>
     <string name="app_name">Modular Alphabetical Sort</string>
     <string name="sort_settings_title">Sort helper settings</string>
-    <string name="reverse_order">Reverse alphabetical order</string>
+    <string name="sort_settings_explanation">Configure reverse order separately for each sort instance in Modular settings.</string>
 </resources>

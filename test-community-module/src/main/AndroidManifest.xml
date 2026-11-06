@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="io.github.alexanderwilhelmsenberg.modular.debug" />
+    </queries>
+
+    <application android:allowBackup="false" android:label="Community sort test module">
+        <provider
+            android:name=".CallerProbeProvider"
+            android:authorities="io.github.alexanderwilhelmsenberg.modular.testcommunity.probe"
+            android:exported="true" />
+        <service
+            android:name=".CommunitySortService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="io.github.alexanderwilhelmsenberg.modular.action.MODULE" />
+            </intent-filter>
+            <meta-data
+                android:name="io.github.alexanderwilhelmsenberg.modular.MODULE_DESCRIPTOR"
+                android:resource="@raw/module_descriptor" />
+        </service>
+        <service
+            android:name=".MismatchedDescriptorService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="io.github.alexanderwilhelmsenberg.modular.action.MODULE" />
+            </intent-filter>
+            <meta-data
+                android:name="io.github.alexanderwilhelmsenberg.modular.MODULE_DESCRIPTOR"
+                android:resource="@raw/module_descriptor" />
+        </service>
+    </application>
+</manifest>

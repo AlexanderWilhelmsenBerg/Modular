@@ -47,11 +47,24 @@ object ProviderSelectionResolver {
                 }
 
                 1 -> {
-                    resolved += ResolvedContextBinding(
-                        capability = binding.capability,
-                        instance = instance,
-                        route = matches.single(),
-                    )
+                    val route = matches.single()
+                    val validation = runCatching {
+                        instance.withValidatedConfiguration(listOf(route))
+                    }
+                    if (validation.isFailure) {
+                        problems += ContextResolutionProblem(
+                            capability = binding.capability,
+                            instanceId = instance.id,
+                            kind = ContextResolutionProblemKind.CONFIGURATION_INVALID,
+                            detail = "Saved configuration is incompatible with the current provider schema",
+                        )
+                    } else {
+                        resolved += ResolvedContextBinding(
+                            capability = binding.capability,
+                            instance = validation.getOrThrow(),
+                            route = route,
+                        )
+                    }
                 }
 
                 else -> {
@@ -78,3 +91,4 @@ object ProviderSelectionResolver {
         )
     }
 }
+

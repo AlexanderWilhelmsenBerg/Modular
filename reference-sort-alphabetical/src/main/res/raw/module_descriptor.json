@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "moduleId": "modular.reference.sort.alphabetical",
+  "moduleVersion": "0.2.0",
+  "displayName": "Alphabetical Sort",
+  "description": "Sorts the launchable app list by name.",
+  "coreProtocol": { "min": 4, "max": 4 },
+  "providedCapabilities": ["modular.apps.sort/v1"],
+  "requestedCoreCapabilities": [],
+  "instanceConfiguration": {
+    "schemaVersion": 1,
+    "fields": [
+      {
+        "key": "reverse",
+        "title": "Reverse alphabetical order",
+        "type": "boolean",
+        "default": false
+      }
+    ]
+  },
+  "managementActivity": ".SortSettingsActivity"
+}

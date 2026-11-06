@@ -1,6 +1,8 @@
 package io.github.alexanderwilhelmsenberg.modular.composition
 
 import java.util.UUID
+import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRoute
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -12,6 +14,7 @@ import kotlinx.coroutines.flow.stateIn
 
 class InstanceStore(
     private val stateStore: CompositionStateStore,
+    private val routes: StateFlow<List<CapabilityRoute>> = MutableStateFlow(emptyList()),
 ) : AutoCloseable {
     private val scope =
         CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -31,7 +34,7 @@ class InstanceStore(
         configurationJson: String = "{}",
     ): Result<ModuleInstance> =
         runCatching {
-            val instance = normalizeAndValidate(
+            val candidate = normalizeAndValidate(
                 ModuleInstance(
                     id = UUID.randomUUID().toString(),
                     name = name,
@@ -40,7 +43,10 @@ class InstanceStore(
                 ),
             )
 
+            var saved = candidate
             stateStore.update { state ->
+                val instance = candidate.withValidatedConfiguration(routes.value)
+                saved = instance
                 require(
                     state.instances.none { it.id == instance.id },
                 ) {
@@ -53,16 +59,18 @@ class InstanceStore(
                 )
             }
 
-            instance
+            saved
         }
 
     suspend fun upsert(
         instance: ModuleInstance,
     ): Result<ModuleInstance> =
         runCatching {
-            val normalized = normalizeAndValidate(instance)
+            val candidate = normalizeAndValidate(instance)
+            var saved = candidate
 
             stateStore.update { state ->
+                val normalized = candidate.withValidatedConfiguration(routes.value)
                 val existing = state.instances.firstOrNull {
                     it.id == normalized.id
                 }
@@ -75,6 +83,18 @@ class InstanceStore(
                         "create a new instance to select a different provider"
                 }
 
+                require(
+                    existing == null || existing == normalized ||
+                        state.contexts.none { context ->
+                            context.id == state.activeContextId &&
+                                context.bindings.any { it.instanceId == normalized.id }
+                        },
+                ) {
+                    "Deactivate the active context before editing this instance"
+                }
+
+                saved = normalized
+
                 state.copy(
                     instances = (
                         state.instances.filterNot {
@@ -84,7 +104,7 @@ class InstanceStore(
                 )
             }
 
-            normalized
+            saved
         }
 
     suspend fun remove(
@@ -155,3 +175,4 @@ class InstanceStore(
         return normalized
     }
 }
+

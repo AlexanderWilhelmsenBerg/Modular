@@ -14,6 +14,7 @@ import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostSession
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularModuleService
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleDescriptorCodec
 import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CancellationException
@@ -35,6 +36,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Discovers external Modular module services and negotiates their root session.
@@ -78,13 +81,32 @@ class ModuleRegistry(
             .mapNotNull { resolveInfo ->
                 val serviceInfo = resolveInfo.serviceInfo ?: return@mapNotNull null
                 val component = ComponentName(serviceInfo.packageName, serviceInfo.name)
-                ModuleRecord(component = component)
+                val discovery = ModuleDescriptorDiscovery.inspect(packageManager, serviceInfo)
+                ModuleRecord(
+                    component = component,
+                    descriptor = discovery.descriptor,
+                    descriptorError = discovery.error,
+                    descriptorFingerprint = discovery.fingerprint,
+                    moduleId = discovery.descriptor?.moduleId,
+                    moduleVersion = discovery.descriptor?.moduleVersion,
+                    status = if (discovery.error != null) ModuleConnectionStatus.INCOMPATIBLE
+                        else ModuleConnectionStatus.DISCOVERED,
+                    error = discovery.error,
+                )
             }
             .distinctBy { it.component }
             .sortedBy { it.component.flattenToShortString() }
 
         val discoveredComponents = discovered.map { it.component }.toSet()
         val previousByComponent = _modules.value.associateBy { it.component }
+
+        discovered.forEach { candidate ->
+            val previous = previousByComponent[candidate.component]
+            if (previous != null && (previous.descriptorFingerprint != candidate.descriptorFingerprint ||
+                    previous.descriptorError != candidate.descriptorError)) {
+                unbind(candidate.component)
+            }
+        }
 
         connections.keys
             .filterNot { it in discoveredComponents }
@@ -94,24 +116,33 @@ class ModuleRegistry(
         _modules.value = discovered.map { candidate ->
             val previous = previousByComponent[candidate.component]
             val enabled = managementStore.isEnabled(candidate.component)
+            val changed = previous != null && (previous.descriptorFingerprint != candidate.descriptorFingerprint ||
+                previous.descriptorError != candidate.descriptorError)
+            val base = if (changed) candidate else previous ?: candidate
             if (!enabled) {
-                (previous ?: candidate).copy(
-                    moduleId = previous?.moduleId ?: managementStore.knownProviderId(candidate.component),
+                base.copy(
+                    moduleId = candidate.moduleId ?: previous?.moduleId ?: managementStore.knownProviderId(candidate.component),
                     enabled = false,
                     status = ModuleConnectionStatus.DISABLED,
                 )
-            } else if (previous != null) {
-                previous.copy(enabled = true)
+            } else if (previous != null && !changed) {
+                previous.copy(enabled = true, descriptor = candidate.descriptor,
+                    descriptorError = candidate.descriptorError,
+                    descriptorFingerprint = candidate.descriptorFingerprint)
             } else {
-                candidate.copy(moduleId = managementStore.knownProviderId(candidate.component))
+                candidate.copy(moduleId = candidate.moduleId ?: managementStore.knownProviderId(candidate.component))
             }
         }
 
         discovered.forEach { candidate ->
             val enabled = managementStore.isEnabled(candidate.component)
             val demanded = connectionDemand?.contains(candidate.component) ?: true
-            if (!enabled || !demanded) {
+            if (!enabled || !demanded || candidate.descriptorError != null) {
                 unbind(candidate.component)
+                if (candidate.descriptorError != null && enabled) {
+                    update(candidate.component) { it.copy(status = ModuleConnectionStatus.INCOMPATIBLE,
+                        error = candidate.descriptorError, sessionId = null) }
+                }
                 if (enabled && !demanded) {
                     update(candidate.component) {
                         val idleStatus = if (it.status in setOf(
@@ -123,7 +154,7 @@ class ModuleRegistry(
                     }
                 }
             } else if (candidate.component !in connections &&
-                previousByComponent[candidate.component]?.status !in setOf(
+                _modules.value.firstOrNull { it.component == candidate.component }?.status !in setOf(
                     ModuleConnectionStatus.FAILED,
                     ModuleConnectionStatus.INCOMPATIBLE,
                 )
@@ -175,6 +206,9 @@ class ModuleRegistry(
     suspend fun acquireCapabilityBinder(
         component: ComponentName,
         capability: CapabilityId,
+        instanceId: String? = null,
+        configurationJson: String = "{}",
+        expectedSessionId: String? = null,
     ): Result<IBinder> {
         val module = modules.value.firstOrNull {
             it.component == component &&
@@ -198,16 +232,50 @@ class ModuleRegistry(
                 ),
             )
 
+        if (expectedSessionId != null && expectedSessionId != session.sessionId) {
+            return Result.failure(IllegalStateException("Module route belongs to a stale session"))
+        }
+
+        val v4 = ModuleContract.supportsInstanceConfiguration(module.protocolVersion ?: 0)
+        val normalizedConfiguration = try {
+            if (v4) {
+                val descriptor = requireNotNull(module.descriptor) { "Module descriptor is missing" }
+                require(!instanceId.isNullOrBlank()) { "A module instance is required" }
+                ModuleDescriptorCodec.normalizeConfiguration(descriptor, configurationJson)
+            } else {
+                require(configurationJson.toByteArray(Charsets.UTF_8).size <= ModuleDescriptorCodec.MAX_CONFIGURATION_BYTES) {
+                    "Configuration exceeds size limit"
+                }
+                val legacyConfig = runCatching { Json.parseToJsonElement(configurationJson) }.getOrNull()
+                require(legacyConfig is JsonObject && legacyConfig.isEmpty()) {
+                    "This legacy module cannot use instance configuration"
+                }
+                "{}"
+            }
+        } catch (error: Exception) {
+            return Result.failure(error)
+        }
+
         return withContext(Dispatchers.IO) {
             runCatching {
-                requireNotNull(
-                    session.remote.getCapabilityBinder(
+                check(sessions[component] === session) { "Module session changed" }
+                val binder = if (v4) {
+                    session.remote.getInstanceCapabilityBinder(
                         session.sessionId,
+                        requireNotNull(instanceId),
+                        normalizedConfiguration,
                         capability.wireValue,
-                    ),
-                ) {
+                    )
+                } else {
+                    session.remote.getCapabilityBinder(session.sessionId, capability.wireValue)
+                }
+                requireNotNull(binder) {
                     "Module returned no Binder for " + capability.wireValue
                 }
+                check(sessions[component] === session &&
+                    modules.value.any { it.component == component && it.sessionId == session.sessionId &&
+                        it.status == ModuleConnectionStatus.CONNECTED }) { "Module session changed" }
+                binder
             }
         }
     }
@@ -216,18 +284,23 @@ class ModuleRegistry(
         serviceDiscoveryOverride?.invoke() ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             packageManager.queryIntentServices(
                 Intent(ModuleContract.SERVICE_ACTION),
-                PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong()),
+                PackageManager.ResolveInfoFlags.of((PackageManager.MATCH_ALL or PackageManager.GET_META_DATA).toLong()),
             )
         } else {
             @Suppress("DEPRECATION")
             packageManager.queryIntentServices(
                 Intent(ModuleContract.SERVICE_ACTION),
-                PackageManager.MATCH_ALL,
+                PackageManager.MATCH_ALL or PackageManager.GET_META_DATA,
             )
         }
 
     private fun bind(component: ComponentName) {
         if (!managementStore.isEnabled(component)) return
+        val descriptorError = modules.value.firstOrNull { it.component == component }?.descriptorError
+        if (descriptorError != null) {
+            update(component) { it.copy(status = ModuleConnectionStatus.INCOMPATIBLE, error = descriptorError) }
+            return
+        }
         val demanded = connectionDemand?.contains(component) ?: true
         if (!demanded) return
         if (component in connections) return
@@ -511,10 +584,48 @@ class ModuleRegistry(
                 }
                 .toSet()
 
+        val discovered = modules.value.firstOrNull { it.component == component }
+            ?: throw CancellationException("Module discovery changed")
+        val descriptor = discovered.descriptor
+
+        if (supported && ModuleContract.supportsInstanceConfiguration(protocolVersion)) {
+            val descriptorProblem = when {
+                discovered.descriptorError != null -> discovered.descriptorError
+                descriptor == null -> "Protocol v4 requires a packaged module descriptor. Add the service raw JSON metadata."
+                protocolVersion !in descriptor.coreProtocolMin..descriptor.coreProtocolMax ->
+                    "Packaged descriptor does not support protocol version $protocolVersion"
+                descriptor.moduleId != moduleId || descriptor.moduleVersion != moduleVersion ->
+                    "Packaged descriptor identity or version differs from the service handshake"
+                descriptor.providedCapabilities.sorted() != capabilities ->
+                    "Packaged descriptor capabilities differ from the service handshake"
+                descriptor.requestedCoreCapabilities.sorted() != requestedCoreCapabilities ->
+                    "Packaged descriptor Core requests differ from the service handshake"
+                else -> {
+                    val runtime = runCatching { ModuleDescriptorCodec.parse(remote.descriptorJson) }.getOrNull()
+                    when {
+                        runtime == null -> "Service returned an invalid runtime descriptor"
+                        runtime != descriptor -> "Runtime descriptor differs from the packaged descriptor"
+                        else -> null
+                    }
+                }
+            }
+            if (descriptorProblem != null) {
+                return HandshakeResult(
+                    record = discovered.copy(
+                        moduleId = moduleId, moduleVersion = moduleVersion,
+                        protocolVersion = protocolVersion, capabilities = capabilities,
+                        requestedCoreCapabilities = requestedCoreCapabilities,
+                        status = ModuleConnectionStatus.INCOMPATIBLE, sessionId = null,
+                        error = descriptorProblem,
+                    ),
+                    sessionId = null, coreHostSession = null,
+                )
+            }
+        }
+
         if (!supported) {
             return HandshakeResult(
-                record = ModuleRecord(
-                    component = component,
+                record = discovered.copy(
                     moduleId = moduleId,
                     moduleVersion = moduleVersion,
                     protocolVersion = protocolVersion,
@@ -566,8 +677,7 @@ class ModuleRegistry(
         }
 
         return HandshakeResult(
-            record = ModuleRecord(
-                component = component,
+            record = discovered.copy(
                 moduleId = moduleId,
                 moduleVersion = moduleVersion,
                 protocolVersion = protocolVersion,

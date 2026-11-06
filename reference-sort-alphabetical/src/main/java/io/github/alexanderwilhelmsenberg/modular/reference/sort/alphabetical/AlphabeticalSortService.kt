@@ -165,6 +165,8 @@ class AlphabeticalSortService : Service() {
                         AlphabeticalSorter.sort(
                             items = request.items,
                             localeTag = request.localeTag,
+                            reverse = getSharedPreferences(SORT_PREFERENCES, MODE_PRIVATE)
+                                .getBoolean(REVERSE_ORDER, false),
                         )
                     }.fold(
                         onSuccess = { sorted ->
@@ -210,5 +212,7 @@ class AlphabeticalSortService : Service() {
             "modular.reference.sort.alphabetical"
         const val MODULE_VERSION =
             "0.1.0"
+        const val SORT_PREFERENCES = "sort_settings"
+        const val REVERSE_ORDER = "reverse_order"
     }
 }

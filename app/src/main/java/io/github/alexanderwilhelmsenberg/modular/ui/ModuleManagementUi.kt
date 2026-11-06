@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -28,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
@@ -91,7 +93,7 @@ internal fun ModuleManagementCard(
                     enabled = !isCore,
                     onCheckedChange = { onSetEnabled(module, it) },
                     modifier = Modifier.semantics {
-                        contentDescription = "Enable ${module.label}"
+                        contentDescription = "${module.label} module"
                     },
                 )
             }
@@ -246,7 +248,7 @@ private fun CapabilityGrantRow(
             enabled = enabled,
             onCheckedChange = onChanged,
             modifier = Modifier.semantics {
-                contentDescription = "Allow ${capability.wireValue}"
+                contentDescription = "Access to ${capability.wireValue}"
             },
         )
     }
@@ -333,13 +335,20 @@ internal fun ModuleEventLog(
                 Text(if (expanded) "Hide module event log" else "Module event log · ${events.size}")
             }
             if (expanded) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     FilterChipButton("All", !errorsOnly) { errorsOnly = false }
                     FilterChipButton("Errors", errorsOnly) { errorsOnly = true }
                 }
                 Column {
-                    OutlinedButton(onClick = { menuOpen = true }) {
-                        Text(selectedModule?.substringAfterLast('/') ?: "All modules")
+                    OutlinedButton(onClick = { menuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            selectedModule?.substringAfterLast('/') ?: "All modules",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(

@@ -11,12 +11,19 @@ import io.github.alexanderwilhelmsenberg.modular.ui.HomeScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceSettingsStore
+import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceTheme
+import io.github.alexanderwilhelmsenberg.modular.appearance.ModularTheme
+import io.github.alexanderwilhelmsenberg.modular.appearance.applySystemBarAppearance
+import io.github.alexanderwilhelmsenberg.modular.capabilities.AppSortClient
+import io.github.alexanderwilhelmsenberg.modular.home.HomeSortController
 import io.github.alexanderwilhelmsenberg.modular.apps.AndroidAppRepository
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
@@ -55,6 +62,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var securityManager:
         ModuleSecurityManager
 
+    private lateinit var appearanceStore: AppearanceSettingsStore
+    private lateinit var appSortClient: AppSortClient
+    private lateinit var homeSortController: HomeSortController
+    private var homeSearchQuery by mutableStateOf("")
+    private var homeIntentGeneration by mutableStateOf(0)
+
     private var settingsVisible by mutableStateOf(false)
     private var pendingUninstallPackage: String? = null
 
@@ -91,6 +104,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        homeSearchQuery = savedInstanceState?.getString("homeSearchQuery").orEmpty()
+        appearanceStore = AppearanceSettingsStore(this)
         settingsVisible = savedInstanceState?.getBoolean("settingsVisible") ?: false
         pendingUninstallPackage = savedInstanceState?.getString("pendingUninstallPackage")
 
@@ -128,6 +143,21 @@ class MainActivity : ComponentActivity() {
             routes = capabilityRouter.routes,
         )
 
+        appSortClient = AppSortClient(capabilityRouter)
+        homeSortController = HomeSortController(
+            catalog = appRepository.catalog,
+            activeContext = contextManager.active,
+            routes = capabilityRouter.routes,
+            sort = appSortClient::sort,
+            localeTag = resources.configuration.locales[0].toLanguageTag(),
+            onFailure = { route, message ->
+                moduleRegistry.managementStore.record(
+                    route.component?.flattenToString() ?: route.providerId,
+                    "sort", message, true,
+                )
+            },
+        )
+
         eventBus = CoreEventBus()
         eventSources = CoreEventSources(
             eventBus = eventBus,
@@ -143,6 +173,13 @@ class MainActivity : ComponentActivity() {
         appRepository.refresh()
 
         setContent {
+            val appearanceTheme by appearanceStore.theme.collectAsState(initial = AppearanceTheme.LIGHT)
+            val appearanceError by appearanceStore.error.collectAsState()
+            val homeOrderedApps by homeSortController.orderedApps.collectAsState()
+            LaunchedEffect(appearanceTheme) {
+                applySystemBarAppearance(this@MainActivity, appearanceTheme)
+            }
+            ModularTheme(appearanceTheme) {
             val modules by moduleRegistry.modules.collectAsState()
             val appCatalog by appRepository.catalog.collectAsState()
             val instances by instanceStore.instances.collectAsState()
@@ -177,8 +214,12 @@ class MainActivity : ComponentActivity() {
             BackHandler { settingsVisible = false }
 
             if (!settingsVisible) {
+                key(homeIntentGeneration) {
                 HomeScreen(
                     catalog = appCatalog,
+                    orderedApps = homeOrderedApps,
+                    searchQuery = homeSearchQuery,
+                    onSearchQueryChange = { homeSearchQuery = it },
                     listState = homeListState,
                     showMakeDefault = homeRoleAvailable && !homeRoleHeld,
                     onLaunch = { app ->
@@ -193,6 +234,7 @@ class MainActivity : ComponentActivity() {
                     onMakeDefault = ::requestHomeRole,
                     onOpenSettings = { settingsVisible = true },
                 )
+                }
             } else {
                 val securityStatuses = modules.groupBy { it.component.packageName }.map { (packageName, packageModules) ->
                     securityManager.status(
@@ -203,6 +245,11 @@ class MainActivity : ComponentActivity() {
                 }
 
                 ModularApp(
+                    appearanceTheme = appearanceTheme,
+                    appearanceError = appearanceError,
+                    onAppearanceThemeSelected = { selected ->
+                        lifecycleScope.launch { appearanceStore.setTheme(selected) }
+                    },
                     onBack = { settingsVisible = false },
                     corePackageName = packageName,
                     managementEvents = managementEvents,
@@ -273,10 +320,12 @@ class MainActivity : ComponentActivity() {
                     onDeactivateContext = ::deactivateContext,
                 )
             }
+            }
         }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("homeSearchQuery", homeSearchQuery)
         outState.putBoolean("settingsVisible", settingsVisible)
         outState.putString("pendingUninstallPackage", pendingUninstallPackage)
         super.onSaveInstanceState(outState)
@@ -288,6 +337,8 @@ class MainActivity : ComponentActivity() {
         if (intent.action == Intent.ACTION_MAIN &&
             (intent.hasCategory(Intent.CATEGORY_HOME) || intent.hasCategory(Intent.CATEGORY_LAUNCHER))) {
             settingsVisible = false
+            homeSearchQuery = ""
+            homeIntentGeneration++
         }
     }
 
@@ -305,6 +356,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (::homeSortController.isInitialized) homeSortController.close()
+        if (::appSortClient.isInitialized) appSortClient.close()
         if (::eventSources.isInitialized) {
             eventSources.close()
         }

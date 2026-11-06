@@ -8,12 +8,27 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortItemParc
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortRequestParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortResultParcel
 import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 class AppSortClient(
     private val capabilityRouter: CapabilityRouter,
-) {
+) : AutoCloseable {
+    // Remote Binder calls cannot be interrupted. One worker and one waiting
+    // request bound the damage from a hung provider without racing sequential
+    // calls that arrive as the worker completes.
+    private val worker = ThreadPoolExecutor(
+        1, 1, 0L, TimeUnit.MILLISECONDS,
+        ArrayBlockingQueue(1),
+        { task -> Thread(task, "modular-app-sort-ipc").apply { isDaemon = true } },
+        ThreadPoolExecutor.AbortPolicy(),
+    )
+
     suspend fun sort(
         route: CapabilityRoute,
         apps: List<LaunchableApp>,
@@ -37,54 +52,45 @@ class AppSortClient(
             )
         }
 
-        return capabilityRouter
-            .acquireModuleBinder(route)
-            .fold(
-                onSuccess = { binder ->
-                    withContext(Dispatchers.IO) {
-                        runCatching {
-                            val capability =
-                                IAppSortCapability.Stub.asInterface(
-                                    binder,
-                                )
-
-                            val result = capability.sort(
-                                AppSortRequestParcel(
-                                    items = apps.map { app ->
-                                        AppSortItemParcel(
-                                            key = AppKeyParcel(
-                                                packageName =
-                                                    app.key.packageName,
-                                                activityName =
-                                                    app.key.activityName,
-                                                profileSerial =
-                                                    app.key.profileSerial,
-                                            ),
-                                            label = app.label,
-                                        )
-                                    },
-                                    localeTag = localeTag,
-                                ),
-                            )
-
-                            require(
-                                result.status ==
-                                    AppSortResultParcel.STATUS_SUCCESS,
-                            ) {
-                                result.message
-                                    ?: "Sort provider failed"
-                            }
-
-                            AppSortResultValidator.apply(
-                                input = apps,
-                                orderedKeys = result.orderedKeys,
-                            ).getOrThrow()
+        return suspendCancellableCoroutine { continuation ->
+            try {
+                worker.execute {
+                    if (!continuation.isActive) return@execute
+                    val result = runCatching {
+                        val binder = runBlocking {
+                            capabilityRouter.acquireModuleBinder(route).getOrThrow()
                         }
+                        val capability = IAppSortCapability.Stub.asInterface(binder)
+                        val response = capability.sort(
+                            AppSortRequestParcel(
+                                items = apps.map { app ->
+                                    AppSortItemParcel(
+                                        key = AppKeyParcel(
+                                            packageName = app.key.packageName,
+                                            activityName = app.key.activityName,
+                                            profileSerial = app.key.profileSerial,
+                                        ),
+                                        label = app.label,
+                                    )
+                                },
+                                localeTag = localeTag,
+                            ),
+                        )
+                        require(response.status == AppSortResultParcel.STATUS_SUCCESS) {
+                            response.message ?: "Sort provider failed"
+                        }
+                        AppSortResultValidator.apply(apps, response.orderedKeys).getOrThrow()
                     }
-                },
-                onFailure = { throwable ->
-                    Result.failure(throwable)
-                },
-            )
+                    if (continuation.isActive) continuation.resume(result)
+                }
+            } catch (error: RejectedExecutionException) {
+                if (continuation.isActive) continuation.resume(Result.failure(error))
+            }
+        }
+    }
+
+    override fun close() {
+        worker.shutdown()
     }
 }
+

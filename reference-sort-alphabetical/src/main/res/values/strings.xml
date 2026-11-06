@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Modular Alphabetical Sort</string>
+    <string name="sort_settings_title">Sort helper settings</string>
+    <string name="reverse_order">Reverse alphabetical order</string>
 </resources>

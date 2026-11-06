@@ -21,6 +21,7 @@ import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 internal fun HomeAppRow(
     app: LaunchableApp,
     enabled: Boolean,
+    unavailabilityReason: String? = null,
     onClick: () -> Unit,
 ) {
     Box(
@@ -28,7 +29,9 @@ internal fun HomeAppRow(
             .fillMaxWidth()
             .heightIn(min = 48.dp)
             .clickable(enabled = enabled, onClick = onClick)
-            .semantics { if (!enabled) stateDescription = "Unavailable" }
+            .semantics {
+                if (!enabled) stateDescription = unavailabilityReason ?: "Unavailable"
+            }
             .testTag("app-row:${app.key.stableId}")
             .padding(horizontal = 8.dp, vertical = 12.dp),
         contentAlignment = Alignment.CenterStart,
@@ -41,3 +44,4 @@ internal fun HomeAppRow(
         )
     }
 }
+

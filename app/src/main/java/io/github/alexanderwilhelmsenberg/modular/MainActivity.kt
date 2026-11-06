@@ -11,12 +11,18 @@ import io.github.alexanderwilhelmsenberg.modular.ui.HomeScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceSettingsStore
+import io.github.alexanderwilhelmsenberg.modular.appearance.ModularTheme
+import io.github.alexanderwilhelmsenberg.modular.appearance.applySystemBarAppearance
+import io.github.alexanderwilhelmsenberg.modular.capabilities.AppSortClient
+import io.github.alexanderwilhelmsenberg.modular.home.HomeSortController
 import io.github.alexanderwilhelmsenberg.modular.apps.AndroidAppRepository
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
@@ -55,6 +61,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var securityManager:
         ModuleSecurityManager
 
+    private lateinit var appearanceStore: AppearanceSettingsStore
+    private lateinit var appSortClient: AppSortClient
+    private lateinit var homeSortController: HomeSortController
+    private var homeSearchQuery by mutableStateOf("")
+    private var homeIntentGeneration by mutableStateOf(0)
+
     private var settingsVisible by mutableStateOf(false)
     private var pendingUninstallPackage: String? = null
 
@@ -91,6 +103,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        homeSearchQuery = savedInstanceState?.getString("homeSearchQuery").orEmpty()
+        appearanceStore = AppearanceSettingsStore(this)
         settingsVisible = savedInstanceState?.getBoolean("settingsVisible") ?: false
         pendingUninstallPackage = savedInstanceState?.getString("pendingUninstallPackage")
 
@@ -128,6 +142,21 @@ class MainActivity : ComponentActivity() {
             routes = capabilityRouter.routes,
         )
 
+        appSortClient = AppSortClient(capabilityRouter)
+        homeSortController = HomeSortController(
+            catalog = appRepository.catalog,
+            activeContext = contextManager.active,
+            routes = capabilityRouter.routes,
+            sort = appSortClient::sort,
+            localeTag = resources.configuration.locales[0].toLanguageTag(),
+            onFailure = { route, message ->
+                moduleRegistry.managementStore.record(
+                    route.component?.flattenToString() ?: route.providerId,
+                    "sort", message, true,
+                )
+            },
+        )
+
         eventBus = CoreEventBus()
         eventSources = CoreEventSources(
             eventBus = eventBus,
@@ -142,141 +171,165 @@ class MainActivity : ComponentActivity() {
         moduleRegistry.refresh()
         appRepository.refresh()
 
-        setContent {
-            val modules by moduleRegistry.modules.collectAsState()
-            val appCatalog by appRepository.catalog.collectAsState()
-            val instances by instanceStore.instances.collectAsState()
-            val contexts by contextManager.contexts.collectAsState()
-            val activeContext by contextManager.active.collectAsState()
-            val activationError by
-                contextManager.activationError.collectAsState()
-            val compositionLoadError by
-                compositionStore.loadError.collectAsState()
-            val eventDiagnostics by
-                eventBus.diagnostics.collectAsState()
-            val grantState by
-                grantStore.state.collectAsState()
-            val grantLoadError by
-                grantStore.loadError.collectAsState()
-
-            val managementEvents by moduleRegistry.managementStore.events.collectAsState()
-            // Settings requests inspection sessions. Home needs only providers selected
-            // by its persisted context; the built-in launcher requires no module.
-            LaunchedEffect(settingsVisible, modules, activeContext.context, instances) {
-                val providerIds = activeContext.context?.bindings.orEmpty().mapNotNull { binding ->
-                    instances.firstOrNull { it.id == binding.instanceId }?.providerId
-                }.toSet()
-                moduleRegistry.setConnectionDemand(
-                    if (settingsVisible) null else modules.filter { module ->
-                        (module.moduleId ?: moduleRegistry.managementStore.knownProviderId(module.component)) in providerIds
-                    }.map { it.component }.toSet(),
-                )
-            }
-
-            val homeListState = rememberLazyListState()
-            BackHandler { settingsVisible = false }
-
-            if (!settingsVisible) {
-                HomeScreen(
-                    catalog = appCatalog,
-                    listState = homeListState,
-                    showMakeDefault = homeRoleAvailable && !homeRoleHeld,
-                    onLaunch = { app ->
-                        lifecycleScope.launch {
-                            appRepository.launch(app.key).onFailure {
-                                Toast.makeText(this@MainActivity, "Unable to open ${app.label}", Toast.LENGTH_LONG).show()
-                                appRepository.refresh()
-                            }
-                        }
-                    },
-                    onRefresh = appRepository::refresh,
-                    onMakeDefault = ::requestHomeRole,
-                    onOpenSettings = { settingsVisible = true },
-                )
-            } else {
-                val securityStatuses = modules.groupBy { it.component.packageName }.map { (packageName, packageModules) ->
-                    securityManager.status(
-                        packageName = packageName,
-                        requestedCapabilities = packageModules.flatMap { it.requestedCoreCapabilities }
-                            .mapNotNull(CapabilityId::parse).toSet(),
-                    )
+        lifecycleScope.launch {
+            // Read local appearance before the first Compose frame, without blocking Main.
+            val initialTheme = appearanceStore.currentTheme()
+            applySystemBarAppearance(this@MainActivity, initialTheme)
+            setContent {
+                val appearanceTheme by appearanceStore.theme.collectAsState(initial = initialTheme)
+                val appearanceError by appearanceStore.error.collectAsState()
+                val homeOrderedApps by homeSortController.orderedApps.collectAsState()
+                LaunchedEffect(appearanceTheme) {
+                    applySystemBarAppearance(this@MainActivity, appearanceTheme)
                 }
+                ModularTheme(appearanceTheme) {
+                    val modules by moduleRegistry.modules.collectAsState()
+                    val appCatalog by appRepository.catalog.collectAsState()
+                    val instances by instanceStore.instances.collectAsState()
+                    val contexts by contextManager.contexts.collectAsState()
+                    val activeContext by contextManager.active.collectAsState()
+                    val activationError by
+                        contextManager.activationError.collectAsState()
+                    val compositionLoadError by
+                        compositionStore.loadError.collectAsState()
+                    val eventDiagnostics by
+                        eventBus.diagnostics.collectAsState()
+                    val grantState by
+                        grantStore.state.collectAsState()
+                    val grantLoadError by
+                        grantStore.loadError.collectAsState()
 
-                ModularApp(
-                    onBack = { settingsVisible = false },
-                    corePackageName = packageName,
-                    managementEvents = managementEvents,
-                    onSetModuleEnabled = { module, enabled -> moduleRegistry.setEnabled(module.component, enabled) },
-                    onRetryModule = { module -> moduleRegistry.retry(module.component) },
-                    onUninstallModule = ::uninstallModule,
-                    onClearModuleEvents = moduleRegistry.managementStore::clearEvents,
-                    onSetGrant = { module, capability, granted ->
-                        val status = securityStatuses.firstOrNull { it.packageName == module.component.packageName }
-                        lifecycleScope.launch {
-                            val result = if (granted) {
-                                val identity = status?.identity
-                                if (identity == null) Result.failure(IllegalStateException("Module identity unavailable"))
-                                else securityManager.grant(ModuleAuthorizationContext(identity, status.requestedCapabilities), capability)
-                            } else securityManager.revoke(module.component.packageName, capability)
-                            recordManagementResult(module.component.flattenToString(), "permission", result,
-                                "${if (granted) "Granted" else "Revoked"} ${capability.wireValue}")
+                    val managementEvents by moduleRegistry.managementStore.events.collectAsState()
+                    // Settings requests inspection sessions. Home needs only providers selected
+                    // by its persisted context; the built-in launcher requires no module.
+                    LaunchedEffect(settingsVisible, modules, activeContext.context, instances) {
+                        val providerIds = activeContext.context?.bindings.orEmpty().mapNotNull { binding ->
+                            instances.firstOrNull { it.id == binding.instanceId }?.providerId
+                        }.toSet()
+                        moduleRegistry.setConnectionDemand(
+                            if (settingsVisible) null else modules.filter { module ->
+                                (module.moduleId ?: moduleRegistry.managementStore.knownProviderId(module.component)) in providerIds
+                            }.map { it.component }.toSet(),
+                        )
+                    }
+
+                    val homeListState = rememberLazyListState()
+                    BackHandler { settingsVisible = false }
+
+                    if (!settingsVisible) {
+                        key(homeIntentGeneration) {
+                            HomeScreen(
+                                catalog = appCatalog,
+                                orderedApps = homeOrderedApps,
+                                searchQuery = homeSearchQuery,
+                                onSearchQueryChange = { homeSearchQuery = it },
+                                listState = homeListState,
+                                showMakeDefault = homeRoleAvailable && !homeRoleHeld,
+                                onLaunch = { app ->
+                                    lifecycleScope.launch {
+                                        appRepository.launch(app.key).onFailure {
+                                            Toast.makeText(this@MainActivity, "Unable to open ${app.label}", Toast.LENGTH_LONG).show()
+                                            appRepository.refresh()
+                                        }
+                                    }
+                                },
+                                onRefresh = appRepository::refresh,
+                                onMakeDefault = ::requestHomeRole,
+                                onOpenSettings = { settingsVisible = true },
+                            )
                         }
-                    },
-                    compositionContent = {
-                        CompositionManagement(
+                    } else {
+                        val securityStatuses = modules.groupBy { it.component.packageName }.map { (packageName, packageModules) ->
+                            securityManager.status(
+                                packageName = packageName,
+                                requestedCapabilities = packageModules.flatMap { it.requestedCoreCapabilities }
+                                    .mapNotNull(CapabilityId::parse).toSet(),
+                            )
+                        }
+
+                        ModularApp(
+                            appearanceTheme = appearanceTheme,
+                            appearanceError = appearanceError,
+                            onAppearanceThemeSelected = { selected ->
+                                lifecycleScope.launch { appearanceStore.setTheme(selected) }
+                            },
+                            onBack = { settingsVisible = false },
+                            corePackageName = packageName,
+                            managementEvents = managementEvents,
+                            onSetModuleEnabled = { module, enabled -> moduleRegistry.setEnabled(module.component, enabled) },
+                            onRetryModule = { module -> moduleRegistry.retry(module.component) },
+                            onUninstallModule = ::uninstallModule,
+                            onClearModuleEvents = moduleRegistry.managementStore::clearEvents,
+                            onSetGrant = { module, capability, granted ->
+                                val status = securityStatuses.firstOrNull { it.packageName == module.component.packageName }
+                                lifecycleScope.launch {
+                                    val result = if (granted) {
+                                        val identity = status?.identity
+                                        if (identity == null) Result.failure(IllegalStateException("Module identity unavailable"))
+                                        else securityManager.grant(ModuleAuthorizationContext(identity, status.requestedCapabilities), capability)
+                                    } else securityManager.revoke(module.component.packageName, capability)
+                                    recordManagementResult(module.component.flattenToString(), "permission", result,
+                                        "${if (granted) "Granted" else "Revoked"} ${capability.wireValue}")
+                                }
+                            },
+                            compositionContent = {
+                                CompositionManagement(
+                                    instances = instances,
+                                    contexts = contexts,
+                                    modules = modules,
+                                    activeContext = activeContext,
+                                    onSaveInstance = { instance ->
+                                        instanceStore.upsert(instance).map { Unit }.also {
+                                            recordManagementResult("Core", "instance", it, "Saved instance ${instance.name}")
+                                        }
+                                    },
+                                    onDeleteInstance = { id ->
+                                        instanceStore.remove(id).also {
+                                            recordManagementResult("Core", "instance", it, "Removed instance $id")
+                                        }
+                                    },
+                                    onSaveContext = { context ->
+                                        contextManager.upsert(context).map { Unit }.also {
+                                            recordManagementResult("Core", "context", it, "Saved context ${context.name}")
+                                        }
+                                    },
+                                    onDeleteContext = { id ->
+                                        contextManager.remove(id).also {
+                                            recordManagementResult("Core", "context", it, "Removed context $id")
+                                        }
+                                    },
+                                    onActivateContext = ::activateContext,
+                                    onDeactivateContext = ::deactivateContext,
+                                )
+                            },
+                            homeRoleAvailable = homeRoleAvailable,
+                            homeRoleHeld = homeRoleHeld,
+                            modules = modules,
+                            appCatalog = appCatalog,
                             instances = instances,
                             contexts = contexts,
-                            modules = modules,
                             activeContext = activeContext,
-                            onSaveInstance = { instance ->
-                                instanceStore.upsert(instance).map { Unit }.also {
-                                    recordManagementResult("Core", "instance", it, "Saved instance ${instance.name}")
-                                }
-                            },
-                            onDeleteInstance = { id ->
-                                instanceStore.remove(id).also {
-                                    recordManagementResult("Core", "instance", it, "Removed instance $id")
-                                }
-                            },
-                            onSaveContext = { context ->
-                                contextManager.upsert(context).map { Unit }.also {
-                                    recordManagementResult("Core", "context", it, "Saved context ${context.name}")
-                                }
-                            },
-                            onDeleteContext = { id ->
-                                contextManager.remove(id).also {
-                                    recordManagementResult("Core", "context", it, "Removed context $id")
-                                }
-                            },
+                            compositionLoadError = compositionLoadError,
+                            contextActivationError = activationError,
+                            eventBusDiagnostics = eventDiagnostics,
+                            moduleSecurity = securityStatuses,
+                            grantRecordCount =
+                                grantState.records.size,
+                            grantLoadError = grantLoadError,
+                            onRequestHomeRole = ::requestHomeRole,
+                            onRefreshModules = moduleRegistry::refresh,
+                            onRefreshApps = appRepository::refresh,
                             onActivateContext = ::activateContext,
                             onDeactivateContext = ::deactivateContext,
                         )
-                    },
-                    homeRoleAvailable = homeRoleAvailable,
-                    homeRoleHeld = homeRoleHeld,
-                    modules = modules,
-                    appCatalog = appCatalog,
-                    instances = instances,
-                    contexts = contexts,
-                    activeContext = activeContext,
-                    compositionLoadError = compositionLoadError,
-                    contextActivationError = activationError,
-                    eventBusDiagnostics = eventDiagnostics,
-                    moduleSecurity = securityStatuses,
-                    grantRecordCount =
-                        grantState.records.size,
-                    grantLoadError = grantLoadError,
-                    onRequestHomeRole = ::requestHomeRole,
-                    onRefreshModules = moduleRegistry::refresh,
-                    onRefreshApps = appRepository::refresh,
-                    onActivateContext = ::activateContext,
-                    onDeactivateContext = ::deactivateContext,
-                )
+                    }
+                }
             }
         }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("homeSearchQuery", homeSearchQuery)
         outState.putBoolean("settingsVisible", settingsVisible)
         outState.putString("pendingUninstallPackage", pendingUninstallPackage)
         super.onSaveInstanceState(outState)
@@ -288,6 +341,8 @@ class MainActivity : ComponentActivity() {
         if (intent.action == Intent.ACTION_MAIN &&
             (intent.hasCategory(Intent.CATEGORY_HOME) || intent.hasCategory(Intent.CATEGORY_LAUNCHER))) {
             settingsVisible = false
+            homeSearchQuery = ""
+            homeIntentGeneration++
         }
     }
 
@@ -305,6 +360,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (::homeSortController.isInitialized) homeSortController.close()
+        if (::appSortClient.isInitialized) appSortClient.close()
         if (::eventSources.isInitialized) {
             eventSources.close()
         }

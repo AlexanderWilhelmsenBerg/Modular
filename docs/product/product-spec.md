@@ -1,6 +1,6 @@
 # Modular — Product Specification
 
-Status: **Core requirements and agreed follow-up specifications (2026-11-05)**
+Status: **Core requirements including search, themes, and helper recovery (2026-11-06)**
 
 This document captures the product intent established before implementation. Items marked **Open** are deliberately unresolved rather than guessed.
 
@@ -110,7 +110,7 @@ The model must be capable of representing:
 - enabled/available state;
 - changes over time.
 
-Alphabetical ordering is built into Core. Optional filtering, tagging, grouping, and alternative sorting extend the shared model. Built-in search is an agreed follow-up requirement (section 15).
+Alphabetical ordering is built into Core. Optional filtering, tagging, grouping, and alternative sorting extend the shared model. Built-in search is a Core requirement (section 15).
 
 Android's `LauncherApps` API is the primary platform abstraction to evaluate for profile-aware launcher operations.
 
@@ -182,7 +182,7 @@ Python is the preferred first optional scripting runtime, consistent with ADR-00
 - Ordinary return from a launched app preserves Home scroll position where possible. Rotation/process recreation restores appropriate UI state; a newly delivered HOME or app-icon intent takes precedence and shows Home.
 - TalkBack semantics, large text, adequate touch targets, contrast, and system insets are baseline requirements.
 - Optional add-on failure shall retain or restore built-in Home and alphabetical ordering. Settings and add-on disable controls remain reachable.
-- No separate drawer is required. Built-in search and theme selection are agreed follow-up Core requirements (section 15); favorites, an alphabet index, widgets, and alternative layouts remain optional enhancements.
+- No separate drawer is required. Built-in search and theme selection are Core requirements (section 15); favorites, an alphabet index, widgets, and alternative layouts remain optional enhancements.
 
 ## 12. Non-goals for the first implementation slice
 
@@ -233,9 +233,9 @@ These requirements complete the management surface around the existing module ru
 
 Acceptance: disable/re-enable and restart Core; retry a failed/blocked handshake; simulate stale callbacks, service death, and an incompatible module; restart and inspect retained events; clear history; edit invalid/referenced configuration; reject an invalid context switch; revoke permission during a session; cancel uninstall and then confirm uninstall. Home and Settings must remain reachable throughout.
 
-## 15. Agreed next phase: Home controls and themes
+## 15. Home controls and themes
 
-These requirements are approved but are not part of the module-management implementation:
+These requirements extend the baseline Core and Settings implementation:
 
 - Remove the “Apps” title from Home.
 - Add a search control beside a settings gear icon, both with a 48 dp resting height and adequate touch targets. Search expands horizontally when focused, keeps the entered text/caret visible, and keeps Settings accessible. Keyboard Back dismisses editing before Home navigation. Clearing search restores the full alphabetical list; show an explicit no-results state.
@@ -243,3 +243,21 @@ These requirements are approved but are not part of the module-management implem
 - Provide persisted Light, Dark, and AMOLED themes in Settings and apply them consistently to Home, Settings, dialogs, and system bars. AMOLED uses a true-black background with readable controls and text.
 - Define a bounded theme extension contract before adding themes from external add-ons. Losing an add-on theme falls back to a built-in theme without blocking Home.
 - Verify compact widths, font scaling, TalkBack, keyboard/insets, and contrast in all built-in themes. Do not add app icons or profile subtitles to the default list.
+
+## 16. Delivery and acceptance evidence
+
+The current Core delivery implements sections 11, 14, and 15 and connects the
+selected `apps.sort/v1` helper to Home. Core applies search after ordering and
+validates helper output against the current catalog. Timeout, failure, disabled
+or removed providers, and invalid or stale results retain built-in ordering.
+Explicit HOME/app-icon intents reset search; returning from Settings or a launched
+app preserves it, and recreation restores the saved query.
+
+The built-in themes and a bounded [future theme contract](../architecture/theme-contract.md)
+are included. External theme loading and external Home/Drawer rendering remain
+later add-on work, as do automation, scripting, MCP transport, and terminal tools.
+They are not dependencies of Core acceptance.
+
+See [Core completion](../implementation/core-completion.md) for automated coverage,
+CI evidence, remaining physical-device checks, and the reference helper proof.
+Implementation status is not a claim that every OEM/device combination was tested.

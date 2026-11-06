@@ -49,6 +49,16 @@ class AlphabeticalSorterTest {
         )
     }
 
+    @Test
+    fun reverseSettingReturnsExactKeysInDescendingOrder() {
+        val sorted = AlphabeticalSorter.sort(
+            items = listOf(item("b.pkg", "Beta", 1), item("a.pkg", "Alpha", 1)),
+            localeTag = "en",
+            reverse = true,
+        )
+        assertEquals(listOf("b.pkg", "a.pkg"), sorted.map { it.key.packageName })
+    }
+
     private fun item(
         packageName: String,
         label: String,

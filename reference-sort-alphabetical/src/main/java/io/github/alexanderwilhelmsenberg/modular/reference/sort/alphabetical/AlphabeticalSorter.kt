@@ -8,6 +8,7 @@ object AlphabeticalSorter {
     fun sort(
         items: List<AppSortItemParcel>,
         localeTag: String,
+        reverse: Boolean = false,
     ): List<AppSortItemParcel> {
         val locale = runCatching {
             Locale.forLanguageTag(localeTag)
@@ -17,7 +18,7 @@ object AlphabeticalSorter {
             strength = Collator.PRIMARY
         }
 
-        return items.sortedWith { left, right ->
+        val sorted = items.sortedWith { left, right ->
             val byCollation = collator.compare(
                 left.label,
                 right.label,
@@ -55,5 +56,6 @@ object AlphabeticalSorter {
                 right.key.profileSerial,
             )
         }
+        return if (reverse) sorted.reversed() else sorted
     }
 }

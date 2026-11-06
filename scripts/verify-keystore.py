@@ -13,7 +13,11 @@ def main():
     parser.add_argument("--expected-certificates", type=Path)
     parser.add_argument("--write-public", type=Path)
     args = parser.parse_args()
-    store = os.environ["MODULAR_KEYSTORE_PATH"]
+    store = os.environ.get("MODULAR_KEYSTORE_PATH", "")
+    if not store:
+        raise SystemExit("MODULAR_KEYSTORE_PATH must point to the signing keystore")
+    if not os.environ.get("MODULAR_KEYSTORE_PASSWORD"):
+        raise SystemExit("Missing MODULAR_KEYSTORE_PASSWORD. Set it as a repository Actions secret, not a Variable or environment-only secret.")
     certificates = {}
     for variant in ("debug", "release"):
         alias = "modular-" + variant

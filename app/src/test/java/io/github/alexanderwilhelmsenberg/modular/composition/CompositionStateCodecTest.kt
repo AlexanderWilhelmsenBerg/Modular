@@ -2,6 +2,7 @@ package io.github.alexanderwilhelmsenberg.modular.composition
 
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -68,4 +69,18 @@ class CompositionStateCodecTest {
             )
         }
     }
+
+    @Test
+    fun invalidConfigurationDoesNotEchoItsContents() {
+        val sentinel = "private-config-sentinel"
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            CompositionStateCodec.validateConfigurationJson(
+                """{"secret":"$sentinel","broken":}""",
+            )
+        }
+
+        assertEquals("Instance configuration must be valid JSON", error.message)
+        assertFalse(error.message.orEmpty().contains(sentinel))
+    }
 }
+

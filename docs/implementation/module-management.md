@@ -2,7 +2,7 @@
 
 This change completes the Settings management surface around the existing registry,
 composition, and security stores. It extends the text-only Core Home work; it does
-not change Home rows or add the separately agreed search/theme controls.
+not change Home rows. The subsequent [Core completion](core-completion.md) adds the agreed search/theme controls and optional Home sort integration.
 
 ## Behavior
 
@@ -31,14 +31,14 @@ not change Home rows or add the separately agreed search/theme controls.
 | --- | --- |
 | Baseline launcher | Text-only alphabetical Home, launcher visibility and warm Home navigation have existing automated coverage; user confirmed complete catalog and simple rows. |
 | Management | Enable/disable, retry, diagnostics, uninstall handoff, instance/context editors and grants are implemented in this change; validation results belong in the PR checks. |
-| Composition runtime | Storage, validation and route selection exist. Optional sorting/filtering is not yet applied to the built-in Home; a complete helper integration remains a separate acceptance item. |
-| External presentation | Versioned external surface/configuration/theme schemas remain to be designed. |
-| Home controls and themes | Search, gear, removal of Apps heading, Light/Dark/AMOLED are agreed in product-spec section 15, awaiting implementation. |
+| Composition runtime | Storage, validation and route selection exist. Selected optional sorting now applies to Home with timeout, invalid-result validation and stale-response rejection; richer filtering remains later work. |
+| External presentation | A bounded future theme contract is documented; external surface/configuration schemas and external theme loading remain later work. |
+| Home controls and themes | Search, gear, removal of Apps heading, and persisted Light/Dark/AMOLED are implemented by Core completion. |
 | Device acceptance | Physical-device uninstall cancellation/success, paused work profiles, TalkBack, large font, process restoration and OEM-specific service behavior still require device validation. |
 
-The entire product specification is therefore not yet met. Management completion
-does not claim that external rendering, helper integration, or the next UI phase
-has shipped.
+The current Core implementation covers the agreed baseline and management scope.
+External rendering and other explicitly later add-ons remain deferred; physical-device
+acceptance is tracked separately from automated CI evidence.
 
 ## Design review
 

@@ -39,7 +39,7 @@ Acceptance: product-spec cases 6–8; external add-ons remain separately package
 - Preserve default text-only rows and baseline navigation/accessibility.
 - Design an add-on theme contract before external themes are loaded.
 
-These are agreed requirements awaiting implementation after module management.
+These requirements are implemented in the Core completion change. Validation and device acceptance are tracked in [Core completion](implementation/core-completion.md).
 
 ## Phase 2 — Module UX and richer composition
 

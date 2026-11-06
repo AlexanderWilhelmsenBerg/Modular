@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.capabilities
 
 import android.content.Context
+import android.content.ComponentName
 import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -12,6 +13,7 @@ import io.github.alexanderwilhelmsenberg.modular.composition.ContextCapabilityBi
 import io.github.alexanderwilhelmsenberg.modular.composition.ContextManager
 import io.github.alexanderwilhelmsenberg.modular.composition.DataStoreCompositionStateStore
 import io.github.alexanderwilhelmsenberg.modular.composition.InstanceStore
+import io.github.alexanderwilhelmsenberg.modular.home.HomeSortController
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
 import io.github.alexanderwilhelmsenberg.modular.security.AndroidModuleIdentityResolver
@@ -19,6 +21,8 @@ import io.github.alexanderwilhelmsenberg.modular.security.DataStoreModuleGrantSt
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
 import io.github.alexanderwilhelmsenberg.modular.security.OfficialModuleBootstrapPolicy
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -26,6 +30,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -45,6 +51,7 @@ class AppSortCrossApkSmokeTest {
                     app("z.pkg", "Zulu"),
                     app("b.pkg", "beta"),
                     app("a.pkg", "Alpha"),
+                    app("0.pkg", "alpha"),
                 ),
             )
 
@@ -84,6 +91,9 @@ class AppSortCrossApkSmokeTest {
                 stateStore = stateStore,
                 routes = router.routes,
             )
+            val sortClient = AppSortClient(router)
+            var homeSortController: HomeSortController? = null
+            var disabledComponent: ComponentName? = null
 
             try {
                 registry.refresh()
@@ -142,8 +152,8 @@ class AppSortCrossApkSmokeTest {
                     personalContext.id,
                 ).getOrThrow()
 
-                val personalSorted = AppSortClient(router)
-                    .sort(
+                val personalSorted = withTimeout(10_000) {
+                    sortClient.sort(
                         route = requireNotNull(
                             personalActive.routeFor(
                                 StandardCapabilities.AppsSort,
@@ -152,11 +162,11 @@ class AppSortCrossApkSmokeTest {
                         apps =
                             repository.catalog.value.apps,
                         localeTag = "en",
-                    )
-                    .getOrThrow()
+                    ).getOrThrow()
+                }
 
                 assertEquals(
-                    listOf("Alpha", "beta", "Zulu"),
+                    listOf("Alpha", "alpha", "beta", "Zulu"),
                     personalSorted.map { it.label },
                 )
                 assertEquals(
@@ -179,8 +189,8 @@ class AppSortCrossApkSmokeTest {
                         .id,
                 )
 
-                val workSorted = AppSortClient(router)
-                    .sort(
+                val workSorted = withTimeout(10_000) {
+                    sortClient.sort(
                         route = requireNotNull(
                             workActive.routeFor(
                                 StandardCapabilities.AppsSort,
@@ -189,11 +199,11 @@ class AppSortCrossApkSmokeTest {
                         apps =
                             repository.catalog.value.apps,
                         localeTag = "en",
-                    )
-                    .getOrThrow()
+                    ).getOrThrow()
+                }
 
                 assertEquals(
-                    listOf("Alpha", "beta", "Zulu"),
+                    listOf("Alpha", "alpha", "beta", "Zulu"),
                     workSorted.map { it.label },
                 )
 
@@ -204,8 +214,62 @@ class AppSortCrossApkSmokeTest {
                     }
                 }
 
+                val invocationCount = AtomicInteger(0)
+                val failures = CopyOnWriteArrayList<String>()
+                val controller = HomeSortController(
+                    catalog = repository.catalog,
+                    activeContext = contexts.active,
+                    routes = router.routes,
+                    sort = { route, apps, locale ->
+                        invocationCount.incrementAndGet()
+                        sortClient.sort(route, apps, locale)
+                    },
+                    localeTag = "en",
+                    timeoutMillis = 5_000,
+                    onFailure = { _, message -> failures.add(message) },
+                )
+                homeSortController = controller
+
+                // Core's stable-key tie breaker puts 0.pkg first. The external
+                // reference helper uses exact label text and puts Alpha first.
+                val helperOrder = listOf("Alpha", "alpha", "beta", "Zulu")
+                val coreOrder = listOf("alpha", "Alpha", "beta", "Zulu")
+                withTimeout(15_000) {
+                    controller.orderedApps.first { apps -> apps.map { it.label } == helperOrder }
+                }
+                assertTrue("Selected helper was not invoked", invocationCount.get() > 0)
+                assertTrue("Sort helper failed: $failures", failures.isEmpty())
+                controller.orderedApps.value.forEach { sorted ->
+                    assertSame(repository.catalog.value.apps.single { it.key == sorted.key }, sorted)
+                }
+
+                contexts.deactivate().getOrThrow()
+                withTimeout(5_000) {
+                    controller.orderedApps.first { apps -> apps.map { it.label } == coreOrder }
+                }
+                val callsBeforeReactivation = invocationCount.get()
+
+                contexts.activate(workContext.id).getOrThrow()
+                withTimeout(15_000) {
+                    controller.orderedApps.first { apps -> apps.map { it.label } == helperOrder }
+                }
+                assertTrue(invocationCount.get() > callsBeforeReactivation)
+
+                val component = requireNotNull(workActive.routeFor(StandardCapabilities.AppsSort)?.component)
+                val callsAtDisable = invocationCount.get()
+                disabledComponent = component
+                registry.setEnabled(component, false)
+                withTimeout(5_000) {
+                    router.routes.first { available -> available.none { it.component == component } }
+                    controller.orderedApps.first { apps -> apps.map { it.label } == coreOrder }
+                }
+                assertEquals("Disabled helper should not receive more calls", callsAtDisable, invocationCount.get())
+
                 Unit
             } finally {
+                homeSortController?.close()
+                disabledComponent?.let { registry.setEnabled(it, true) }
+                sortClient.close()
                 contexts.close()
                 instances.close()
                 stateStore.close()

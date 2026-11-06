@@ -3,10 +3,12 @@ package io.github.alexanderwilhelmsenberg.modular.ui
 import android.content.Intent
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import io.github.alexanderwilhelmsenberg.modular.MainActivity
 import org.junit.Rule
 import org.junit.Test
@@ -17,7 +19,7 @@ class CoreNavigationTest {
 
     @Test
     fun settingsBackReturnsToHome() {
-        composeRule.onNodeWithText("Apps").assertIsDisplayed()
+        composeRule.onNodeWithTag("home-search").assertIsDisplayed()
         composeRule.onNodeWithTag("home-settings").performClick()
         composeRule.onNodeWithText("Back").assertIsDisplayed()
 
@@ -25,13 +27,58 @@ class CoreNavigationTest {
             composeRule.activity.onBackPressedDispatcher.onBackPressed()
         }
 
-        composeRule.onNodeWithText("Apps").assertIsDisplayed()
+        composeRule.onNodeWithTag("home-search").assertIsDisplayed()
+    }
+
+    @Test
+    fun focusedSearchBackKeepsHomeVisibleAndPreservesQuery() {
+        composeRule.onNodeWithTag("home-search").performClick()
+        composeRule.onNodeWithTag("home-search-field").performTextInput("zz unlikely app")
+        composeRule.onNodeWithTag("home-search-field").assertTextContains("zz unlikely app")
+
+        composeRule.runOnIdle {
+            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+        }
+
+        composeRule.onNodeWithTag("home-settings").assertIsDisplayed()
+        composeRule.onNodeWithText("Back").assertDoesNotExist()
+        composeRule.onNodeWithTag("home-search-field").assertTextContains("zz unlikely app")
+    }
+
+    @Test
+    fun backFromEmptySearchClosesEditingBeforeHomeNavigation() {
+        composeRule.onNodeWithTag("home-search").performClick()
+        composeRule.onNodeWithTag("home-search-field").assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+        }
+
+        composeRule.onNodeWithTag("home-search-field").assertDoesNotExist()
+        composeRule.onNodeWithTag("home-search").assertIsDisplayed()
+        composeRule.onNodeWithTag("home-settings").assertIsDisplayed()
+    }
+
+    @Test
+    fun searchQuerySurvivesSettingsAndActivityRecreation() {
+        composeRule.onNodeWithTag("home-search").performClick()
+        composeRule.onNodeWithTag("home-search-field").performTextInput("zz unlikely app")
+        composeRule.onNodeWithTag("home-search-field").assertTextContains("zz unlikely app")
+
+        composeRule.onNodeWithTag("home-settings").performClick()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.onNodeWithText("Appearance").assertIsDisplayed()
+        composeRule.onNodeWithText("Back").performClick()
+
+        composeRule.onNodeWithTag("home-search-field").assertTextContains("zz unlikely app")
     }
 
     @Test
     fun warmHomeIntentReturnsExistingActivityToHome() {
         val originalIntent = composeRule.activity.intent
         try {
+            composeRule.onNodeWithTag("home-search").performClick()
+            composeRule.onNodeWithTag("home-search-field").performTextInput("zz unlikely app")
             composeRule.onNodeWithTag("home-settings").performClick()
             composeRule.onNodeWithText("Back").assertIsDisplayed()
             composeRule.runOnIdle {
@@ -41,7 +88,8 @@ class CoreNavigationTest {
                 InstrumentationRegistry.getInstrumentation()
                     .callActivityOnNewIntent(composeRule.activity, homeIntent)
             }
-            composeRule.onNodeWithText("Apps").assertIsDisplayed()
+            composeRule.onNodeWithTag("home-search").assertIsDisplayed()
+            composeRule.onNodeWithTag("home-search-field").assertDoesNotExist()
         } finally {
             // ActivityScenario matches lifecycle events using its launch intent.
             // MainActivity correctly stores HOME, so restore the harness intent

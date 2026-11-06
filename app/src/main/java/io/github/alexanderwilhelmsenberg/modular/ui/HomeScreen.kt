@@ -51,6 +51,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,6 +84,10 @@ fun HomeScreen(
         if (searchQuery == null) localQuery = value else onSearchQueryChange?.invoke(value)
     }
     val visibleApps = remember(apps, query, locale) { filterHomeApps(apps, query, locale) }
+    val pausedProfiles = remember(catalog.profiles) {
+        catalog.profiles.filter { it.quietModeEnabled }.map { it.serialNumber }.toSet()
+    }
+    val hasPausedProfileApps = catalog.apps.any { it.key.profileSerial in pausedProfiles }
     var lastShownQuery by remember { mutableStateOf(query) }
     LaunchedEffect(query) {
         if (query != lastShownQuery) {
@@ -228,6 +234,17 @@ fun HomeScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            if (hasPausedProfileApps) {
+                item(key = "paused-profile-notice") {
+                    Text(
+                        "Some apps are unavailable while a profile is paused.",
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                            .semantics { liveRegion = LiveRegionMode.Polite },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             if (catalog.lastError != null) {
                 item(key = "catalog-error") {
                     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
@@ -259,10 +276,11 @@ fun HomeScreen(
                 }
             }
             items(visibleApps, key = { it.key.stableId }) { app ->
-                val quiet = catalog.profiles.firstOrNull { it.serialNumber == app.key.profileSerial }?.quietModeEnabled == true
+                val quiet = app.key.profileSerial in pausedProfiles
                 HomeAppRow(
                     app = app,
                     enabled = app.enabled && !quiet,
+                    unavailabilityReason = if (quiet) "Profile paused" else null,
                     onClick = {
                         endEditing()
                         onLaunch(app)

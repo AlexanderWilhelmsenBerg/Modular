@@ -9,7 +9,9 @@ Installing the Core APK provides:
 - a Home screen with a vertical alphabetical app list;
 - text-only app names, profile-aware discovery, and tap-to-launch;
 - Android HOME integration;
-- secondary Settings and reliable recovery;
+- expanding app search and a settings gear;
+- persisted Light, Dark, and true-black AMOLED themes;
+- secondary Settings with add-on controls, retained failure history, and Android-confirmed uninstall;
 - accessibility and automatic app-list updates.
 
 Home opens immediately. No extra APK, network, account, or context setup is required. Add-ons extend the finished Core with filtering, alternative sorting/presentation, automation, scripts, and integrations. Built-in Home remains available when an add-on fails.
@@ -80,7 +82,7 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 
 First complete Core Home, alphabetical ordering, launching, settings navigation, accessibility, and lifecycle/failure handling. Then validate optional helper add-ons and advanced contexts. External Home/Drawer modules are optional presentation replacements.
 
-Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). The text-only Core Home and Settings module management are implemented. The specifications still include future work: Home search/gear controls, built-in themes, applying optional helper output to Home, and external presentation contracts. Device acceptance remains part of completion.
+Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). Core includes text-only Home, search/gear controls, built-in themes, Settings module management, and selected optional sort-helper output with alphabetical fallback. External presentation and external theme loading remain future work. See [Core completion](docs/implementation/core-completion.md) for test evidence and remaining physical-device acceptance.
 
 Product clarification (2026-11-04): default Home rows contain only app-name text. Icons and profile labels require an explicitly enabled presentation add-on. Core retains profile identity internally for correct launching.
 

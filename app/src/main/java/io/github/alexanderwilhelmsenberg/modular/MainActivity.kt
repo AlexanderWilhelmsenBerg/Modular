@@ -180,146 +180,146 @@ class MainActivity : ComponentActivity() {
                 applySystemBarAppearance(this@MainActivity, appearanceTheme)
             }
             ModularTheme(appearanceTheme) {
-            val modules by moduleRegistry.modules.collectAsState()
-            val appCatalog by appRepository.catalog.collectAsState()
-            val instances by instanceStore.instances.collectAsState()
-            val contexts by contextManager.contexts.collectAsState()
-            val activeContext by contextManager.active.collectAsState()
-            val activationError by
-                contextManager.activationError.collectAsState()
-            val compositionLoadError by
-                compositionStore.loadError.collectAsState()
-            val eventDiagnostics by
-                eventBus.diagnostics.collectAsState()
-            val grantState by
-                grantStore.state.collectAsState()
-            val grantLoadError by
-                grantStore.loadError.collectAsState()
+                val modules by moduleRegistry.modules.collectAsState()
+                val appCatalog by appRepository.catalog.collectAsState()
+                val instances by instanceStore.instances.collectAsState()
+                val contexts by contextManager.contexts.collectAsState()
+                val activeContext by contextManager.active.collectAsState()
+                val activationError by
+                    contextManager.activationError.collectAsState()
+                val compositionLoadError by
+                    compositionStore.loadError.collectAsState()
+                val eventDiagnostics by
+                    eventBus.diagnostics.collectAsState()
+                val grantState by
+                    grantStore.state.collectAsState()
+                val grantLoadError by
+                    grantStore.loadError.collectAsState()
 
-            val managementEvents by moduleRegistry.managementStore.events.collectAsState()
-            // Settings requests inspection sessions. Home needs only providers selected
-            // by its persisted context; the built-in launcher requires no module.
-            LaunchedEffect(settingsVisible, modules, activeContext.context, instances) {
-                val providerIds = activeContext.context?.bindings.orEmpty().mapNotNull { binding ->
-                    instances.firstOrNull { it.id == binding.instanceId }?.providerId
-                }.toSet()
-                moduleRegistry.setConnectionDemand(
-                    if (settingsVisible) null else modules.filter { module ->
-                        (module.moduleId ?: moduleRegistry.managementStore.knownProviderId(module.component)) in providerIds
-                    }.map { it.component }.toSet(),
-                )
-            }
-
-            val homeListState = rememberLazyListState()
-            BackHandler { settingsVisible = false }
-
-            if (!settingsVisible) {
-                key(homeIntentGeneration) {
-                HomeScreen(
-                    catalog = appCatalog,
-                    orderedApps = homeOrderedApps,
-                    searchQuery = homeSearchQuery,
-                    onSearchQueryChange = { homeSearchQuery = it },
-                    listState = homeListState,
-                    showMakeDefault = homeRoleAvailable && !homeRoleHeld,
-                    onLaunch = { app ->
-                        lifecycleScope.launch {
-                            appRepository.launch(app.key).onFailure {
-                                Toast.makeText(this@MainActivity, "Unable to open ${app.label}", Toast.LENGTH_LONG).show()
-                                appRepository.refresh()
-                            }
-                        }
-                    },
-                    onRefresh = appRepository::refresh,
-                    onMakeDefault = ::requestHomeRole,
-                    onOpenSettings = { settingsVisible = true },
-                )
-                }
-            } else {
-                val securityStatuses = modules.groupBy { it.component.packageName }.map { (packageName, packageModules) ->
-                    securityManager.status(
-                        packageName = packageName,
-                        requestedCapabilities = packageModules.flatMap { it.requestedCoreCapabilities }
-                            .mapNotNull(CapabilityId::parse).toSet(),
+                val managementEvents by moduleRegistry.managementStore.events.collectAsState()
+                // Settings requests inspection sessions. Home needs only providers selected
+                // by its persisted context; the built-in launcher requires no module.
+                LaunchedEffect(settingsVisible, modules, activeContext.context, instances) {
+                    val providerIds = activeContext.context?.bindings.orEmpty().mapNotNull { binding ->
+                        instances.firstOrNull { it.id == binding.instanceId }?.providerId
+                    }.toSet()
+                    moduleRegistry.setConnectionDemand(
+                        if (settingsVisible) null else modules.filter { module ->
+                            (module.moduleId ?: moduleRegistry.managementStore.knownProviderId(module.component)) in providerIds
+                        }.map { it.component }.toSet(),
                     )
                 }
 
-                ModularApp(
-                    appearanceTheme = appearanceTheme,
-                    appearanceError = appearanceError,
-                    onAppearanceThemeSelected = { selected ->
-                        lifecycleScope.launch { appearanceStore.setTheme(selected) }
-                    },
-                    onBack = { settingsVisible = false },
-                    corePackageName = packageName,
-                    managementEvents = managementEvents,
-                    onSetModuleEnabled = { module, enabled -> moduleRegistry.setEnabled(module.component, enabled) },
-                    onRetryModule = { module -> moduleRegistry.retry(module.component) },
-                    onUninstallModule = ::uninstallModule,
-                    onClearModuleEvents = moduleRegistry.managementStore::clearEvents,
-                    onSetGrant = { module, capability, granted ->
-                        val status = securityStatuses.firstOrNull { it.packageName == module.component.packageName }
-                        lifecycleScope.launch {
-                            val result = if (granted) {
-                                val identity = status?.identity
-                                if (identity == null) Result.failure(IllegalStateException("Module identity unavailable"))
-                                else securityManager.grant(ModuleAuthorizationContext(identity, status.requestedCapabilities), capability)
-                            } else securityManager.revoke(module.component.packageName, capability)
-                            recordManagementResult(module.component.flattenToString(), "permission", result,
-                                "${if (granted) "Granted" else "Revoked"} ${capability.wireValue}")
-                        }
-                    },
-                    compositionContent = {
-                        CompositionManagement(
-                            instances = instances,
-                            contexts = contexts,
-                            modules = modules,
-                            activeContext = activeContext,
-                            onSaveInstance = { instance ->
-                                instanceStore.upsert(instance).map { Unit }.also {
-                                    recordManagementResult("Core", "instance", it, "Saved instance ${instance.name}")
+                val homeListState = rememberLazyListState()
+                BackHandler { settingsVisible = false }
+
+                if (!settingsVisible) {
+                    key(homeIntentGeneration) {
+                        HomeScreen(
+                            catalog = appCatalog,
+                            orderedApps = homeOrderedApps,
+                            searchQuery = homeSearchQuery,
+                            onSearchQueryChange = { homeSearchQuery = it },
+                            listState = homeListState,
+                            showMakeDefault = homeRoleAvailable && !homeRoleHeld,
+                            onLaunch = { app ->
+                                lifecycleScope.launch {
+                                    appRepository.launch(app.key).onFailure {
+                                        Toast.makeText(this@MainActivity, "Unable to open ${app.label}", Toast.LENGTH_LONG).show()
+                                        appRepository.refresh()
+                                    }
                                 }
                             },
-                            onDeleteInstance = { id ->
-                                instanceStore.remove(id).also {
-                                    recordManagementResult("Core", "instance", it, "Removed instance $id")
-                                }
-                            },
-                            onSaveContext = { context ->
-                                contextManager.upsert(context).map { Unit }.also {
-                                    recordManagementResult("Core", "context", it, "Saved context ${context.name}")
-                                }
-                            },
-                            onDeleteContext = { id ->
-                                contextManager.remove(id).also {
-                                    recordManagementResult("Core", "context", it, "Removed context $id")
-                                }
-                            },
-                            onActivateContext = ::activateContext,
-                            onDeactivateContext = ::deactivateContext,
+                            onRefresh = appRepository::refresh,
+                            onMakeDefault = ::requestHomeRole,
+                            onOpenSettings = { settingsVisible = true },
                         )
-                    },
-                    homeRoleAvailable = homeRoleAvailable,
-                    homeRoleHeld = homeRoleHeld,
-                    modules = modules,
-                    appCatalog = appCatalog,
-                    instances = instances,
-                    contexts = contexts,
-                    activeContext = activeContext,
-                    compositionLoadError = compositionLoadError,
-                    contextActivationError = activationError,
-                    eventBusDiagnostics = eventDiagnostics,
-                    moduleSecurity = securityStatuses,
-                    grantRecordCount =
-                        grantState.records.size,
-                    grantLoadError = grantLoadError,
-                    onRequestHomeRole = ::requestHomeRole,
-                    onRefreshModules = moduleRegistry::refresh,
-                    onRefreshApps = appRepository::refresh,
-                    onActivateContext = ::activateContext,
-                    onDeactivateContext = ::deactivateContext,
-                )
-            }
+                    }
+                } else {
+                    val securityStatuses = modules.groupBy { it.component.packageName }.map { (packageName, packageModules) ->
+                        securityManager.status(
+                            packageName = packageName,
+                            requestedCapabilities = packageModules.flatMap { it.requestedCoreCapabilities }
+                                .mapNotNull(CapabilityId::parse).toSet(),
+                        )
+                    }
+
+                    ModularApp(
+                        appearanceTheme = appearanceTheme,
+                        appearanceError = appearanceError,
+                        onAppearanceThemeSelected = { selected ->
+                            lifecycleScope.launch { appearanceStore.setTheme(selected) }
+                        },
+                        onBack = { settingsVisible = false },
+                        corePackageName = packageName,
+                        managementEvents = managementEvents,
+                        onSetModuleEnabled = { module, enabled -> moduleRegistry.setEnabled(module.component, enabled) },
+                        onRetryModule = { module -> moduleRegistry.retry(module.component) },
+                        onUninstallModule = ::uninstallModule,
+                        onClearModuleEvents = moduleRegistry.managementStore::clearEvents,
+                        onSetGrant = { module, capability, granted ->
+                            val status = securityStatuses.firstOrNull { it.packageName == module.component.packageName }
+                            lifecycleScope.launch {
+                                val result = if (granted) {
+                                    val identity = status?.identity
+                                    if (identity == null) Result.failure(IllegalStateException("Module identity unavailable"))
+                                    else securityManager.grant(ModuleAuthorizationContext(identity, status.requestedCapabilities), capability)
+                                } else securityManager.revoke(module.component.packageName, capability)
+                                recordManagementResult(module.component.flattenToString(), "permission", result,
+                                    "${if (granted) "Granted" else "Revoked"} ${capability.wireValue}")
+                            }
+                        },
+                        compositionContent = {
+                            CompositionManagement(
+                                instances = instances,
+                                contexts = contexts,
+                                modules = modules,
+                                activeContext = activeContext,
+                                onSaveInstance = { instance ->
+                                    instanceStore.upsert(instance).map { Unit }.also {
+                                        recordManagementResult("Core", "instance", it, "Saved instance ${instance.name}")
+                                    }
+                                },
+                                onDeleteInstance = { id ->
+                                    instanceStore.remove(id).also {
+                                        recordManagementResult("Core", "instance", it, "Removed instance $id")
+                                    }
+                                },
+                                onSaveContext = { context ->
+                                    contextManager.upsert(context).map { Unit }.also {
+                                        recordManagementResult("Core", "context", it, "Saved context ${context.name}")
+                                    }
+                                },
+                                onDeleteContext = { id ->
+                                    contextManager.remove(id).also {
+                                        recordManagementResult("Core", "context", it, "Removed context $id")
+                                    }
+                                },
+                                onActivateContext = ::activateContext,
+                                onDeactivateContext = ::deactivateContext,
+                            )
+                        },
+                        homeRoleAvailable = homeRoleAvailable,
+                        homeRoleHeld = homeRoleHeld,
+                        modules = modules,
+                        appCatalog = appCatalog,
+                        instances = instances,
+                        contexts = contexts,
+                        activeContext = activeContext,
+                        compositionLoadError = compositionLoadError,
+                        contextActivationError = activationError,
+                        eventBusDiagnostics = eventDiagnostics,
+                        moduleSecurity = securityStatuses,
+                        grantRecordCount =
+                            grantState.records.size,
+                        grantLoadError = grantLoadError,
+                        onRequestHomeRole = ::requestHomeRole,
+                        onRefreshModules = moduleRegistry::refresh,
+                        onRefreshApps = appRepository::refresh,
+                        onActivateContext = ::activateContext,
+                        onDeactivateContext = ::deactivateContext,
+                    )
+                }
             }
         }
     }

@@ -7,6 +7,7 @@ import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityProvider
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRoute
 import io.github.alexanderwilhelmsenberg.modular.composition.ActiveContextState
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
+import android.os.RemoteException
 import java.text.Collator
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
@@ -79,14 +80,21 @@ class HomeSortController(
                     localeTags.value == snapshot.localeTag) {
                     val result = response?.getOrNull()
                     if (result == null) {
-                        reportFailure(route, if (response == null) "Sort helper timed out"
-                            else "Sort helper failed: ${response.exceptionOrNull()?.message ?: "unknown error"}")
+                        reportFailure(route, if (response == null) {
+                            "Sort helper timed out. Retry its connection in Settings."
+                        } else {
+                            "Sort helper failed (${failureCategory(response.exceptionOrNull())}). " +
+                                "Retry its connection in Settings."
+                        })
                         return@collectLatest
                     }
                     // Re-map keys to the current Core objects even if a faulty
                     // client returned altered labels or launch metadata.
                     val original = originalAppsInOrder(source, result)
-                    if (original == null) reportFailure(route, "Sort helper returned an invalid app order")
+                    if (original == null) reportFailure(
+                        route,
+                        "Sort helper returned an invalid app order. Retry its connection in Settings.",
+                    )
                     else {
                         failedRoute = null
                         _orderedApps.value = original
@@ -108,6 +116,14 @@ class HomeSortController(
         if (failedRoute == route) return
         failedRoute = route
         runCatching { onFailure(route, message) }
+    }
+
+    private fun failureCategory(error: Throwable?): String = when (error) {
+        is SecurityException -> "permission denied"
+        is RemoteException -> "connection error"
+        is IllegalArgumentException -> "invalid response"
+        is IllegalStateException -> "unavailable"
+        else -> "call error"
     }
 
     private data class Snapshot(

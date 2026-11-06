@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.composition
 
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -42,7 +43,11 @@ internal object CompositionStateCodec {
             "Instance configuration JSON must not be blank"
         }
 
-        val element = json.parseToJsonElement(value)
+        val element = try {
+            json.parseToJsonElement(value)
+        } catch (_: SerializationException) {
+            throw IllegalArgumentException("Instance configuration must be valid JSON")
+        }
 
         require(element is kotlinx.serialization.json.JsonObject) {
             "Instance configuration must be a JSON object"
@@ -141,3 +146,4 @@ internal object CompositionStateCodec {
         val instanceId: String,
     )
 }
+

@@ -7,7 +7,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertContentDescriptionEquals
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.SemanticsMatcher
@@ -214,6 +213,18 @@ class CoreHomeTest {
 
         composeRule.onNodeWithTag("app-row:${disabled.key.stableId}").assertIsNotEnabled()
         composeRule.onNodeWithTag("app-row:${quietProfileApp.key.stableId}").assertIsNotEnabled()
+        composeRule.onNodeWithText("Some apps are unavailable while a profile is paused.")
+            .assertIsDisplayed()
+        assertEquals(
+            "Unavailable",
+            composeRule.onNodeWithTag("app-row:${disabled.key.stableId}")
+                .fetchSemanticsNode().config[SemanticsProperties.StateDescription],
+        )
+        assertEquals(
+            "Profile paused",
+            composeRule.onNodeWithTag("app-row:${quietProfileApp.key.stableId}")
+                .fetchSemanticsNode().config[SemanticsProperties.StateDescription],
+        )
         composeRule.runOnIdle { assertEquals(emptyList<String>(), launches) }
     }
 

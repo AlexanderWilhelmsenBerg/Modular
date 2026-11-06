@@ -18,6 +18,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Test
 
@@ -101,7 +102,7 @@ class HomeSortControllerTest {
         advanceTimeBy(101)
         runCurrent()
         assertEquals(listOf("Alpha", "Beta"), controller.orderedApps.value.map { it.label })
-        assertEquals(listOf("Sort helper timed out"), failures)
+        assertEquals(listOf("Sort helper timed out. Retry its connection in Settings."), failures)
 
         catalog.value = AppCatalog(generation = 1, apps = listOf(app("gamma", "Gamma"), alpha))
         runCurrent()
@@ -147,6 +148,29 @@ class HomeSortControllerTest {
         oldResponse.complete(Result.success(listOf(alpha, beta)))
         runCurrent()
         assertEquals(listOf("Beta", "Alpha"), controller.orderedApps.value.map { it.label })
+        controller.close()
+    }
+
+    @Test
+    fun providerFailureDoesNotEchoCatalogDetailsInDiagnostic() = runTest {
+        val sentinel = "private-app-catalog-sentinel"
+        val catalog = MutableStateFlow(AppCatalog(apps = source))
+        val active = MutableStateFlow(selected())
+        val routes = MutableStateFlow(listOf(route))
+        val failures = mutableListOf<String>()
+        val controller = HomeSortController(
+            catalog, active, routes,
+            { _, _, _ -> Result.failure(IllegalStateException("Provider leaked $sentinel")) },
+            onFailure = { _, message -> failures += message },
+            scope = this,
+        )
+
+        runCurrent()
+        assertEquals(
+            listOf("Sort helper failed (unavailable). Retry its connection in Settings."),
+            failures,
+        )
+        assertFalse(failures.single().contains(sentinel))
         controller.close()
     }
 

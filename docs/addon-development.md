@@ -11,7 +11,7 @@ implementation("io.github.alexanderwilhelmsenberg.modular:module-api:0.2.0")
 implementation("io.github.alexanderwilhelmsenberg.modular:module-sdk:0.2.0")
 ```
 
-The release build publishes the Maven-layout `sdk-repository` artifact. Point a Maven repository in your add-on's Gradle settings at the extracted directory. The standalone example takes it through `-PmodularSdkRepository=/absolute/path/to/sdk-repository`. This is a local artifact source; no Core source checkout or `project(":module-api")` dependency is needed. Android Gradle Plugin 9.4.1, Gradle 9.6, Java 17, compile SDK 37, and min SDK 29 match this release.
+Android CI publishes the release API/SDK libraries as the Maven-layout `modular-addon-sdk` artifact. Download it from a successful Android CI run and extract it into a directory such as `sdk-repository`. Point a Maven repository in your add-on's Gradle settings at the extracted directory. The standalone example takes it through `-PmodularSdkRepository=/absolute/path/to/sdk-repository`. This is a local artifact source; no Core source checkout or `project(":module-api")` dependency is needed. Android Gradle Plugin 9.4.1, Gradle 9.6, Java 17, compile SDK 37, and min SDK 29 match this release.
 
 `module-api` contains the AIDL wire interfaces, models, identifiers, and `ModuleDescriptorCodec`. `module-sdk` provides `BaseModuleService`, `ModuleInstanceContext`, and `TrustedCorePolicy`. The wire contract remains authoritative if you implement it without the SDK. Do not load add-on classes into Core.
 

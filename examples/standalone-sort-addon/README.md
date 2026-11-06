@@ -2,7 +2,7 @@
 
 This is a separate Android project. It depends on published Modular Android libraries, not the Core source tree or Core signing key.
 
-Extract the `sdk-repository` artifact from the Modular SDK build, then run from the Modular checkout or use an absolute path to this project:
+Extract the `modular-addon-sdk` artifact from a successful Android CI run into a directory such as `sdk-repository`, then run from the Modular checkout or use an absolute path to this project:
 
 ```sh
 gradle -p examples/standalone-sort-addon \

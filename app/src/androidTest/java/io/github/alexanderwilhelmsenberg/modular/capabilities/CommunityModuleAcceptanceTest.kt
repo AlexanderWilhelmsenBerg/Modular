@@ -44,7 +44,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class CommunityModuleAcceptanceTest {
     @Test
-    fun independentSignerInstancesGrantsAndFallback() = runBlocking {
+    fun independentSignerInstancesGrantsAndFallback(): Unit = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val moduleInfo = context.packageManager.getApplicationInfo(MODULE_PACKAGE, 0)
         assertNotEquals(context.applicationInfo.uid, moduleInfo.uid)
@@ -184,6 +184,7 @@ class CommunityModuleAcceptanceTest {
 
             contexts.deactivate().getOrThrow()
             withTimeout(5_000) { homeController.orderedApps.first { it.map(LaunchableApp::label) == CORE_ORDER } }
+            Unit
         } finally {
             controller?.close()
             if (disabled) registry.setEnabled(

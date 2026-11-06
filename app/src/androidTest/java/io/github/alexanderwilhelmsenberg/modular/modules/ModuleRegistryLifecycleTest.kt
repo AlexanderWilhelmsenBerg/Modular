@@ -157,7 +157,7 @@ class ModuleRegistryLifecycleTest {
             override fun getProtocolVersion() = 4
             override fun getModuleId() = "sample.module"
             override fun getModuleVersion() = "1.0"
-            override fun getCapabilities(): Array<String> = arrayOf("apps.sort/v1")
+            override fun getCapabilities(): Array<String> = arrayOf(StandardCapabilities.AppsSort.wireValue)
             override fun getRequestedCoreCapabilities(): Array<String> = emptyArray()
             override fun getDescriptorJson() = "{}"
             override fun openSession(sessionId: String?, host: IModularHost?) = Unit
@@ -201,7 +201,7 @@ class ModuleRegistryLifecycleTest {
             override fun getProtocolVersion() = 2
             override fun getModuleId() = "sample.module"
             override fun getModuleVersion() = "1.0"
-            override fun getCapabilities(): Array<String> = arrayOf("apps.sort/v1")
+            override fun getCapabilities(): Array<String> = arrayOf(StandardCapabilities.AppsSort.wireValue)
             override fun getRequestedCoreCapabilities(): Array<String> = emptyArray()
             override fun getDescriptorJson() = ""
             override fun openSession(sessionId: String?, host: IModularHost?) = Unit

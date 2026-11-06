@@ -3,6 +3,9 @@ package io.github.alexanderwilhelmsenberg.modular.ui
 import android.content.ComponentName
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -95,9 +98,12 @@ class CompositionManagementTest {
 
         composeRule.onNodeWithTag("edit-instance-instance-1").performScrollTo().performClick()
 
-        composeRule.onNodeWithText("Sample Sort").assertExists()
-        composeRule.onNodeWithText("Controls sample sorting.").assertExists()
-        composeRule.onNodeWithText("Direction (direction) · string · default: \"ascending\"").assertExists()
+        composeRule.onNode(hasText("Sample Sort") and hasAnyAncestor(isDialog())).assertExists()
+        composeRule.onNode(hasText("Controls sample sorting.") and hasAnyAncestor(isDialog())).assertExists()
+        composeRule.onNode(
+            hasText("Direction (direction) · string · default: \"ascending\"") and
+                hasAnyAncestor(isDialog()),
+        ).assertExists()
     }
 
     @Test

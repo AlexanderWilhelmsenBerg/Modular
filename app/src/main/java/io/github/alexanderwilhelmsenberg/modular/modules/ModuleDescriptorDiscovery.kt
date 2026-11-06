@@ -1,7 +1,9 @@
 package io.github.alexanderwilhelmsenberg.modular.modules
 
+import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.os.Build
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleDescriptor
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleDescriptorCodec
@@ -36,11 +38,60 @@ internal object ModuleDescriptorDiscovery {
                     .toString()
             }
             val descriptor = ModuleDescriptorCodec.parse(raw)
+            descriptor.managementActivity?.let { activity ->
+                validateManagementActivity(packageManager, service, activity)
+            }
             Discovery(descriptor, null, sha256(raw))
         } catch (error: Exception) {
             val reason = if (error is IllegalArgumentException) error.message ?: "Invalid JSON"
                 else "Resource could not be read as UTF-8 JSON"
             Discovery(null, "Invalid packaged module descriptor: $reason. Check the service's raw JSON metadata.", null)
+        }
+    }
+
+    /** A declared settings screen must be launchable from Core in this provider's package. */
+    fun validateManagementActivity(
+        packageManager: PackageManager,
+        service: ServiceInfo,
+        declaration: String,
+    ) {
+        val packageName = service.packageName
+        val className = if (declaration.startsWith('.')) {
+            val packageInfo = try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    packageManager.getPackageInfo(packageName,
+                        PackageManager.PackageInfoFlags.of(PackageManager.GET_ACTIVITIES.toLong()))
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageManager.getPackageInfo(packageName, PackageManager.GET_ACTIVITIES)
+                }
+            } catch (_: PackageManager.NameNotFoundException) {
+                throw IllegalArgumentException("Management Activity provider package was not found")
+            }
+            val matches = packageInfo.activities.orEmpty().filter {
+                it.packageName == packageName && it.name.endsWith(declaration)
+            }
+            require(matches.size == 1) {
+                "Management Activity must resolve to exactly one Activity in the provider package"
+            }
+            matches.single().name
+        } else declaration
+        val component = ComponentName(packageName, className)
+        val activity = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getActivityInfo(component, PackageManager.ComponentInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getActivityInfo(component, 0)
+            }
+        } catch (_: PackageManager.NameNotFoundException) {
+            throw IllegalArgumentException("Management Activity was not found in the provider package")
+        }
+        require(activity.packageName == packageName && activity.name == className) {
+            "Management Activity does not resolve to the declared provider component"
+        }
+        require(activity.exported && activity.enabled && activity.applicationInfo.enabled) {
+            "Management Activity must be exported and enabled"
         }
     }
 

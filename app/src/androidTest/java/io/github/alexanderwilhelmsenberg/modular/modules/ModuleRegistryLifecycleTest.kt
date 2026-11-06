@@ -224,6 +224,19 @@ class ModuleRegistryLifecycleTest {
         }
     }
 
+    @Test
+    fun managementActivityMustResolveToExportedActivityInProviderApk() {
+        val service = ServiceInfo().apply { packageName = baseContext.packageName }
+        val manager = baseContext.packageManager
+        ModuleDescriptorDiscovery.validateManagementActivity(manager, service, ".MainActivity")
+        assertTrue(runCatching {
+            ModuleDescriptorDiscovery.validateManagementActivity(manager, service, "com.android.settings.Settings")
+        }.isFailure)
+        assertTrue(runCatching {
+            ModuleDescriptorDiscovery.validateManagementActivity(manager, service, ".MissingActivity")
+        }.isFailure)
+    }
+
     private suspend fun awaitStatus(registry: ModuleRegistry, status: ModuleConnectionStatus) {
         withTimeout(3_000L) {
             while (registry.modules.value.singleOrNull()?.status != status) delay(10)

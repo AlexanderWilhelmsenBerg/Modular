@@ -34,12 +34,19 @@ Acceptance: product-spec cases 6–8; external add-ons remain separately package
 
 ## Phase 1c — Agreed Home controls and built-in themes
 
-- Remove Apps heading; compact expanding search and accessible settings gear.
+- Remove Apps heading; persistent full-width search and accessible settings gear.
 - Persist Light, Dark, and AMOLED themes across Home and Settings.
 - Preserve default text-only rows and baseline navigation/accessibility.
 - Design an add-on theme contract before external themes are loaded.
 
 These requirements are implemented in the Core completion change. Validation and device acceptance are tracked in [Core completion](implementation/core-completion.md).
+
+## Remaining Core contract work
+
+- Carry bounded instance identity/configuration through versioned module requests;
+  prove independently configured instances of the same provider.
+- Implement and validate the agreed manifest discovery descriptor metadata.
+- Complete physical-device acceptance. See product-spec section 17.
 
 ## Phase 2 — Module UX and richer composition
 

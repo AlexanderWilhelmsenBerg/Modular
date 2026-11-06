@@ -6,7 +6,7 @@ Home controls and built-in themes and connects optional sort helpers to Home.
 
 ## Coordinator plan and ownership
 
-- Home agent: compact expanding search, accessible gear, current-catalog filtering
+- Home agent: persistent full-width search, accessible gear, current-catalog filtering
   and text-only app rows.
 - Appearance agent: persistent themes, Settings selector, system bars, contrast
   coverage and bounded future theme contract.
@@ -22,7 +22,7 @@ Home controls and built-in themes and connects optional sort helpers to Home.
 | --- | --- |
 | Home first, complete text-only catalog, exact launch identity | Existing catalog visibility, Home and navigation tests; app objects always come from Core. |
 | Alphabetical baseline and local search | HomeSearchTest and CoreHomeTest cover locale matching, clearing, no results, duplicate identity, stale helper order and current metadata. |
-| Gear and expanding search | CoreHomeTest covers semantics, equal 48 dp resting height, expansion, compact widths and large font. |
+| Gear and persistent search | CoreHomeTest covers semantics, equal 48 dp baseline height, unchanged field bounds on focus/typing/clearing, compact widths and large font. |
 | Back, Settings, rotation and new HOME | CoreNavigationTest covers saved query, Settings recreation, Back while editing and explicit HOME reset. |
 | Persisted Light/Dark/AMOLED | AppearanceSettingsTest covers persistence, radio semantics, true-black surfaces and text/control contrast. |
 | Optional helper integration and recovery | HomeSortControllerTest covers selected order, current Core objects, timeout, invalid response, route loss, deactivation and late response rejection; cross-APK smoke coverage verifies selected helper order and deactivation/disable fallback through real Binder negotiation. |
@@ -64,3 +64,11 @@ These checks are device-dependent and are not claimed complete by unit tests.
 External Home/Drawer rendering, external theme loading, richer configuration schemas,
 favorites, icons/profile labels, filtering providers, automation, scripts, MCP and
 terminal integrations remain later add-ons. They must preserve baseline Core recovery.
+
+## Outstanding Core contract requirements
+
+Baseline Home/Settings completion does not complete the entire module contract.
+Per-instance configuration is stored but not delivered through current IPC, and
+discovery does not consume all the manifest descriptor metadata specified in the
+architecture. See [product specification section 17](../product/product-spec.md#17-outstanding-core-contract-work)
+for the remaining deliverables and acceptance boundaries.

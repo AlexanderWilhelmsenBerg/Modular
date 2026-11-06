@@ -15,8 +15,8 @@ Source-only Hallmark audit of the native Compose UI against product spec section
 ## What the source gets right
 
 - Home retains a plain alphabetical app list with name-only rows, consistent with the restrained launcher brief. Rows have at least 48 dp height; disabled rows expose an unavailable state.
-- Search and Settings have 48 dp resting height. Search pairs a magnifier with visible text; the gear has an explicit `Settings` accessibility label. Focused search keeps Settings reachable.
-- The expanded search has a theme-aware outline, so its boundary remains visible against the true-black AMOLED canvas; its minimum height can grow with larger text.
+- Search and Settings have 48 dp resting height. Search is always full-width beside the gear and pairs a magnifier with a visible placeholder; the gear has an explicit `Settings` accessibility label. Focus does not resize the bar and keeps Settings reachable.
+- The persistent search has a theme-aware outline, so its boundary remains visible against the true-black AMOLED canvas; its minimum height can grow with larger text.
 - Search has a separate no-results message, a labeled clear control, and a Back path that ends editing. The controls use the app's Compose color roles rather than one-off local colors.
 - Settings offers Light, Dark, and AMOLED using native radio semantics. Theme storage uses stable IDs and resolves unknown IDs to Light. The AMOLED scheme explicitly makes its main surfaces true black.
 - Module and capability switches now use neutral labels, leaving on/off to native switch semantics. The event-log filter controls wrap on compact widths, and a long selected module name ellipsizes within the available width.

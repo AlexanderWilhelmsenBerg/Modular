@@ -105,7 +105,7 @@ class CoreHomeTest {
         }
 
         composeRule.onNodeWithText("Apps").assertDoesNotExist()
-        composeRule.onNodeWithTag("home-search").assertContentDescriptionEquals("Search").performClick()
+        composeRule.onNodeWithTag("home-search-field").assertContentDescriptionEquals("Search apps").performClick()
         composeRule.onNodeWithTag("home-search-field")
             .assertContentDescriptionEquals("Search apps")
             .performTextInput("bet")
@@ -136,7 +136,7 @@ class CoreHomeTest {
             )
         }
 
-        composeRule.onNodeWithTag("home-search").performClick()
+        composeRule.onNodeWithTag("home-search-field").performClick()
         composeRule.onNodeWithTag("home-search-field").performTextInput("missing")
         composeRule.onNodeWithText("No matching apps").assertIsDisplayed()
         composeRule.onNodeWithText("No apps available").assertDoesNotExist()
@@ -148,7 +148,7 @@ class CoreHomeTest {
     }
 
     @Test
-    fun restingSearchAndSettingsControlsHaveEqual48DpHeightAndSearchExpands() {
+    fun persistentSearchFillsRowAndKeepsBoundsWhenFocusedOrTyped() {
         composeRule.setContent {
             HomeScreen(
                 catalog = AppCatalog(),
@@ -164,11 +164,17 @@ class CoreHomeTest {
         assertEquals(48f, settings.height / density, 1.5f)
         assertEquals(48f, settings.width / density, 1.5f)
         assertEquals(restingSearch.height, settings.height, density)
-        composeRule.onNodeWithTag("home-search-field").assertDoesNotExist()
-
-        composeRule.onNodeWithTag("home-search").performClick()
-        val expanded = composeRule.onNodeWithTag("home-search-field").fetchSemanticsNode().boundsInRoot
-        assertTrue("Focused search should expand", expanded.width > restingSearch.width)
+        composeRule.onNodeWithTag("home-search-field").assertIsDisplayed()
+        assertTrue("Search should fill the space beside Settings", restingSearch.width > settings.width * 3)
+        composeRule.onNodeWithTag("home-search-field").performClick()
+        composeRule.onNodeWithTag("home-search-field").performTextInput("A long query that scrolls while the search bar stays the same size")
+        val focused = composeRule.onNodeWithTag("home-search").fetchSemanticsNode().boundsInRoot
+        assertEquals(restingSearch.width, focused.width, 1f)
+        assertEquals(restingSearch.height, focused.height, 1f)
+        composeRule.onNodeWithTag("home-search-clear").performClick()
+        val cleared = composeRule.onNodeWithTag("home-search").fetchSemanticsNode().boundsInRoot
+        assertEquals(restingSearch.width, cleared.width, 1f)
+        assertEquals(restingSearch.height, cleared.height, 1f)
         composeRule.onNodeWithTag("home-settings").assertIsDisplayed()
     }
 
@@ -186,7 +192,7 @@ class CoreHomeTest {
             }
         }
 
-        composeRule.onNodeWithTag("home-search").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("home-search-field").assertIsDisplayed().performClick()
         composeRule.onNodeWithTag("home-search-field").assertIsDisplayed().performTextInput("Alpha")
         val alphaKey = app("alpha.pkg", "Alpha").key.stableId
         composeRule.onNodeWithTag("app-row:$alphaKey").assertIsDisplayed()

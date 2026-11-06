@@ -238,7 +238,7 @@ Acceptance: disable/re-enable and restart Core; retry a failed/blocked handshake
 These requirements extend the baseline Core and Settings implementation:
 
 - Remove the “Apps” title from Home.
-- Add a search control beside a settings gear icon, both with a 48 dp resting height and adequate touch targets. Search expands horizontally when focused, keeps the entered text/caret visible, and keeps Settings accessible. Keyboard Back dismisses editing before Home navigation. Clearing search restores the full alphabetical list; show an explicit no-results state.
+- Keep a persistent, single-line search bar filling the available width beside the settings gear, both with a 48 dp baseline height and adequate touch targets. Tapping or typing must not expand the bar horizontally or vertically; long text scrolls within it to keep the caret visible, and Settings stays accessible. Larger system font settings may increase the minimum content height for accessibility. Keyboard Back dismisses editing before Home navigation. Clearing search restores the full alphabetical list; show an explicit no-results state.
 - Use a gear icon with the accessible label “Settings” in place of the text button.
 - Provide persisted Light, Dark, and AMOLED themes in Settings and apply them consistently to Home, Settings, dialogs, and system bars. AMOLED uses a true-black background with readable controls and text.
 - Define a bounded theme extension contract before adding themes from external add-ons. Losing an add-on theme falls back to a built-in theme without blocking Home.
@@ -246,7 +246,7 @@ These requirements extend the baseline Core and Settings implementation:
 
 ## 16. Delivery and acceptance evidence
 
-The current Core delivery implements sections 11, 14, and 15 and connects the
+The current Core delivery implements baseline Home and Settings behavior in sections 11, 14, and 15 and connects the
 selected `apps.sort/v1` helper to Home. Core applies search after ordering and
 validates helper output against the current catalog. Timeout, failure, disabled
 or removed providers, and invalid or stale results retain built-in ordering.
@@ -261,3 +261,29 @@ They are not dependencies of Core acceptance.
 See [Core completion](../implementation/core-completion.md) for automated coverage,
 CI evidence, remaining physical-device checks, and the reference helper proof.
 Implementation status is not a claim that every OEM/device combination was tested.
+
+## 17. Outstanding Core contract work
+
+The baseline launcher is implemented; the broader Core/module contract is not yet
+fully delivered. These items remain open and are not reclassified as optional
+add-ons merely because baseline Home works:
+
+1. **Apply instance configuration at runtime.** Core persists and edits instance
+   JSON, but current module sessions and sort requests do not carry instance identity
+   or that configuration. Define a bounded versioned contract and demonstrate two
+   independently configured instances of one provider, including validation, updates,
+   isolation and fallback. The reference helper's reverse preference is currently
+   module-wide and does not satisfy this requirement.
+2. **Complete discovery descriptors.** Reconcile the manifest metadata requirements
+   in section 7 and module-model.md with the service-action discovery plus Binder
+   handshake currently implemented. Specify/read bounded metadata (including schema
+   references and management information), validate compatibility and cross-check
+   runtime identity without treating metadata as authority. Existing protocol checks
+   must remain intact.
+3. **Device acceptance.** Finish the physical-device checks in core-completion.md:
+   TalkBack, work-profile transitions, process recovery, keyboard/system insets,
+   HOME role and Android uninstall cancellation/success on supported devices.
+
+External presentation/theme loading, automation, scripts, MCP transport and terminal
+remain explicitly later features. The existing theme-extension design is a contract
+proposal, not an implemented external theme loader.

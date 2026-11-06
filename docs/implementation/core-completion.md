@@ -48,9 +48,7 @@ records a bounded diagnostic event without preventing app launching or Settings.
 PR #11 passed build/unit/lint and API 35 emulator CI before merging at
 `bc070fdaee380fa6810e996157bc38b5d5e392ec`.
 
-The Core completion change is under PR #12. Its Android build and emulator results
-are pending; local execution is unavailable in the source mirror because Gradle,
-Android SDK and ADB are absent. Source-only review is not device verification.
+The Core completion change is tracked in [PR #12](https://github.com/AlexanderWilhelmsenBerg/Modular/pull/12). Its commit-specific checks are the authoritative Android build, unit/lint, and emulator evidence. Local execution is unavailable in the source mirror because Gradle, Android SDK and ADB are absent. Source-only review is not device verification.
 
 ## Physical-device acceptance
 

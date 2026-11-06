@@ -1,12 +1,12 @@
 {
   "debug": {
     "alias": "modular-debug",
-    "sha256": "1e75980726c09f91d2eeb31a46850bdac1dd22d2cf9d3290c5c3fec05be6e5e1",
-    "publicKeySha256": "264df8100320c4df452253044b248689600b4e0b20e63a741f1add453a805992"
+    "sha256": "fa9ab6f9a0771e5b29feec3ced42136387995e5f31ef5d75c9a0384259096f88",
+    "publicKeySha256": "f0584708ede8412a00d4a29b9b96d3431b3b9021c9fd3bfe862c4d03b182cf2f"
   },
   "release": {
     "alias": "modular-release",
-    "sha256": "43aa42aecfe008e3ed3c75840d8397909fb2b064d24120ba71d8f12047550600",
-    "publicKeySha256": "264df8100320c4df452253044b248689600b4e0b20e63a741f1add453a805992"
+    "sha256": "631f4dcb3498006ae23755926ce3d4ac859fd9d1eb5806c5ca28d2de041f4280",
+    "publicKeySha256": "f0584708ede8412a00d4a29b9b96d3431b3b9021c9fd3bfe862c4d03b182cf2f"
   }
 }

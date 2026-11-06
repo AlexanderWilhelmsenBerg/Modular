@@ -21,16 +21,35 @@ disable the other to avoid ambiguous provider selection.
 
 ## GitHub setup
 
-Create these **repository Actions secrets** using the separately delivered private
-bundle (never commit the bundle):
+Generate and retain the private keystore on the owner's computer, outside the
+repository. The pinned public fingerprints correspond to the owner's locally
+generated identities; the earlier assistant-generated bundle is superseded.
+Never commit the keystore or its password.
 
-- `MODULAR_KEYSTORE_BASE64`: contents of `keystore.b64`.
-- `MODULAR_KEYSTORE_PASSWORD`: contents of `keystore.password`.
+In GitHub, open **Settings > Secrets and variables > Actions > Secrets** and
+create or update these **repository Actions secrets** (not Variables):
 
-Alternatively, use an authenticated GitHub CLI and run the bundle's
-`upload-secrets.sh`. It refuses to overwrite existing signing secrets by default.
+- `MODULAR_KEYSTORE_BASE64`: Base64 encoding of the complete `modular-signing.p12` file.
+- `MODULAR_KEYSTORE_PASSWORD`: the existing keystore password, also used for both key entries.
+
+For manual entry from PowerShell, copy the keystore encoding to the clipboard,
+then paste it into the corresponding GitHub secret:
+
+```powershell
+[Convert]::ToBase64String(
+    [System.IO.File]::ReadAllBytes('C:\Development\.modular\modular-signing.p12')
+) | Set-Clipboard
+```
+
+Enter the password secret from the owner's password manager. No alias secrets
+are needed; the aliases are fixed in the build configuration. Clear sensitive
+clipboard entries afterward and keep an encrypted backup of the keystore.
+OpenSSL is not needed for key generation or manual secret upload.
+
 The public certificate fingerprints in [signing-certificates.json](signing-certificates.json)
-are safe to commit and are checked before distributing signed APKs.
+are safe to commit and are checked before distributing signed APKs. These include
+SHA-256 of each DER certificate and SHA-256 of its DER SubjectPublicKeyInfo.
+The CI verifier uses OpenSSL to extract that public-key representation.
 
 After `.github/workflows/signed-apks.yml` is on the default branch, run **Signed
 APKs** from the Actions tab, selecting the trusted branch/tag to build. The

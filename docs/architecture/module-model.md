@@ -167,3 +167,8 @@ Core shall restore its production built-in Home and alphabetical ordering if an 
 The official SDK and reference modules use Kotlin.
 
 The IPC contract should remain callable from Java because AIDL generates JVM interfaces. Third-party internals may use native code behind their own boundary, but Core does not accept native binary plugins loaded into its process.
+
+
+## Implemented descriptor and instance boundary
+
+[Protocol v4](addon-protocol-v4.md) defines the normative packaged raw-resource descriptor, bounded flat schema, and per-instance capability acquisition. [The SDK guide](../addon-development.md) documents independently signed external development. Existing v1–v3 transactions remain compatible with empty instance configuration. Rich forms and external surface providers remain later phases.

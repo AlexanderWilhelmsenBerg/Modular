@@ -36,12 +36,14 @@ and enable its service; create an instance for `modular.reference.sort.alphabeti
 then a context binding `apps.sort/v1` to that instance and activate it. The provider
 is optional: deactivating the context returns Home to Core alphabetical order.
 
-Open the reference APK's own launcher entry and enable reverse order. Return to
-Core: the refreshed catalog is ordered by that helper. This is a module-wide demo
-preference, not per-instance configuration: the current sort wire request carries
-apps and locale, not instance settings. Disable the module or deactivate the context
-to restore Core ordering. A hung, failed or invalid helper also falls back and
-records a bounded diagnostic event without preventing app launching or Settings.
+Create one instance with `{"reverse":false}` and another with `{"reverse":true}`.
+Bind them in separate contexts and switch between those contexts to compare order.
+Protocol v4 delivers each instance's normalized configuration when acquiring its
+endpoint; the reference APK no longer uses a module-wide reverse preference.
+Deactivate an active context before editing its instance. Disable the module or
+deactivate the context to restore Core ordering. A hung, failed or invalid helper
+also falls back and records a bounded diagnostic event without preventing app
+launching or Settings.
 
 ## Validation status
 
@@ -65,10 +67,10 @@ External Home/Drawer rendering, external theme loading, richer configuration sch
 favorites, icons/profile labels, filtering providers, automation, scripts, MCP and
 terminal integrations remain later add-ons. They must preserve baseline Core recovery.
 
-## Outstanding Core contract requirements
+## Core framework contract
 
-Baseline Home/Settings completion does not complete the entire module contract.
-Per-instance configuration is stored but not delivered through current IPC, and
-discovery does not consume all the manifest descriptor metadata specified in the
-architecture. See [product specification section 17](../product/product-spec.md#17-outstanding-core-contract-work)
-for the remaining deliverables and acceptance boundaries.
+[Core framework completion](core-framework.md) supplies protocol-v4 instance
+configuration, validated manifest descriptors, a reusable public SDK, and independent
+add-on build/runtime acceptance. [Product specification section 17](../product/product-spec.md#17-core-framework-and-remaining-acceptance)
+tracks the resulting contract and remaining physical-device acceptance. Build/unit/lint
+and emulator results are recorded against PR #14; device-only checks above remain open.

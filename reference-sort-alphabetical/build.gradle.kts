@@ -22,7 +22,7 @@ android {
         minSdk = 29
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.2.0"
     }
 
     signingConfigs {
@@ -62,7 +62,7 @@ android {
 }
 
 dependencies {
-    implementation(project(":module-api"))
+    implementation(project(":module-sdk"))
 
     testImplementation("junit:junit:4.13.2")
 }

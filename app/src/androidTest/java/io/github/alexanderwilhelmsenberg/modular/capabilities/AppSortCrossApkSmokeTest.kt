@@ -112,11 +112,13 @@ class AppSortCrossApkSmokeTest {
                 val personalInstance = instances.create(
                     name = "Personal sort",
                     providerId = REFERENCE_MODULE_ID,
+                    configurationJson = """{"reverse":false}""",
                 ).getOrThrow()
 
                 val workInstance = instances.create(
                     name = "Work sort",
                     providerId = REFERENCE_MODULE_ID,
+                    configurationJson = """{"reverse":true}""",
                 ).getOrThrow()
 
                 assertNotEquals(
@@ -159,6 +161,7 @@ class AppSortCrossApkSmokeTest {
                                 StandardCapabilities.AppsSort,
                             ),
                         ),
+                        binding = personalActive.resolvedBindings.single(),
                         apps =
                             repository.catalog.value.apps,
                         localeTag = "en",
@@ -196,6 +199,7 @@ class AppSortCrossApkSmokeTest {
                                 StandardCapabilities.AppsSort,
                             ),
                         ),
+                        binding = workActive.resolvedBindings.single(),
                         apps =
                             repository.catalog.value.apps,
                         localeTag = "en",
@@ -203,7 +207,7 @@ class AppSortCrossApkSmokeTest {
                 }
 
                 assertEquals(
-                    listOf("Alpha", "alpha", "beta", "Zulu"),
+                    listOf("Zulu", "beta", "alpha", "Alpha"),
                     workSorted.map { it.label },
                 )
 
@@ -220,9 +224,9 @@ class AppSortCrossApkSmokeTest {
                     catalog = repository.catalog,
                     activeContext = contexts.active,
                     routes = router.routes,
-                    sort = { route, apps, locale ->
+                    sort = { route, binding, apps, locale ->
                         invocationCount.incrementAndGet()
-                        sortClient.sort(route, apps, locale)
+                        sortClient.sort(route, binding, apps, locale)
                     },
                     localeTag = "en",
                     timeoutMillis = 5_000,
@@ -232,7 +236,7 @@ class AppSortCrossApkSmokeTest {
 
                 // Core's stable-key tie breaker puts 0.pkg first. The external
                 // reference helper uses exact label text and puts Alpha first.
-                val helperOrder = listOf("Alpha", "alpha", "beta", "Zulu")
+                val helperOrder = listOf("Zulu", "beta", "alpha", "Alpha")
                 val coreOrder = listOf("alpha", "Alpha", "beta", "Zulu")
                 withTimeout(15_000) {
                     controller.orderedApps.first { apps -> apps.map { it.label } == helperOrder }

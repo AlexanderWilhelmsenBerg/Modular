@@ -136,7 +136,7 @@ class MainActivity : ComponentActivity() {
 
         compositionStore =
             DataStoreCompositionStateStore(this)
-        instanceStore = InstanceStore(compositionStore)
+        instanceStore = InstanceStore(compositionStore, capabilityRouter.routes)
         contextManager = ContextManager(
             stateStore = compositionStore,
             routes = capabilityRouter.routes,
@@ -186,6 +186,7 @@ class MainActivity : ComponentActivity() {
                     val modules by moduleRegistry.modules.collectAsState()
                     val appCatalog by appRepository.catalog.collectAsState()
                     val instances by instanceStore.instances.collectAsState()
+                    val availableRoutes by capabilityRouter.routes.collectAsState()
                     val contexts by contextManager.contexts.collectAsState()
                     val activeContext by contextManager.active.collectAsState()
                     val activationError by
@@ -278,6 +279,7 @@ class MainActivity : ComponentActivity() {
                                     contexts = contexts,
                                     modules = modules,
                                     activeContext = activeContext,
+                                    routes = availableRoutes,
                                     onSaveInstance = { instance ->
                                         instanceStore.upsert(instance).map { Unit }.also {
                                             recordManagementResult("Core", "instance", it, "Saved instance ${instance.name}")

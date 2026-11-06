@@ -262,28 +262,32 @@ See [Core completion](../implementation/core-completion.md) for automated covera
 CI evidence, remaining physical-device checks, and the reference helper proof.
 Implementation status is not a claim that every OEM/device combination was tested.
 
-## 17. Outstanding Core contract work
+## 17. Core framework and remaining acceptance
 
-The baseline launcher is implemented; the broader Core/module contract is not yet
-fully delivered. These items remain open and are not reclassified as optional
-add-ons merely because baseline Home works:
+The Core/module framework now implements the remaining contract requirements:
 
-1. **Apply instance configuration at runtime.** Core persists and edits instance
-   JSON, but current module sessions and sort requests do not carry instance identity
-   or that configuration. Define a bounded versioned contract and demonstrate two
-   independently configured instances of one provider, including validation, updates,
-   isolation and fallback. The reference helper's reverse preference is currently
-   module-wide and does not satisfy this requirement.
-2. **Complete discovery descriptors.** Reconcile the manifest metadata requirements
-   in section 7 and module-model.md with the service-action discovery plus Binder
-   handshake currently implemented. Specify/read bounded metadata (including schema
-   references and management information), validate compatibility and cross-check
-   runtime identity without treating metadata as authority. Existing protocol checks
-   must remain intact.
-3. **Device acceptance.** Finish the physical-device checks in core-completion.md:
-   TalkBack, work-profile transitions, process recovery, keyboard/system insets,
-   HOME role and Android uninstall cancellation/success on supported devices.
+1. **Per-instance runtime configuration.** Protocol v4 carries the stable instance
+   ID and bounded configuration JSON when acquiring a capability. Core and the SDK
+   validate the shared versioned schema and defaults. The reference sort helper uses
+   per-instance `reverse` settings; old endpoints are revoked on configuration changes.
+   Protocol v1–v3 providers retain their original ABI and accept only empty configuration.
+2. **Discovery descriptors.** Service metadata points to a bounded raw JSON resource
+   containing identity, protocol compatibility, capabilities, configuration schema,
+   and optional management information. Core cross-checks it against the runtime
+   handshake. Metadata never grants authority.
+3. **Public add-on development.** Separately packaged `module-api` and `module-sdk`
+   libraries provide the IPC contract, service/session lifecycle, caller verification,
+   configuration snapshots, and typed Core clients. An independent sample consumes
+   their Maven artifacts without Core source or its signing key.
 
-External presentation/theme loading, automation, scripts, MCP transport and terminal
-remain explicitly later features. The existing theme-extension design is a contract
-proposal, not an implemented external theme loader.
+See the [framework acceptance matrix](../implementation/core-framework.md),
+[protocol v4](../architecture/addon-protocol-v4.md), and
+[add-on development guide](../addon-development.md) for implementation and evidence.
+Automated verification is recorded per commit; implementation alone does not close
+physical-device acceptance. TalkBack, work-profile transitions, process recovery,
+keyboard/system insets, HOME role, and Android uninstall cancellation/success still
+require the device checklist in core-completion.md.
+
+External presentation/theme loading, rich configuration forms, automation, scripts,
+MCP transport, and terminal remain later features. The theme-extension design is a
+contract proposal, not an implemented external theme loader.

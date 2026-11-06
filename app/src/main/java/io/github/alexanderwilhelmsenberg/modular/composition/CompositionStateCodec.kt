@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.composition
 
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleDescriptorCodec
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -39,6 +40,9 @@ internal object CompositionStateCodec {
     }
 
     fun validateConfigurationJson(value: String) {
+        require(value.toByteArray(Charsets.UTF_8).size <= ModuleDescriptorCodec.MAX_CONFIGURATION_BYTES) {
+            "Instance configuration exceeds size limit"
+        }
         require(value.isNotBlank()) {
             "Instance configuration JSON must not be blank"
         }

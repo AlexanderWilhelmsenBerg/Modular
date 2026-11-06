@@ -10,7 +10,7 @@ This is sequencing, not a release-date commitment. Target requirements are defin
 
 ## Phase 1 — Complete and reliable Core
 
-- Built-in Home with one vertical app list, icons, and profile identification.
+- Built-in Home with one vertical text-only app list.
 - Built-in locale-aware alphabetical ordering and exact activity/profile launching.
 - Non-blocking Android HOME role request.
 - Settings navigation and cold/warm HOME intent handling.
@@ -23,6 +23,7 @@ Acceptance: install only Core offline; open Home, launch apps, use Settings/Back
 
 ## Phase 1b — Optional add-on reliability
 
+- Complete Settings controls for persisted enable/disable, retry, event history, Android uninstall, instance/context editing, and live permission grants.
 - Validate existing registry, routing, grants, events, and instance infrastructure.
 - Demonstrate an optional helper such as alternative sorting/filtering.
 - Retain the existing Alphabetical Sort APK as an optional IPC contract example.
@@ -31,17 +32,26 @@ Acceptance: install only Core offline; open Home, launch apps, use Settings/Back
 
 Acceptance: product-spec cases 6–8; external add-ons remain separately packaged and subject to live grant checks.
 
+## Phase 1c — Agreed Home controls and built-in themes
+
+- Remove Apps heading; compact expanding search and accessible settings gear.
+- Persist Light, Dark, and AMOLED themes across Home and Settings.
+- Preserve default text-only rows and baseline navigation/accessibility.
+- Design an add-on theme contract before external themes are loaded.
+
+These are agreed requirements awaiting implementation after module management.
+
 ## Phase 2 — Module UX and richer composition
 
 - module configuration schemas.
 - bounded external surface protocol and optional alternative Home/Drawer modules.
-- optional search, favorites, alphabet index, and alternative layouts.
+- optional favorites, alphabet index, and alternative layouts.
 - richer instance configuration.
-- add/remove/enable/disable flows.
+- richer installation/distribution flows beyond Android uninstall.
 - compatibility UX.
 - version/upgrade handling.
-- capability grants UX.
-- diagnostics.
+- richer capability descriptions and configuration schemas.
+- extended diagnostics beyond the local module event history.
 - module crash/death recovery UX.
 - richer filtering/sorting/search capabilities.
 
@@ -130,3 +140,5 @@ Terminal is not the Python scripting architecture and must not become a shortcut
 - optional desktop module-development/test tooling;
 - additional script-runtime profiles;
 - isolated execution for untrusted third-party scripts.
+
+

@@ -9,7 +9,7 @@ The original specification allowed Core to open a settings/recovery shell until 
 
 ## Decision
 
-Ship a complete baseline in the Core APK: a vertical alphabetical app list as Home, app icons and profile identification, exact activity/profile launching, Android HOME integration, secondary Settings, accessibility, and recovery.
+Ship a complete baseline in the Core APK: a vertical alphabetical text-only app list as Home, exact activity/profile launching, Android HOME integration, secondary Settings, accessibility, and recovery.
 
 Core must work immediately offline without extra APKs, accounts, optional permissions, or context configuration. No separate drawer screen is required. Built-in alphabetical ordering uses displayed labels and device locale with deterministic identity tie-breakers.
 
@@ -30,3 +30,6 @@ Security isolation for external APKs remains unchanged. User-facing recovery ret
 ## Verification
 
 The product specification defines baseline and failure acceptance tests. Deliver Core usability first, then external helper proof and richer composition. Documentation records target behavior, not a claim that code already implements it.
+
+Product clarification (2026-11-04): default Home rows contain only app-name text. Icons and profile labels require an explicitly enabled presentation add-on. Core retains profile identity internally for correct launching.
+

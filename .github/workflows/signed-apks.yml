@@ -1,0 +1,61 @@
+name: Signed APKs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed-apks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6.0"
+      - name: Restore private signing keystore
+        env:
+          MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-signing.p12
+          MODULAR_KEYSTORE_BASE64: ${{ secrets.MODULAR_KEYSTORE_BASE64 }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          value = os.environ.get("MODULAR_KEYSTORE_BASE64", "").strip()
+          if not value:
+              raise SystemExit("Add MODULAR_KEYSTORE_BASE64 and MODULAR_KEYSTORE_PASSWORD to repository Actions secrets.")
+          data = base64.b64decode(value, validate=True)
+          path = Path(os.environ["MODULAR_KEYSTORE_PATH"])
+          path.touch(mode=0o600, exist_ok=False)
+          path.write_bytes(data)
+          PY
+      - name: Build persistent debug and release APKs
+        env:
+          MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-signing.p12
+          MODULAR_KEYSTORE_PASSWORD: ${{ secrets.MODULAR_KEYSTORE_PASSWORD }}
+        run: |
+          python3 scripts/verify-keystore.py --expected-certificates docs/signing-certificates.json
+          gradle :app:assembleDebug :app:assembleRelease :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease --no-configuration-cache
+      - name: Verify signatures and variant identities
+        run: python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json
+      - name: Upload signed APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: modular-signed-apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
+            reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
+            reference-sort-alphabetical/build/outputs/apk/release/reference-sort-alphabetical-release.apk
+          if-no-files-found: error
+      - name: Remove private signing material
+        if: always()
+        env:
+          MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-signing.p12
+        run: rm -f -- "$MODULAR_KEYSTORE_PATH"

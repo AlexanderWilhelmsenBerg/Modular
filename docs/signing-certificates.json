@@ -1,0 +1,12 @@
+{
+  "debug": {
+    "alias": "modular-debug",
+    "sha256": "fa9ab6f9a0771e5b29feec3ced42136387995e5f31ef5d75c9a0384259096f88",
+    "publicKeySha256": "f0584708ede8412a00d4a29b9b96d3431b3b9021c9fd3bfe862c4d03b182cf2f"
+  },
+  "release": {
+    "alias": "modular-release",
+    "sha256": "631f4dcb3498006ae23755926ce3d4ac859fd9d1eb5806c5ca28d2de041f4280",
+    "publicKeySha256": "f0584708ede8412a00d4a29b9b96d3431b3b9021c9fd3bfe862c4d03b182cf2f"
+  }
+}

@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
     <queries>
+        <!-- Discover launchable apps beyond packages automatically visible to Core. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
         <intent>
             <action android:name="io.github.alexanderwilhelmsenberg.modular.action.MODULE" />
         </intent>
@@ -32,3 +39,5 @@
     </application>
 
 </manifest>
+
+

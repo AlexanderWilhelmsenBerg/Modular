@@ -288,6 +288,7 @@ class AppSortCrossApkSmokeTest {
             "modular.reference.sort.alphabetical"
 
         private const val REFERENCE_PACKAGE =
-            "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical"
+            "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical.debug"
     }
 }
+

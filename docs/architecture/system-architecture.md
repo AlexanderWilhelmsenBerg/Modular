@@ -207,3 +207,8 @@ Before production implementation, resolve:
 8. external surface replacement UX and bounded failure-recovery timing.
 
 Resolved by ADR-0004: baseline Home and alphabetical ordering are built into Core. External surface design and distribution questions do not block baseline delivery.
+
+## Default presentation and discovery
+
+Core Home renders app-name text only. Icons and profile labels belong to optional presentation add-ons. Core keeps exact activity/profile identity internally. Declare a scoped MAIN/LAUNCHER package-visibility query alongside module-service discovery so installed launcher activities are visible to the app repository.
+

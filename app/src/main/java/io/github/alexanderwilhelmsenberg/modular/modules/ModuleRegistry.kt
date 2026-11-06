@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.RemoteException
@@ -14,7 +15,14 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.IModularModuleService
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
 import java.util.UUID
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,7 +32,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 
 /**
  * Discovers external Modular module services and negotiates their root session.
@@ -35,18 +45,36 @@ import kotlinx.coroutines.withContext
 class ModuleRegistry(
     context: Context,
     private val hostFactory: CoreHostFactory,
+    val managementStore: ModuleManagementStore = ModuleManagementStore(context),
+    private val handshakeTimeoutMillis: Long = 15_000L,
+    private val serviceDiscoveryOverride: (() -> List<ResolveInfo>)? = null,
+    private val serviceBindingOverride: ((Intent, ServiceConnection, Int) -> Boolean)? = null,
 ) : AutoCloseable {
     private val appContext = context.applicationContext
     private val packageManager = appContext.packageManager
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val connections = mutableMapOf<ComponentName, ServiceConnection>()
     private val sessions = ConcurrentHashMap<ComponentName, SessionBinding>()
+    private val attempts = ConcurrentHashMap<ComponentName, HandshakeAttempt>()
+    private val deadlines = mutableMapOf<ComponentName, Job>()
+    @Volatile private var connectionDemand: Set<ComponentName>? = null
 
     private val _modules = MutableStateFlow<List<ModuleRecord>>(emptyList())
     val modules: StateFlow<List<ModuleRecord>> = _modules.asStateFlow()
 
     fun refresh() {
-        val discovered = queryModuleServices()
+        val services = try {
+            queryModuleServices()
+        } catch (exception: Exception) {
+            val detail = if (exception is SecurityException) {
+                "SecurityException: ${exception.message ?: "access denied"}"
+            } else {
+                "${exception::class.java.simpleName}: ${exception.message ?: "service discovery failed"}"
+            }
+            managementStore.record("system", "discover", detail, isError = true)
+            return
+        }
+        val discovered = services
             .mapNotNull { resolveInfo ->
                 val serviceInfo = resolveInfo.serviceInfo ?: return@mapNotNull null
                 val component = ComponentName(serviceInfo.packageName, serviceInfo.name)
@@ -64,14 +92,84 @@ class ModuleRegistry(
             .forEach(::unbind)
 
         _modules.value = discovered.map { candidate ->
-            previousByComponent[candidate.component] ?: candidate
+            val previous = previousByComponent[candidate.component]
+            val enabled = managementStore.isEnabled(candidate.component)
+            if (!enabled) {
+                (previous ?: candidate).copy(
+                    moduleId = previous?.moduleId ?: managementStore.knownProviderId(candidate.component),
+                    enabled = false,
+                    status = ModuleConnectionStatus.DISABLED,
+                )
+            } else if (previous != null) {
+                previous.copy(enabled = true)
+            } else {
+                candidate.copy(moduleId = managementStore.knownProviderId(candidate.component))
+            }
         }
 
         discovered.forEach { candidate ->
-            if (candidate.component !in connections) {
+            val enabled = managementStore.isEnabled(candidate.component)
+            val demanded = connectionDemand?.contains(candidate.component) ?: true
+            if (!enabled || !demanded) {
+                unbind(candidate.component)
+                if (enabled && !demanded) {
+                    update(candidate.component) {
+                        val idleStatus = if (it.status in setOf(
+                                ModuleConnectionStatus.FAILED,
+                                ModuleConnectionStatus.INCOMPATIBLE,
+                            )
+                        ) it.status else ModuleConnectionStatus.DISCOVERED
+                        it.copy(status = idleStatus, sessionId = null)
+                    }
+                }
+            } else if (candidate.component !in connections &&
+                previousByComponent[candidate.component]?.status !in setOf(
+                    ModuleConnectionStatus.FAILED,
+                    ModuleConnectionStatus.INCOMPATIBLE,
+                )
+            ) {
+                managementStore.record(candidate.component.flattenToShortString(), "discover", "Module service discovered")
                 bind(candidate.component)
             }
         }
+        val removed = previousByComponent.keys - discoveredComponents
+        removed.forEach {
+            managementStore.record(it.flattenToShortString(), "discover", "Module service no longer discovered", isError = true)
+        }
+    }
+
+    /** null keeps all enabled modules eligible; an empty set releases every module connection. */
+    fun setConnectionDemand(components: Set<ComponentName>?) {
+        val normalized = components?.toSet()
+        if (connectionDemand == normalized) return
+        connectionDemand = normalized
+        refresh()
+    }
+
+    fun setEnabled(component: ComponentName, enabled: Boolean) {
+        managementStore.setEnabled(component, enabled)
+        if (!enabled) {
+            unbind(component)
+            update(component) {
+                it.copy(enabled = false, status = ModuleConnectionStatus.DISABLED, sessionId = null, error = null)
+            }
+            managementStore.record(component.flattenToShortString(), "disable", "Module disabled")
+            return
+        }
+
+        update(component) { it.copy(enabled = true, status = ModuleConnectionStatus.DISCOVERED, error = null) }
+        managementStore.record(component.flattenToShortString(), "enable", "Module enabled")
+        val demanded = connectionDemand?.contains(component) ?: true
+        if (demanded && component !in connections) bind(component)
+    }
+
+    fun retry(component: ComponentName) {
+        val module = modules.value.firstOrNull { it.component == component } ?: return
+        if (!module.enabled || !managementStore.isEnabled(component)) return
+        unbind(component)
+        update(component) { it.copy(status = ModuleConnectionStatus.DISCOVERED, sessionId = null, error = null) }
+        managementStore.record(component.flattenToShortString(), "retry", "Retry requested")
+        bind(component)
     }
 
     suspend fun acquireCapabilityBinder(
@@ -115,7 +213,7 @@ class ModuleRegistry(
     }
 
     private fun queryModuleServices() =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        serviceDiscoveryOverride?.invoke() ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             packageManager.queryIntentServices(
                 Intent(ModuleContract.SERVICE_ACTION),
                 PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong()),
@@ -129,6 +227,10 @@ class ModuleRegistry(
         }
 
     private fun bind(component: ComponentName) {
+        if (!managementStore.isEnabled(component)) return
+        val demanded = connectionDemand?.contains(component) ?: true
+        if (!demanded) return
+        if (component in connections) return
         update(component) {
             it.copy(
                 status = ModuleConnectionStatus.CONNECTING,
@@ -137,54 +239,20 @@ class ModuleRegistry(
             )
         }
 
-        val connection = object : ServiceConnection {
+        lateinit var connection: ServiceConnection
+        connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName, service: IBinder) {
+                if (connections[name] !== this || !isEligible(name)) {
+                    managementStore.record(name.flattenToShortString(), "bind", "Ignored stale service connection", isError = true)
+                    return
+                }
                 val remote = IModularModuleService.Stub.asInterface(service)
 
-                scope.launch {
-                    val result = runCatching {
-                        withContext(Dispatchers.IO) {
-                            performHandshake(name, remote)
-                        }
-                    }
-
-                    result.fold(
-                        onSuccess = { handshake ->
-                            if (handshake.record.status ==
-                                ModuleConnectionStatus.CONNECTED &&
-                                handshake.sessionId != null &&
-                                handshake.coreHostSession != null
-                            ) {
-                                val sessionEstablished =
-                                    establishSessionDeathTracking(
-                                        component = name,
-                                        remote = remote,
-                                        sessionId = handshake.sessionId,
-                                        coreHostSession = handshake.coreHostSession,
-                                    )
-
-                                if (!sessionEstablished) {
-                                    return@fold
-                                }
-                            }
-
-                            replace(name, handshake.record)
-                        },
-                        onFailure = { throwable ->
-                            update(name) {
-                                it.copy(
-                                    status = ModuleConnectionStatus.FAILED,
-                                    sessionId = null,
-                                    error = throwable.message
-                                        ?: throwable::class.java.simpleName,
-                                )
-                            }
-                        },
-                    )
-                }
+                startHandshake(name, remote, connection)
             }
 
             override fun onServiceDisconnected(name: ComponentName) {
+                if (connections[name] !== connection || !isEligible(name)) return
                 dropDeadSession(name)
                 update(name) {
                     it.copy(
@@ -192,9 +260,11 @@ class ModuleRegistry(
                         sessionId = null,
                     )
                 }
+                managementStore.record(name.flattenToShortString(), "disconnect", "Module disconnected", isError = true)
             }
 
             override fun onBindingDied(name: ComponentName) {
+                if (connections[name] !== connection) return
                 dropDeadSession(name)
                 update(name) {
                     it.copy(
@@ -203,10 +273,12 @@ class ModuleRegistry(
                         error = "Module binding died",
                     )
                 }
+                managementStore.record(name.flattenToShortString(), "disconnect", "Module binding died", isError = true)
                 unbind(name, closeSession = false)
             }
 
             override fun onNullBinding(name: ComponentName) {
+                if (connections[name] !== connection) return
                 update(name) {
                     it.copy(
                         status = ModuleConnectionStatus.FAILED,
@@ -214,45 +286,176 @@ class ModuleRegistry(
                         error = "Module returned a null binding",
                     )
                 }
+                managementStore.record(name.flattenToShortString(), "bind", "Module returned a null binding", isError = true)
                 unbind(name, closeSession = false)
             }
         }
 
         connections[component] = connection
+        scheduleDeadline(component, connection)
 
+        var bindFailure: String? = null
         val bound = try {
-            appContext.bindService(
-                Intent(ModuleContract.SERVICE_ACTION).setComponent(component),
-                connection,
-                Context.BIND_AUTO_CREATE,
-            )
-        } catch (securityException: SecurityException) {
+            val intent = Intent(ModuleContract.SERVICE_ACTION).setComponent(component)
+            serviceBindingOverride?.invoke(intent, connection, Context.BIND_AUTO_CREATE)
+                ?: appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        } catch (exception: RuntimeException) {
+            bindFailure = "${exception::class.java.simpleName}: ${exception.message ?: "service binding failed"}"
             update(component) {
                 it.copy(
                     status = ModuleConnectionStatus.FAILED,
-                    error = securityException.message ?: "SecurityException",
+                    error = bindFailure,
                 )
             }
+            managementStore.record(component.flattenToShortString(), "bind", bindFailure.orEmpty(), isError = true)
             false
         }
 
         if (!bound) {
+            deadlines.remove(component)?.cancel()
             connections.remove(component)
+            val error = bindFailure ?: "Android refused the service binding"
             update(component) {
                 it.copy(
                     status = ModuleConnectionStatus.FAILED,
-                    error = "Android refused the service binding",
+                    error = error,
                 )
+            }
+            if (bindFailure == null) {
+                managementStore.record(component.flattenToShortString(), "bind", error, isError = true)
             }
         }
     }
 
-    private suspend fun performHandshake(
+    private fun scheduleDeadline(component: ComponentName, connection: ServiceConnection) {
+        deadlines.remove(component)?.cancel()
+        deadlines[component] = scope.launch {
+            delay(handshakeTimeoutMillis)
+            if (connections[component] !== connection) return@launch
+            cancelAttempt(component)
+            update(component) {
+                it.copy(
+                    status = ModuleConnectionStatus.FAILED,
+                    sessionId = null,
+                    error = "Module connection timed out",
+                )
+            }
+            managementStore.record(
+                component.flattenToShortString(),
+                "handshake",
+                "Timed out waiting for module connection or handshake",
+                isError = true,
+            )
+            unbind(component)
+        }
+    }
+
+    private fun startHandshake(
         component: ComponentName,
         remote: IModularModuleService,
+        connection: ServiceConnection,
+    ) {
+        if (!HANDSHAKES_IN_FLIGHT.add(component)) {
+            managementStore.record(component.flattenToShortString(), "handshake", "A previous handshake is still running", isError = true)
+            update(component) {
+                it.copy(status = ModuleConnectionStatus.FAILED, sessionId = null, error = "A previous handshake is still running")
+            }
+            unbind(component)
+            return
+        }
+        val attempt = HandshakeAttempt()
+        attempts[component] = attempt
+        try {
+            HANDSHAKE_EXECUTOR.execute {
+                val result = try {
+                    val handshake = performHandshake(component, remote, attempt)
+                    if (attempt.cancelled) {
+                        Result.failure(CancellationException("Handshake result is stale"))
+                    } else {
+                        Result.success(handshake)
+                    }
+                } catch (throwable: Throwable) {
+                    Result.failure(throwable)
+                } finally {
+                    HANDSHAKES_IN_FLIGHT.remove(component)
+                }
+
+                scope.launch {
+                    if (connections[component] !== connection || attempt.cancelled) {
+                        attempts.remove(component, attempt)
+                        return@launch
+                    }
+                    attempts.remove(component, attempt)
+                    deadlines.remove(component)?.cancel()
+                    result.fold(
+                        onSuccess = { handshake ->
+                            if (handshake.record.status == ModuleConnectionStatus.CONNECTED &&
+                                handshake.sessionId != null && handshake.coreHostSession != null
+                            ) {
+                                val sessionEstablished = establishSessionDeathTracking(
+                                    component = component,
+                                    remote = remote,
+                                    sessionId = handshake.sessionId,
+                                    coreHostSession = handshake.coreHostSession,
+                                )
+                                if (!sessionEstablished) {
+                                    unbind(component)
+                                    return@fold
+                                }
+                            }
+                            replace(component, handshake.record.copy(enabled = true))
+                            handshake.record.moduleId?.let { managementStore.rememberProviderId(component, it) }
+                            if (handshake.record.status == ModuleConnectionStatus.INCOMPATIBLE) {
+                                val error = handshake.record.error ?: "Unsupported module protocol"
+                                managementStore.record(component.flattenToShortString(), "handshake", error, isError = true)
+                                unbind(component)
+                            } else {
+                                managementStore.record(component.flattenToShortString(), "handshake", "Module handshake completed")
+                            }
+                        },
+                        onFailure = { throwable ->
+                            if (throwable is CancellationException) return@fold
+                            val cause = generateSequence(throwable) { it.cause }
+                                .firstOrNull { it is SecurityException } ?: throwable
+                            val detail = when (cause) {
+                                is SecurityException -> "SecurityException: ${cause.message ?: "access denied"}"
+                                else -> "${cause::class.java.simpleName}: ${cause.message ?: "handshake failed"}"
+                            }.take(MAX_ERROR_LENGTH)
+                            update(component) {
+                                it.copy(status = ModuleConnectionStatus.FAILED, sessionId = null, error = detail)
+                            }
+                            managementStore.record(component.flattenToShortString(), "handshake", detail, isError = true)
+                            unbind(component)
+                        },
+                    )
+                }
+            }
+        } catch (exception: RejectedExecutionException) {
+            HANDSHAKES_IN_FLIGHT.remove(component)
+            attempts.remove(component, attempt)
+            deadlines.remove(component)?.cancel()
+            update(component) {
+                it.copy(status = ModuleConnectionStatus.FAILED, error = "Handshake capacity is full")
+            }
+            managementStore.record(component.flattenToShortString(), "handshake", "Handshake capacity is full", isError = true)
+            unbind(component)
+        }
+    }
+
+    private fun cancelAttempt(component: ComponentName) {
+        attempts.remove(component)?.cancel()
+    }
+
+    private fun performHandshake(
+        component: ComponentName,
+        remote: IModularModuleService,
+        attempt: HandshakeAttempt,
     ): HandshakeResult {
+        if (attempt.cancelled) throw CancellationException("Handshake cancelled")
         val protocolVersion = remote.protocolVersion
         val supported = ModuleContract.isProtocolSupported(protocolVersion)
+        val moduleId = remote.moduleId
+        val moduleVersion = remote.moduleVersion
 
         val capabilities = remote.capabilities
             ?.toList()
@@ -312,8 +515,8 @@ class ModuleRegistry(
             return HandshakeResult(
                 record = ModuleRecord(
                     component = component,
-                    moduleId = remote.moduleId,
-                    moduleVersion = remote.moduleVersion,
+                    moduleId = moduleId,
+                    moduleVersion = moduleVersion,
                     protocolVersion = protocolVersion,
                     capabilities = capabilities,
                     requestedCoreCapabilities =
@@ -331,18 +534,28 @@ class ModuleRegistry(
 
         val sessionId = if (ModuleContract.supportsSessions(protocolVersion)) {
             UUID.randomUUID().toString().also { id ->
-                coreHostSession = hostFactory.create(
-                    component = component,
-                    sessionId = id,
-                    requestedCapabilities =
-                        requestedCoreCapabilityIds,
-                )
+                if (attempt.cancelled) throw CancellationException("Handshake cancelled")
+                val createdHost = runBlocking {
+                    hostFactory.create(
+                        component = component,
+                        sessionId = id,
+                        requestedCapabilities = requestedCoreCapabilityIds,
+                    )
+                }
+                coreHostSession = createdHost
+                attempt.attach(createdHost)
+                if (attempt.cancelled) {
+                    createdHost.revoke()
+                    throw CancellationException("Handshake cancelled")
+                }
 
                 try {
                     remote.openSession(
                         id,
                         requireNotNull(coreHostSession).host,
                     )
+                    attempt.sessionOpened(remote, id)
+                    if (attempt.cancelled) throw CancellationException("Handshake cancelled")
                 } catch (throwable: Throwable) {
                     coreHostSession?.revoke()
                     throw throwable
@@ -355,8 +568,8 @@ class ModuleRegistry(
         return HandshakeResult(
             record = ModuleRecord(
                 component = component,
-                moduleId = remote.moduleId,
-                moduleVersion = remote.moduleVersion,
+                moduleId = moduleId,
+                moduleVersion = moduleVersion,
                 protocolVersion = protocolVersion,
                 capabilities = capabilities,
                 requestedCoreCapabilities =
@@ -379,6 +592,7 @@ class ModuleRegistry(
         val binder = remote.asBinder()
         val deathRecipient = IBinder.DeathRecipient {
             scope.launch {
+                if (!isEligible(component) || sessions[component]?.sessionId != sessionId) return@launch
                 dropDeadSession(component)
                 update(component) {
                     it.copy(
@@ -387,6 +601,7 @@ class ModuleRegistry(
                         error = "Module process died",
                     )
                 }
+                managementStore.record(component.flattenToShortString(), "disconnect", "Module process died", isError = true)
             }
         }
 
@@ -401,9 +616,7 @@ class ModuleRegistry(
             true
         } catch (remoteException: RemoteException) {
             coreHostSession.revoke()
-            runCatching {
-                remote.closeSession(sessionId)
-            }
+            scheduleCleanup { remote.closeSession(sessionId) }
             update(component) {
                 it.copy(
                     status = ModuleConnectionStatus.FAILED,
@@ -412,6 +625,13 @@ class ModuleRegistry(
                         ?: "Module died while opening session",
                 )
             }
+            managementStore.record(
+                component.flattenToShortString(),
+                "handshake",
+                "RemoteException: ${remoteException.message ?: "Module died while opening session"}",
+                isError = true,
+            )
+            unbind(component)
             false
         }
     }
@@ -447,19 +667,31 @@ class ModuleRegistry(
             )
         }
 
-        runCatching {
-            session.remote.closeSession(session.sessionId)
-        }
+        scheduleCleanup { session.remote.closeSession(session.sessionId) }
     }
 
     private fun dropDeadSession(component: ComponentName) {
         sessions.remove(component)?.coreHostSession?.revoke()
     }
 
+    private fun scheduleCleanup(action: () -> Unit) {
+        try {
+            CLEANUP_EXECUTOR.execute { runCatching(action) }
+        } catch (_: RejectedExecutionException) {
+            // The local host is revoked synchronously; remote close is best effort under saturation.
+        }
+    }
+
+    private fun isEligible(component: ComponentName): Boolean =
+        managementStore.isEnabled(component) &&
+            (connectionDemand?.contains(component) ?: true)
+
     private fun unbind(
         component: ComponentName,
         closeSession: Boolean = true,
     ) {
+        deadlines.remove(component)?.cancel()
+        cancelAttempt(component)
         if (closeSession) {
             closeLiveSession(component)
         } else {
@@ -477,6 +709,9 @@ class ModuleRegistry(
 
     override fun close() {
         connections.keys.toList().forEach(::unbind)
+        attempts.keys.toList().forEach(::cancelAttempt)
+        deadlines.values.toList().forEach(Job::cancel)
+        deadlines.clear()
         scope.cancel()
     }
 
@@ -492,4 +727,62 @@ class ModuleRegistry(
         val deathRecipient: IBinder.DeathRecipient,
         val coreHostSession: CoreHostSession,
     )
+
+    private class HandshakeAttempt {
+        private val host = AtomicReference<CoreHostSession?>(null)
+        private val openedSession = AtomicReference<Pair<IModularModuleService, String>?>(null)
+        private val remoteCloseScheduled = java.util.concurrent.atomic.AtomicBoolean(false)
+        @Volatile var cancelled: Boolean = false
+            private set
+
+        fun attach(session: CoreHostSession) {
+            host.set(session)
+            if (cancelled) session.revoke()
+        }
+
+        fun cancel() {
+            cancelled = true
+            host.get()?.revoke()
+            closeOpenedSession()
+        }
+
+        fun sessionOpened(remote: IModularModuleService, sessionId: String) {
+            openedSession.set(remote to sessionId)
+            if (cancelled) closeOpenedSession()
+        }
+
+        private fun closeOpenedSession() {
+            val opened = openedSession.get() ?: return
+            if (!remoteCloseScheduled.compareAndSet(false, true)) return
+            try {
+                CLEANUP_EXECUTOR.execute { runCatching { opened.first.closeSession(opened.second) } }
+            } catch (_: RejectedExecutionException) {
+                // The root Binder is already revoked; remote close is best effort under saturation.
+            }
+        }
+    }
+
+    private companion object {
+        const val MAX_ERROR_LENGTH = 2_048
+        val HANDSHAKES_IN_FLIGHT = ConcurrentHashMap.newKeySet<ComponentName>()
+        val HANDSHAKE_EXECUTOR = ThreadPoolExecutor(
+            2,
+            4,
+            30L,
+            TimeUnit.SECONDS,
+            ArrayBlockingQueue(32),
+            { task -> Thread(task, "module-handshake").apply { isDaemon = true } },
+            ThreadPoolExecutor.AbortPolicy(),
+        )
+        val CLEANUP_EXECUTOR = ThreadPoolExecutor(
+            1,
+            1,
+            0L,
+            TimeUnit.MILLISECONDS,
+            ArrayBlockingQueue(32),
+            { task -> Thread(task, "module-cleanup").apply { isDaemon = true } },
+            ThreadPoolExecutor.AbortPolicy(),
+        )
+    }
 }
+

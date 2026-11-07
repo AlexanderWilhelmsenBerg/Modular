@@ -70,7 +70,12 @@ class MostUsedCrossApkTest {
         val router = CapabilityRouter(registry)
         val stateStore = DataStoreCompositionStateStore(context, "most-used-composition-${UUID.randomUUID()}")
         val contexts = ContextManager(stateStore, router.routes)
-        val settings = ModuleSettingsController(stateStore, router.routes)
+        // Keep this compatibility test on the old apps.sort/v1 selection path.
+        // Ordinary Settings now prefers the newly advertised featured endpoint.
+        val legacyRoutes = MutableStateFlow(router.routes.value.filterNot {
+            it.capability == StandardCapabilities.AppsFeatured
+        })
+        val settings = ModuleSettingsController(stateStore, legacyRoutes)
         val client = AppSortClient(router)
         var controller: HomeSortController? = null
 
@@ -84,6 +89,9 @@ class MostUsedCrossApkTest {
                 } }.single { it.providerId == MODULE_ID && it.capability == StandardCapabilities.AppsSort }
             }) { "Most Used apps.sort route did not appear within 15 s; routes=${router.routes.value}" }
             assertEquals(MODULE_PACKAGE, requireNotNull(route.component).packageName)
+            legacyRoutes.value = router.routes.value.filterNot {
+                it.capability == StandardCapabilities.AppsFeatured
+            }
 
             settings.save(MODULE_ID, "Most Used", "{}", true).getOrThrow()
             val active = requireNotNull(withTimeoutOrNull(10_000) {

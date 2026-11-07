@@ -1,6 +1,6 @@
 # Home presentation v2 implementation plan
 
-Status: **Planned, not implemented.** Baseline: main
+Status: **Source implemented; acceptance tracked in PR #19 and the acceptance matrix.** Baseline: main
 `3e5559f552d9218c23b67b3b45e73d1f3113839d` (PR #17).
 Requirements: [Home presentation v2](../product/home-presentation-v2.md).
 
@@ -203,9 +203,19 @@ Owner: integration/review coordinator. Dependencies: P1–P4.
 | ABI breaks independent APKs | Add a new capability/interface, preserve v1 parcel bytes, negotiate support, and test old/new pairings. |
 | Core loses apps while applying an add-on subset | Build the alphabetical catalog independently; validate optional contributed keys and discard only the invalid contribution. |
 
-## 4. Documentation-only scope of this change
+## 4. Current implementation map
 
-This plan and its specification change requirements and sequencing only. No
-runtime implementation, APK behavior, new capability registration, or migration
-is delivered by the documentation PR. Verify document links, requirement coverage,
-and superseded statements; Android runtime validation belongs to P1–P5.
+The source tree contains implementations for P1–P4. These are code references,
+not claims that the acceptance gates have passed:
+
+| Package | Main source | Focused coverage and remaining gate |
+| --- | --- | --- |
+| P1 | `appearance/AppearanceSettingsStore.kt`, `appearance/HomeAppearanceControls.kt`, `appearance/WallpaperHomeScrim.kt`, `apps/AppIconRepository.kt`, `ui/HomeSectionBuilder.kt`, `ui/HomeBottomControls.kt` | `HomeAppearanceSettingsTest`, `AppIconRepositoryTest`; V2-A1/A3/A6 device and CI evidence pending. |
+| P2 | `ui/AlphabetRail.kt`, `ui/HomeReachability.kt`, `ui/HomeScreen.kt`, `ui/HomeAppList.kt` | Gesture/locale tests and reference screenshots/video pending V2-A2/A4/A5. |
+| P3 | `module-api` featured parcels/AIDL and `FeaturedAppsContract.kt`; `module-sdk/FeaturedAppsEndpoint.kt`; Core `capabilities/FeaturedAppsClient.kt`, `home/HomeFeaturedController.kt`, `ui/FeaturedAppSettingsUi.kt`, `composition/ModuleSettingsController.kt` | `HomeFeaturedControllerTest`, `FeaturedAppsCrossApkTest`; independent APK, malformed/stale/revocation and CI evidence pending V2-A9. |
+| P4 | `addon-most-used/MostUsedSortService.kt`, `MostUsedSorter.kt`, `PinState.kt`, `PinStore.kt`, descriptor and native Usage Access Activity | `PinStateTest`, `MostUsedSorterTest`, `PinStoreTest`; real Usage Access, persistence, pin UI and old/new APK evidence pending V2-A7/A8. |
+
+P5 remains open. Record the exact revision, device/API level, test results,
+screenshots and video in the [v2 acceptance matrix](core-completion.md#home-presentation-v2-implementation-and-acceptance)
+before calling this revision delivered. Physical Samsung gesture and wallpaper
+checks remain especially important.

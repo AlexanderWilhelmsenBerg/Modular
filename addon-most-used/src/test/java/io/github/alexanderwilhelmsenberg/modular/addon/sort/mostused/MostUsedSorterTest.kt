@@ -63,6 +63,20 @@ class MostUsedSorterTest {
         assertEquals(2, sorted(items, emptyMap()).count { it.key == duplicate.key })
     }
 
+    @Test
+    fun suggestionsExcludePinsUnusedAppsAndOtherProfiles() {
+        val pinned = item("pinned.pkg", "Pinned")
+        val used = item("used.pkg", "Used")
+        val unused = item("unused.pkg", "Unused")
+        val other = item("other.pkg", "Other profile", profile = 20)
+        val result = MostUsedSorter.suggestions(
+            listOf(unused, other, pinned, used), "en", 10,
+            mapOf("pinned.pkg" to 2_000, "used.pkg" to 1_000, "other.pkg" to 3_000),
+            setOf(pinned.key), 8,
+        )
+        assertEquals(listOf(used.key), result)
+    }
+
     private fun sorted(
         items: List<AppSortItemParcel>,
         weights: Map<String, Long>,

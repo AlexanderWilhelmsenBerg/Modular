@@ -5,4 +5,6 @@ package io.github.alexanderwilhelmsenberg.modular.moduleapi
  */
 object StandardCapabilities {
     val AppsSort = CapabilityId("modular.apps.sort", 1)
+    val AppsFeatured = CapabilityId("modular.apps.featured", 1)
 }
+

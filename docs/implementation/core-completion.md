@@ -1,10 +1,12 @@
 # Core completion
 
 The Core APK provides its own launcher and Settings without optional modules,
-network access, accounts or configuration. This delivery completes the agreed
-Home controls and built-in themes and connects optional sort helpers to Home.
+network access, accounts or configuration. The original delivery completed Home
+controls and built-in themes and connected optional sort helpers to Home. Home
+presentation v2 extends that baseline with icons, indexed navigation, optional
+wallpaper, and generic featured-app contributions.
 
-## Coordinator plan and ownership
+## Original Core delivery plan and ownership
 
 - Home agent: persistent full-width search, accessible gear, current-catalog filtering
   and text-only app rows.
@@ -16,7 +18,10 @@ Home controls and built-in themes and connects optional sort helpers to Home.
 - Coordinator: source integration, CI repair, specification reconciliation, signing
   workflow verification and merge after successful checks.
 
-## Requirements and evidence
+## Original Core requirements and evidence
+
+These rows describe the original delivery. The v2 acceptance matrix below
+supersedes its text-only presentation and top control placement.
 
 | Current requirement | Implementation and coverage |
 | --- | --- |
@@ -86,7 +91,7 @@ then attach measured screenshots/video and physical Samsung observations.
 PR #11 passed build/unit/lint and API 35 emulator CI before merging at
 `bc070fdaee380fa6810e996157bc38b5d5e392ec`.
 
-The Core completion change is tracked in [PR #12](https://github.com/AlexanderWilhelmsenBerg/Modular/pull/12). Its commit-specific checks are the authoritative Android build, unit/lint, and emulator evidence. Local execution is unavailable in the source mirror because Gradle, Android SDK and ADB are absent. Source-only review is not device verification.
+The original Core completion change is tracked in [PR #12](https://github.com/AlexanderWilhelmsenBerg/Modular/pull/12). Its commit-specific checks are the authoritative evidence for that earlier revision. The v2 toolchain and verification results are recorded separately above.
 
 ## Physical-device acceptance
 
@@ -111,8 +116,10 @@ These checks are device-dependent and are not claimed complete by unit tests.
 ## Explicitly later add-ons
 
 External Home/Drawer rendering, external theme loading, richer configuration schemas,
-favorites, icons/profile labels, filtering providers, automation, scripts, MCP and
+profile labels, filtering providers, automation, scripts, MCP and
 terminal integrations remain later add-ons. They must preserve baseline Core recovery.
+Icons are now Core presentation; pins and usage suggestions belong to the Most Used
+add-on through the generic featured-app capability.
 
 ## Core framework contract
 

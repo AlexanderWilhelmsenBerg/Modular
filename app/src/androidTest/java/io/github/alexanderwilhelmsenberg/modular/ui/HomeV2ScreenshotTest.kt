@@ -166,9 +166,14 @@ class HomeV2ScreenshotTest {
         // captures outside its private directory before that cleanup occurs.
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         val preserved = "/sdcard/Pictures/ModularHomeV2"
-        val copied = android.os.ParcelFileDescriptor.AutoCloseInputStream(
-            automation.executeShellCommand("mkdir -p '$preserved' && cp '${file.absolutePath}' '$preserved/${file.name}' && echo copied")
+        fun shell(command: String): String = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+            automation.executeShellCommand(command)
         ).bufferedReader().use { it.readText().trim() }
-        check(copied == "copied") { "Could not preserve Home fixture screenshot" }
+        val destination = "$preserved/${file.name}"
+        shell("mkdir -p $preserved")
+        shell("cp ${file.absolutePath} $destination")
+        check(shell("stat -c %s $destination").toLongOrNull() == file.length()) {
+            "Could not preserve Home fixture screenshot"
+        }
     }
 }

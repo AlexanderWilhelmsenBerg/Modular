@@ -1,6 +1,6 @@
 # Home presentation v2 implementation plan
 
-Status: **Source implementation in progress; acceptance pending.** Baseline: main
+Status: **Source implemented; acceptance tracked in PR #19 and the acceptance matrix.** Baseline: main
 `3e5559f552d9218c23b67b3b45e73d1f3113839d` (PR #17).
 Requirements: [Home presentation v2](../product/home-presentation-v2.md).
 

@@ -7,10 +7,12 @@
 Installing the Core APK provides:
 
 - a Home screen with a vertical alphabetical app list;
-- text-only app names, profile-aware discovery, and tap-to-launch;
+- app icons and names, optional text-only rows, profile-aware discovery, and tap-to-launch;
+- letter dividers, animated side alphabet navigation, and retained pull-down reachability;
 - Android HOME integration;
-- persistent full-width app search and a settings gear;
+- persistent full-width app search and a settings gear at the bottom;
 - persisted Light, Dark, and true-black AMOLED themes;
+- optional system wallpaper with adjustable dimming;
 - secondary Settings with add-on controls, retained failure history, and Android-confirmed uninstall;
 - accessibility and automatic app-list updates.
 
@@ -65,7 +67,7 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 ## Specifications
 
 - [Product specification](docs/product/product-spec.md)
-- [Next Home presentation specification](docs/product/home-presentation-v2.md)
+- [Home presentation specification](docs/product/home-presentation-v2.md)
 - [Home presentation implementation plan](docs/implementation/home-presentation-v2-plan.md)
 - [Indexed Home and featured add-ons ADR](docs/decisions/ADR-0005-indexed-home-and-featured-addons.md)
 - [System architecture](docs/architecture/system-architecture.md)
@@ -97,8 +99,9 @@ previous text-only presentation direction. Source now includes Core icons, lette
 dividers, side alphabet navigation, optional system wallpaper/dimming, bottom
 search/settings, and pull-down reachability. Most Used contributes a starred
 section with saved pins before usage-ranked suggestions, while the full
-alphabetical catalog stays available. Revision-specific CI, emulator,
-cross-APK, visual and physical-device acceptance remain pending; see the
+alphabetical catalog stays available. Automated results are tracked against
+[PR #19](https://github.com/AlexanderWilhelmsenBerg/Modular/pull/19); physical-device
+acceptance remains pending. See the
 [v2 acceptance matrix](docs/implementation/core-completion.md#home-presentation-v2-implementation-and-acceptance).
 
 

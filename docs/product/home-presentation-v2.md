@@ -1,7 +1,7 @@
 <!-- Hallmark · reference study and specification · P4 H4 E4 S5 R4 V3 · native Android; rendering validation pending -->
 # Home presentation v2
 
-Status: **Implementation in progress; acceptance pending.** Product request: 2026-11-07.
+Status: **Source implemented; automated and physical acceptance tracked in PR #19 and the acceptance matrix.** Product request: 2026-11-07.
 
 This target follows the Core baseline at
 `3e5559f552d9218c23b67b3b45e73d1f3113839d`. It supersedes the earlier text-only,

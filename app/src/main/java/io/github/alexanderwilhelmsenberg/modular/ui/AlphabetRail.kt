@@ -96,9 +96,12 @@ internal fun AlphabetRail(
                 }
             }
         }
-        if (fingerFraction >= 0f && selected != null) {
+        // Placement can run once after pointer release and before recomposition removes
+        // the bubble. Capture the last valid position so it cannot jump to y = 0.
+        val bubbleFraction = fingerFraction
+        if (bubbleFraction >= 0f && selected != null) {
             Box(
-                Modifier.offset { IntOffset(0, ((fingerFraction * heightPx) - with(density) { 24.dp.toPx() }).roundToInt().coerceIn(0, (heightPx - with(density) { 48.dp.roundToPx() }).coerceAtLeast(0))) }
+                Modifier.offset { IntOffset(0, ((bubbleFraction * heightPx) - with(density) { 24.dp.toPx() }).roundToInt().coerceIn(0, (heightPx - with(density) { 48.dp.roundToPx() }).coerceAtLeast(0))) }
                     .size(48.dp).background(Color(0xFF478FF2), CircleShape).align(AbsoluteAlignment.TopLeft)
                     .testTag("alphabet-bubble"),
                 contentAlignment = Alignment.Center,

@@ -8,7 +8,7 @@ This is sequencing, not a release-date commitment. Target requirements are defin
 - Define Home/navigation, app identity, accessibility, and recovery acceptance.
 - Preserve versioned IPC and security contracts for external add-ons.
 
-## Phase 1 — Complete and reliable Core
+## Phase 1 — Complete and reliable Core (delivered baseline)
 
 - Built-in Home with one vertical text-only app list.
 - Built-in locale-aware alphabetical ordering and exact activity/profile launching.
@@ -32,7 +32,7 @@ Acceptance: install only Core offline; open Home, launch apps, use Settings/Back
 
 Acceptance: product-spec cases 6–8; external add-ons remain separately packaged and subject to live grant checks.
 
-## Phase 1c — Agreed Home controls and built-in themes
+## Phase 1c — Home controls and built-in themes (delivered baseline)
 
 - Remove Apps heading; persistent full-width search and accessible settings gear.
 - Persist Light, Dark, and AMOLED themes across Home and Settings.
@@ -53,11 +53,27 @@ Implementation and commit-specific verification are tracked in
 [Core framework acceptance](implementation/core-framework.md). Physical-device
 acceptance remains open; see product-spec section 17 and the device checklist.
 
+## Phase 1e — Reference-led Home presentation v2 (next; planned)
+
+Requirements: [Home presentation v2](product/home-presentation-v2.md).
+Implementation packages: [v2 plan](implementation/home-presentation-v2-plan.md).
+
+1. P1: Core icons, optional wallpaper/dimming, locale letter sections, bottom search/gear.
+2. P2: animated side alphabet and retained pull-down reachability.
+3. P3: bounded featured-app capability/SDK and generic Core section/pin controls.
+4. P4: Most Used star destination, persistent manual pins, usage suggestions, safe migration.
+5. P5: integrated visual, gesture, cross-APK, failure and physical-device acceptance.
+
+P3 contract work can run alongside P1; P2 uses P1's geometry and section model;
+P4 depends on P3. All ordinary setup remains in module Settings. This phase
+supersedes the baseline text-only/icon and alphabet-index boundary without
+claiming these features already exist. Pinning/ranking remain in the add-on.
+
 ## Phase 2 — Module UX and richer composition
 
 - richer nested schemas and configuration controls beyond the implemented flat fields.
 - bounded external surface protocol and optional alternative Home/Drawer modules.
-- optional favorites, alphabet index, and alternative layouts.
+- additional favorites/grouping providers and alternative layouts beyond phase 1e.
 - richer instance configuration.
 - richer installation/distribution flows beyond Android uninstall.
 - compatibility UX.

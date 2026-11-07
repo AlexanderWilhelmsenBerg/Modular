@@ -1,6 +1,6 @@
 # ADR-0004 — Complete Core Launcher and Optional Add-ons
 
-Status: **Accepted product direction; implementation pending**
+Status: **Accepted; presentation boundary partially superseded by ADR-0005**
 Date: 2026-11-04
 
 ## Context
@@ -33,3 +33,10 @@ The product specification defines baseline and failure acceptance tests. Deliver
 
 Product clarification (2026-11-04): default Home rows contain only app-name text. Icons and profile labels require an explicitly enabled presentation add-on. Core retains profile identity internally for correct launching.
 
+
+
+Presentation revision (2026-11-07): [ADR-0005](ADR-0005-indexed-home-and-featured-addons.md)
+supersedes the text-only/add-on-only icons and alphabet-index boundary above.
+Core now targets optional wallpaper, icons, letter sections/navigation, bottom
+controls, and pull-down reachability. Most Used owns starred contents and pins.
+This is specified future work; the complete offline Core decision remains intact.

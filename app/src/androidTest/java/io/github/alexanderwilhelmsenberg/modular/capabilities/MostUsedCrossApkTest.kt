@@ -86,15 +86,16 @@ class MostUsedCrossApkTest {
             assertEquals(MODULE_PACKAGE, requireNotNull(route.component).packageName)
 
             settings.save(MODULE_ID, "Most Used", "{}", true).getOrThrow()
-            assertTrue("Settings must select Most Used for Home", settings.isUsedForAppOrder(MODULE_ID))
             val active = requireNotNull(withTimeoutOrNull(10_000) {
                 contexts.active.first { current ->
                     current.isReady && current.resolvedBindings.any { binding ->
                         binding.capability == StandardCapabilities.AppsSort &&
-                            binding.instance.providerId == MODULE_ID
+                            binding.instance.providerId == MODULE_ID &&
+                            org.json.JSONObject(binding.instance.configurationJson).optInt("days") == 7
                     }
                 }
             }) { "Settings did not activate Most Used defaults; active=${contexts.active.value}" }
+            assertTrue("Settings must select Most Used for Home", settings.isUsedForAppOrder(MODULE_ID))
             assertEquals(
                 "Saving defaults must activate the descriptor's seven-day value",
                 7,
@@ -142,10 +143,10 @@ class MostUsedCrossApkTest {
             settings.save(MODULE_ID, "Most Used", """{"days":1}""", true).getOrThrow()
             val changed = requireNotNull(withTimeoutOrNull(10_000) {
                 contexts.active.first { current ->
-                    current.isReady && current.resolvedBindings.singleOrNull()
-                        ?.instance?.configurationJson?.let { json ->
-                            org.json.JSONObject(json).optInt("days") == 1
-                        } == true
+                    current.isReady && current.resolvedBindings.singleOrNull()?.let { binding ->
+                        binding.instance.providerId == MODULE_ID &&
+                            org.json.JSONObject(binding.instance.configurationJson).optInt("days") == 1
+                    } == true
                 }
             }) { "Settings did not activate the one-day value; active=${contexts.active.value}" }
             assertTrue("Changing days must leave Most Used selected", settings.isUsedForAppOrder(MODULE_ID))

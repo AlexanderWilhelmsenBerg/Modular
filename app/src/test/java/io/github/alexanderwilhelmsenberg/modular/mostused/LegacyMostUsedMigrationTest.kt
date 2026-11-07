@@ -3,7 +3,6 @@ package io.github.alexanderwilhelmsenberg.modular.mostused
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
-import androidx.datastore.preferences.core.toMutablePreferences
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow

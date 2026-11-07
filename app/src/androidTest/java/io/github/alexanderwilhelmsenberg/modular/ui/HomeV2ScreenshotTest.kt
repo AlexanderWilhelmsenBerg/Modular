@@ -134,6 +134,19 @@ class HomeV2ScreenshotTest {
         capture("wallpaper-featured")
     }
 
+    @Test fun amoledSurfaceKeepsIconsAndBottomControlsVisible() {
+        val icon = fixtureIcon()
+        composeRule.setContent {
+            ModularTheme(AppearanceTheme.AMOLED) {
+                HomeScreen(AppCatalog(apps = apps), {}, {}, {}, {},
+                    showMakeDefault = false, iconForApp = { icon })
+            }
+        }
+        composeRule.onNodeWithTag("alphabet-rail").assertIsDisplayed()
+        composeRule.onNodeWithTag("home-settings").assertIsDisplayed()
+        capture("amoled")
+    }
+
     private fun capture(name: String) {
         composeRule.waitForIdle()
         val context = InstrumentationRegistry.getInstrumentation().targetContext

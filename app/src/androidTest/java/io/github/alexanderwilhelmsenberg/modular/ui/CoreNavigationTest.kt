@@ -27,6 +27,10 @@ class CoreNavigationTest {
 
     @Test
     fun settingsBackReturnsToHome() {
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("alphabet-rail").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("alphabet-rail").assertIsDisplayed()
         composeRule.onNodeWithTag("home-search").assertIsDisplayed()
         composeRule.onNodeWithTag("home-settings").performClick()
         composeRule.onNodeWithText("Back").assertIsDisplayed()
@@ -36,6 +40,7 @@ class CoreNavigationTest {
         }
 
         composeRule.onNodeWithTag("home-search").assertIsDisplayed()
+        composeRule.onNodeWithTag("alphabet-rail").assertIsDisplayed()
     }
 
     @Test

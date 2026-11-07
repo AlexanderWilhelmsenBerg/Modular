@@ -231,6 +231,7 @@ class MainActivity : ComponentActivity() {
                 val featured by homeFeaturedController.featured.collectAsState()
                 var wallpaperActive by remember { mutableStateOf(initialWallpaper) }
                 val homeOrderedApps by homeSortController.orderedApps.collectAsState()
+                val customHomeOrderActive by homeSortController.customOrderActive.collectAsState()
                 LaunchedEffect(appearanceTheme, homeAppearance.background, settingsVisible) {
                     wallpaperActive = applyHomeWindowAppearance(
                         this@MainActivity, appearanceTheme,
@@ -303,7 +304,7 @@ class MainActivity : ComponentActivity() {
                                         "No usage history yet. Pin apps from add-on settings."
                                     else -> null
                                 },
-                                alphabeticalSections = homeOrderedApps == null,
+                                alphabeticalSections = !customHomeOrderActive,
                                 onOpenFeaturedSettings = featured?.let { current -> {
                                     if (homeFeaturedController.featured.value?.binding == current.binding) {
                                         selectedModuleComponent = current.binding.route.component?.flattenToString()

@@ -133,7 +133,7 @@ internal fun HomeAppList(
                 }
                 HomeListEntry.FeaturedStatus -> Column(Modifier.fillMaxWidth().padding(start = 52.dp, end = 56.dp, top = 8.dp, bottom = 16.dp)) {
                     Text(featuredMessage ?: "Enable usage access to see suggested apps", color = foreground)
-                    if (onOpenFeaturedSettings != null) Button(onClick = onOpenFeaturedSettings, modifier = Modifier.testTag("featured-settings")) { Text("Add-on settings") }
+                    if (onOpenFeaturedSettings != null) Button(onClick = onOpenFeaturedSettings, modifier = Modifier.testTag("featured-settings")) { Text("Settings") }
                     if (featuredNeedsPermission && onOpenFeaturedManagement != null) Button(onClick = onOpenFeaturedManagement, modifier = Modifier.testTag("featured-permission")) { Text("Enable usage access") }
                 }
                 HomeListEntry.Actions -> Column(Modifier.fillMaxWidth().padding(16.dp)) {

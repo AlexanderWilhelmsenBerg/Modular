@@ -1,6 +1,6 @@
 # Modular
 
-**Modular** is a complete, minimal Android launcher with optional add-ons for helper functions and enhancements.
+**Modular** is a complete, minimal Android launcher with optional add-ons for complex integrations and alternative behavior.
 
 ## Current delivered behavior
 
@@ -13,10 +13,11 @@ Installing the Core APK provides:
 - persistent full-width app search and a settings gear at the bottom;
 - persisted Light, Dark, and true-black AMOLED themes;
 - optional system wallpaper with adjustable dimming;
+- a built-in, default-off Most Used section with pins and optional usage suggestions;
 - secondary Settings with add-on controls, retained failure history, and Android-confirmed uninstall;
 - accessibility and automatic app-list updates.
 
-Home opens immediately. No extra APK, network, account, or context setup is required. Add-ons extend the finished Core with filtering, alternative sorting/presentation, automation, scripts, and integrations. Built-in Home remains available when an add-on fails.
+Home opens immediately. No extra APK, network, account, or context setup is required. Pins work without Usage Access; usage suggestions require an explicit Android grant to Core. Add-ons extend the finished Core with alternative sorting/presentation, automation, scripts, and integrations. Built-in Home remains available when an add-on fails.
 
 A single module implementation may have multiple configured **instances**. For example, one App Drawer module can have a **Work** instance and a **Personal** instance with different filters, sort providers, layouts, and rules.
 
@@ -24,7 +25,7 @@ A **Context** composes module instances into the active launcher configuration.
 
 ## Architecture principles
 
-1. Core delivers a complete baseline launcher; optional helper functions and enhancements belong in add-ons.
+1. Core delivers everyday launcher functions; complex integrations and alternative behavior belong in add-ons.
 2. Modules advertise capabilities rather than being hard-coded into a closed list of module types.
 3. Module code and module instances are separate concepts.
 4. External modules run as separate Android applications/processes rather than injecting arbitrary code into Core.
@@ -69,7 +70,8 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 - [Product specification](docs/product/product-spec.md)
 - [Home presentation specification](docs/product/home-presentation-v2.md)
 - [Home presentation implementation plan](docs/implementation/home-presentation-v2-plan.md)
-- [Indexed Home and featured add-ons ADR](docs/decisions/ADR-0005-indexed-home-and-featured-addons.md)
+- [Core Most Used ownership and feature order ADR](docs/decisions/ADR-0006-core-most-used-and-feature-order.md)
+- [Indexed Home and generic featured add-on contract ADR](docs/decisions/ADR-0005-indexed-home-and-featured-addons.md)
 - [System architecture](docs/architecture/system-architecture.md)
 - [Module model and contract](docs/architecture/module-model.md)
 - [Add-on SDK and developer guide](docs/addon-development.md)
@@ -97,7 +99,7 @@ Automation, Python, MCP, and terminal capabilities follow later. See the [roadma
 The [2026-11-07 specification](docs/product/home-presentation-v2.md) revises the
 previous text-only presentation direction. Source now includes Core icons, letter
 dividers, side alphabet navigation, optional system wallpaper/dimming, bottom
-search/settings, and pull-down reachability. Most Used contributes a starred
+search/settings, and pull-down reachability. Built-in Most Used contributes a starred
 section with saved pins before usage-ranked suggestions, while the full
 alphabetical catalog stays available. Automated results are tracked against
 [PR #19](https://github.com/AlexanderWilhelmsenBerg/Modular/pull/19); physical-device
@@ -105,15 +107,16 @@ acceptance remains pending. See the
 [v2 acceptance matrix](docs/implementation/core-completion.md#home-presentation-v2-implementation-and-acceptance).
 
 
-## Most Used add-on
+## Built-in Most Used
 
-[Most Used](docs/addons/most-used.md) optionally adds a starred Home section.
+[Most Used](docs/addons/most-used.md) optionally adds a starred Home section in Core.
 Saved pins come first in manual order and work without Usage Access; suggestions
-follow by recorded foreground time when access is granted. In Core module
-Settings, set Recent days and Suggested apps, then tap **Use on Home**. The
-add-on has its own APK and Android Usage Access screen. Core keeps the full
-alphabetical catalog when the add-on is disabled or unavailable. Signed debug
-and release downloads are separate artifacts in the Signed APKs workflow.
+follow by recorded foreground time when access is granted to Core. The built-in
+toggle is off by default. Core keeps the full alphabetical catalog when the
+feature is disabled. The Signed APKs workflow distributes Core debug and release
+by default; reference add-on APKs are an optional SDK-testing output.
+
+Basic categories will be specified after the Core Most Used implementation.
 
 Module cards have a **Settings** button with normal controls and a **Use on Home**
 action for sort helpers. Instances, contexts, and JSON editing are under Advanced

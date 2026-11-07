@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.pm.ServiceInfo
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -46,6 +47,11 @@ import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCustomizationStore
 import io.github.alexanderwilhelmsenberg.modular.ui.HiddenAppsControls
 import io.github.alexanderwilhelmsenberg.modular.ui.RenameAppDialog
+import io.github.alexanderwilhelmsenberg.modular.ui.CoreMostUsedSettingsUi
+import io.github.alexanderwilhelmsenberg.modular.mostused.MostUsedSettingsStore
+import io.github.alexanderwilhelmsenberg.modular.mostused.BuiltInMostUsedController
+import io.github.alexanderwilhelmsenberg.modular.mostused.AndroidMostUsedUsageSource
+import io.github.alexanderwilhelmsenberg.modular.mostused.LegacyMostUsedMigration
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
 import io.github.alexanderwilhelmsenberg.modular.composition.ContextManager
@@ -70,6 +76,8 @@ import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
 import io.github.alexanderwilhelmsenberg.modular.ui.ModuleSettingsDialog
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 
 class MainActivity : ComponentActivity() {
     private lateinit var homeRoleController: HomeRoleController
@@ -78,6 +86,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var appRepository: AppRepository
     private lateinit var appActions: AndroidAppActions
     private lateinit var appCustomizationStore: AppCustomizationStore
+    private lateinit var mostUsedStore: MostUsedSettingsStore
+    private lateinit var builtInMostUsed: BuiltInMostUsedController
+    private lateinit var mostUsedMigration: LegacyMostUsedMigration
     private lateinit var compositionStore:
         DataStoreCompositionStateStore
     private lateinit var instanceStore: InstanceStore
@@ -143,6 +154,7 @@ class MainActivity : ComponentActivity() {
         homeIntentGeneration = savedInstanceState?.getInt("homeIntentGeneration") ?: 0
         appearanceStore = AppearanceSettingsStore(this)
         appCustomizationStore = AppCustomizationStore(this)
+        mostUsedStore = MostUsedSettingsStore(this)
         settingsVisible = savedInstanceState?.getBoolean("settingsVisible") ?: false
         pendingUninstallPackage = savedInstanceState?.getString("pendingUninstallPackage")
         selectedModuleComponent = savedInstanceState?.getString("selectedModuleComponent")
@@ -151,6 +163,11 @@ class MainActivity : ComponentActivity() {
         homeRoleController = HomeRoleController(this)
         appRepository = AndroidAppRepository(this)
         appActions = AndroidAppActions(this)
+        builtInMostUsed = BuiltInMostUsedController(
+            appRepository, mostUsedStore, AndroidMostUsedUsageSource(this),
+            CoroutineScope(lifecycleScope.coroutineContext + Dispatchers.Default),
+            displayCustomizations = appCustomizationStore.customizations,
+        )
         grantStore =
             DataStoreModuleGrantStateStore(this)
         securityManager = ModuleSecurityManager(
@@ -179,6 +196,7 @@ class MainActivity : ComponentActivity() {
             DataStoreCompositionStateStore(this)
         instanceStore = InstanceStore(compositionStore, capabilityRouter.routes)
         moduleSettingsController = ModuleSettingsController(compositionStore, capabilityRouter.routes)
+        mostUsedMigration = LegacyMostUsedMigration(moduleSettingsController, mostUsedStore, packageName)
         contextManager = ContextManager(
             stateStore = compositionStore,
             routes = capabilityRouter.routes,
@@ -232,6 +250,7 @@ class MainActivity : ComponentActivity() {
             val initialTheme = appearanceStore.currentTheme()
             val initialHomeAppearance = appearanceStore.currentSettings()
             val initialCustomizations = appCustomizationStore.currentCustomizations()
+            val initialMostUsed = mostUsedStore.currentSettings()
             val initialWallpaper = applyHomeWindowAppearance(
                 this@MainActivity, initialTheme,
                 initialHomeAppearance.background == HomeBackground.SYSTEM_WALLPAPER,
@@ -243,9 +262,28 @@ class MainActivity : ComponentActivity() {
                 val homeAppearance by appearanceStore.settings.collectAsState(initial = initialHomeAppearance)
                 val appCustomizations by appCustomizationStore.customizations.collectAsState(initial = initialCustomizations)
                 val customizationError by appCustomizationStore.error.collectAsState()
+                val mostUsedSettings by mostUsedStore.settings.collectAsState(initial = initialMostUsed)
+                val mostUsedState by builtInMostUsed.state.collectAsState()
+                val mostUsedError by mostUsedStore.error.collectAsState()
+                var mostUsedConfigureRequest by remember { mutableStateOf(0) }
+                var migrationError by remember { mutableStateOf<String?>(null) }
+                var migrationRetry by remember { mutableStateOf(0) }
                 var renameTarget by remember { mutableStateOf<LaunchableApp?>(null) }
-                LaunchedEffect(homeIntentGeneration, settingsVisible) { renameTarget = null }
+                LaunchedEffect(homeIntentGeneration, settingsVisible) {
+                    renameTarget = null
+                    if (!settingsVisible) mostUsedConfigureRequest = 0
+                }
                 val featured by homeFeaturedController.featured.collectAsState()
+                val externalFeatured = featured?.takeUnless {
+                    mostUsedSettings.enabled ||
+                        (mostUsedSettings.userConfigured && LegacyMostUsedMigration.isLegacy(it, packageName))
+                }
+                LaunchedEffect(featured?.binding, featured?.featureRevision, migrationRetry) {
+                    featured?.takeIf { LegacyMostUsedMigration.isLegacy(it, packageName) }?.let { legacy ->
+                        mostUsedMigration.migrate(legacy).onSuccess { migrationError = null }
+                            .onFailure { migrationError = "Could not move Most Used settings to Core: ${it.message ?: "try again"}" }
+                    }
+                }
                 var wallpaperActive by remember { mutableStateOf(initialWallpaper) }
                 val homeOrderedApps by homeSortController.orderedApps.collectAsState()
                 val customHomeOrderActive by homeSortController.customOrderActive.collectAsState()
@@ -312,23 +350,27 @@ class MainActivity : ComponentActivity() {
                             val homeListState = rememberLazyListState()
                             HomeScreen(
                                 catalog = visibleCatalog,
-                                orderedApps = visibleOrderedApps.takeIf { customHomeOrderActive },
+                                orderedApps = visibleOrderedApps.takeIf { customHomeOrderActive && !mostUsedSettings.enabled },
                                 showAppIcons = homeAppearance.showAppIcons,
                                 wallpaperMode = wallpaperActive,
                                 wallpaperDimmingPercent = homeAppearance.wallpaperDimming,
-                                featuredApps = featured?.featuredApps,
-                                pinnedAppKeys = featured?.pinnedKeys?.toSet().orEmpty(),
-                                featuredNeedsPermission = featured?.featureState ==
-                                    FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED,
-                                featuredMessage = featured?.message?.takeIf(String::isNotBlank) ?: when (featured?.featureState) {
+                                featuredApps = if (mostUsedSettings.enabled) mostUsedState.featuredApps else externalFeatured?.featuredApps,
+                                pinnedAppKeys = if (mostUsedSettings.enabled) mostUsedSettings.pinnedKeys.toSet() else externalFeatured?.pinnedKeys?.toSet().orEmpty(),
+                                featuredNeedsPermission = if (mostUsedSettings.enabled)
+                                    mostUsedSettings.suggestedCount > 0 && mostUsedState.featureState == FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED
+                                    else externalFeatured?.featureState == FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED,
+                                featuredMessage = if (mostUsedSettings.enabled) mostUsedState.message else externalFeatured?.message?.takeIf(String::isNotBlank) ?: when (externalFeatured?.featureState) {
                                     FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED ->
                                         "Usage Access is off. Pins still appear; open add-on settings to grant access."
                                     FeaturedAppsResultParcel.STATE_NO_HISTORY ->
                                         "No usage history yet. Pin apps from add-on settings."
                                     else -> null
                                 },
-                                alphabeticalSections = !customHomeOrderActive,
-                                onOpenFeaturedSettings = featured?.let { current -> {
+                                alphabeticalSections = mostUsedSettings.enabled || !customHomeOrderActive,
+                                onOpenFeaturedSettings = if (mostUsedSettings.enabled) ({
+                                    mostUsedConfigureRequest += 1
+                                    settingsVisible = true
+                                }) else externalFeatured?.let { current -> {
                                     if (homeFeaturedController.featured.value?.binding == current.binding) {
                                         selectedModuleComponent = current.binding.route.component?.flattenToString()
                                         settingsVisible = true
@@ -336,10 +378,16 @@ class MainActivity : ComponentActivity() {
                                         Toast.makeText(this@MainActivity, "The selected add-on changed. Try again.", Toast.LENGTH_LONG).show()
                                     }
                                 } },
-                                onOpenFeaturedManagement = featured?.let { current -> {
+                                onOpenFeaturedManagement = if (mostUsedSettings.enabled) ::openCoreUsageAccess else externalFeatured?.let { current -> {
                                     openFeaturedManagement(current, modules)
                                 } },
-                                onPinApp = featured?.let { current -> { app, pinned ->
+                                onPinApp = if (mostUsedSettings.enabled) ({ app, pinned ->
+                                    lifecycleScope.launch {
+                                        builtInMostUsed.setPinned(app.key, pinned).onFailure {
+                                            Toast.makeText(this@MainActivity, it.message ?: "Could not update pin", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }) else externalFeatured?.let { current -> { app, pinned ->
                                     lifecycleScope.launch {
                                         val result = if (homeFeaturedController.featured.value?.binding != current.binding) {
                                             Result.failure(IllegalStateException("The selected add-on changed. Try again."))
@@ -392,6 +440,35 @@ class MainActivity : ComponentActivity() {
                         }
 
                         ModularApp(
+                            coreFeaturesContent = {
+                                CoreMostUsedSettingsUi(
+                                    enabled = mostUsedSettings.enabled,
+                                    days = mostUsedSettings.days,
+                                    suggestedCount = mostUsedSettings.suggestedCount,
+                                    pinnedKeys = mostUsedSettings.pinnedKeys,
+                                    unavailablePinnedKeys = mostUsedState.unavailablePinnedKeys,
+                                    hasUsageAccess = mostUsedState.hasUsageAccess,
+                                    catalog = visibleCatalog.apps,
+                                    onSetEnabled = mostUsedStore::setEnabled,
+                                    onSetDays = mostUsedStore::setDays,
+                                    onSetSuggestedCount = mostUsedStore::setSuggestedCount,
+                                    onSetPinned = builtInMostUsed::setPinned,
+                                    onReorderPins = builtInMostUsed::reorderPins,
+                                    onOpenUsageAccess = ::openCoreUsageAccess,
+                                    onOpenAppInfo = { handleAppAction {
+                                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                                    } },
+                                    onRefresh = builtInMostUsed::refresh,
+                                    loading = mostUsedState.loading,
+                                    loadError = mostUsedError,
+                                    statusMessage = mostUsedState.message,
+                                    configureRequest = mostUsedConfigureRequest,
+                                )
+                                migrationError?.let { message ->
+                                    Text(message, color = androidx.compose.material3.MaterialTheme.colorScheme.error)
+                                    TextButton(onClick = { migrationRetry += 1; homeFeaturedController.refresh() }) { Text("Retry moving Most Used") }
+                                }
+                            },
                             appearanceTheme = appearanceTheme,
                             appearanceError = appearanceError,
                             onAppearanceThemeSelected = { selected ->
@@ -624,6 +701,17 @@ class MainActivity : ComponentActivity() {
         // The live repository receives package/profile callbacks. Its constructor
         // reconciles a cold-start cache; returning Home does not need a full scan.
         if (::homeFeaturedController.isInitialized) homeFeaturedController.refresh()
+        if (::builtInMostUsed.isInitialized) builtInMostUsed.refresh()
+    }
+
+    private fun openCoreUsageAccess() {
+        handleAppAction {
+            try {
+                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:$packageName")))
+            } catch (_: android.content.ActivityNotFoundException) {
+                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            }
+        }
     }
 
     private fun handleAppAction(action: () -> Unit) {

@@ -37,6 +37,64 @@ class ModuleSettingsController(
         return state.instances.any { it.id in selectedIds && it.providerId == providerId }
     }
 
+    /** Capture the exact selected Home context before copying settings to Core. */
+    fun selectedHomeContextFor(binding: ResolvedContextBinding): LauncherContext? =
+        stateStore.state.value.let { state ->
+            state.activeContext()?.takeIf { context ->
+                selectedHomeBindingMatches(state, context, binding) && binding.route in routes.value
+            }
+        }
+
+    /** Detach only the previously validated selection, leaving instances and other contexts intact. */
+    suspend fun detachSelectedHomeBinding(
+        binding: ResolvedContextBinding,
+        expectedContext: LauncherContext,
+    ): Result<Boolean> = runCatching {
+        var detached = false
+        stateStore.update { state ->
+            val context = state.activeContext() ?: return@update state
+            if (context != expectedContext || !selectedHomeBindingMatches(state, context, binding) ||
+                binding.route !in routes.value) return@update state
+            val existingHome = state.contexts.firstOrNull { it.id == HOME_CONTEXT_ID }
+            require(existingHome == null || existingHome.name == HOME_CONTEXT_NAME) {
+                "Managed Home context id conflicts with another context"
+            }
+            val selected = ContextCapabilityBinding(binding.capability, binding.instance.id)
+            val home = LauncherContext(
+                id = HOME_CONTEXT_ID,
+                name = HOME_CONTEXT_NAME,
+                bindings = context.bindings.filterNot { it == selected },
+            )
+            detached = true
+            state.copy(
+                contexts = (state.contexts.filterNot { it.id == HOME_CONTEXT_ID } + home)
+                    .sortedBy { it.id },
+                activeContextId = HOME_CONTEXT_ID,
+            )
+        }
+        detached
+    }.onFailure { if (it is CancellationException) throw it }
+
+    private fun selectedHomeBindingMatches(
+        state: CompositionState,
+        context: LauncherContext,
+        binding: ResolvedContextBinding,
+    ): Boolean {
+        if (binding.capability != StandardCapabilities.AppsFeatured &&
+            binding.capability != StandardCapabilities.AppsSort) return false
+        if (binding.route.capability != binding.capability) return false
+        val selected = ContextCapabilityBinding(binding.capability, binding.instance.id)
+        val homeBindings = context.bindings.filter {
+            it.capability == StandardCapabilities.AppsFeatured || it.capability == StandardCapabilities.AppsSort
+        }
+        if (homeBindings != listOf(selected)) return false
+        val current = state.instances.singleOrNull { it.id == binding.instance.id }
+            ?: return false
+        if (current.providerId != binding.route.providerId) return false
+        return runCatching { current.withValidatedConfiguration(listOf(binding.route)) }.getOrNull() ==
+            binding.instance
+    }
+
     /** Upgrade a selected legacy provider, retaining its instance and any advanced context. */
     suspend fun migrateActiveLegacySortToFeatured(): Result<Boolean> = runCatching {
         val initial = stateStore.state.value

@@ -27,17 +27,24 @@ def signing_identity(output):
     return next(iter(certificates)).lower(), next(iter(public_keys)).lower()
 
 
+def artifact_modules(core_only=False):
+    modules = [("app", "io.github.alexanderwilhelmsenberg.modular")]
+    if not core_only:
+        modules.extend((
+            ("reference-sort-alphabetical", "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical"),
+            ("addon-most-used", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused"),
+        ))
+    return modules
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--expected-certificates", type=Path)
+    parser.add_argument("--core-only", action="store_true", help="Verify only Core debug and release APKs")
     args = parser.parse_args()
     expected = json.loads(args.expected_certificates.read_text()) if args.expected_certificates else None
     signers = {}
-    for module, base_id in (
-        ("app", "io.github.alexanderwilhelmsenberg.modular"),
-        ("reference-sort-alphabetical", "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical"),
-        ("addon-most-used", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused"),
-    ):
+    for module, base_id in artifact_modules(args.core_only):
         for variant in ("debug", "release"):
             apk = Path(module) / f"build/outputs/apk/{variant}/{module}-{variant}.apk"
             output = subprocess.check_output([android_tool("apksigner"), "verify", "--verbose", "--print-certs", apk], text=True)

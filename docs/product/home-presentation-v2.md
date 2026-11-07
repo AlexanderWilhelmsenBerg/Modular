@@ -7,7 +7,11 @@ This target follows the Core baseline at
 `3e5559f552d9218c23b67b3b45e73d1f3113839d`. It supersedes the earlier text-only,
 add-on-only icons/alphabet-index requirements. Source implementation is present,
 but the acceptance matrix below is not yet complete. See the [implementation plan](../implementation/home-presentation-v2-plan.md)
-and [boundary decision](../decisions/ADR-0005-indexed-home-and-featured-addons.md).
+and [the original presentation decision](../decisions/ADR-0005-indexed-home-and-featured-addons.md).
+[ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md) supersedes
+the Most Used add-on ownership and migration portions below; the generic
+featured-app contract remains. Basic categories are specified later, after
+Core Most Used implementation.
 
 ## 1. Reference and design intent
 
@@ -42,8 +46,8 @@ or committed. Wallpaper comes from the user's device.
 | Background | Core | Existing theme's solid surface; system wallpaper is opt-in |
 | Bottom search and settings gear | Core | Persistent, reachable without an add-on |
 | Pull-down reachability | Core | On |
-| Starred section contents, usage ranking, saved pins | Most Used add-on | Only after explicit Use on Home |
-| Rendering and navigation of a valid contributed starred section | Core | Generic contract; no provider-ID special case |
+| Built-in Most Used star, usage ranking, saved pins | Core | Off until enabled; pins work without Usage Access |
+| Rendering and navigation of a valid add-on-contributed starred section | Core | Generic contract remains for compatible providers |
 | Profile subtitles, icon packs, widgets, replacement Home surfaces | Optional add-ons/future work | Not enabled by this change |
 
 Core still launches immediately without accounts, network, Usage Access, extra
@@ -203,44 +207,26 @@ are retained. Wallpaper stays off until chosen.
 - Do not intercept the Android status-bar notification gesture or system back
   edges. Cancel safely on interruption, pointer cancellation, and catalog changes.
 
-## 8. Most Used starred section and pins — HOME-V2-06
+## 8. Built-in Most Used starred section and pins — HOME-V2-06
 
-- When the upgraded Most Used module is selected with **Use on Home**, it
-  contributes a `★` section before `#`/letters and a star at the top of the rail.
-  Selecting the star navigates to that section with the same gesture feedback.
-- Section order: saved pins in user-defined order, then unpinned suggested apps
-  by recorded foreground time descending, with deterministic alphabetical ties.
-  Default suggested count is 8, configurable from 0–20; pins are additional,
-  bounded to 50. The existing 1–30 day window remains configurable.
-- The complete alphabetical catalog follows. A featured app also appears once
-  in its alphabetical section so letter navigation always finds it. Deduplicate
-  within the starred section, across pins/suggestions, and in search results.
-- Long-press an app offers **Pin to starred apps** or **Unpin from starred apps** when
-  the compatible provider is selected. Its module Settings also exposes an app
-  picker and a **Pinned apps** list with reorder/remove controls. Provide button
-  alternatives to drag reordering. No JSON or manual instances/contexts are needed.
-- Most Used owns persistent pins per configured instance, keyed by exact activity
-  and profile, and preserves manual order across Core/add-on restarts and upgrades.
-  Core renders generic validated pin controls and sends authenticated actions.
-  Do not store pins by app label or silently transfer them to another profile.
-- Pinning works without Usage Access. With access denied/revoked, show pins only
-  and a permission action in the starred section; never invent usage rankings.
-  With permission but no history, show pins and a clear no-history state.
-- Usage Access is a special Android setting, not an installation-time runtime
-  permission. On the first opening without access, Most Used offers an explicit
-  **Open Usage Access** / **Not now** choice and remembers the user's choice.
-  Its settings retain a manual access button and package-targeted App info shortcut,
-  with instructions for **Allow restricted settings** when Android blocks the
-  toggle. The add-on must not redirect automatically or bypass platform restrictions.
-  An enabled, connected provider with no entries still has a star destination
-  containing a useful Pin apps / permission action, not an empty dead-end screen.
-- Uninstalled/unavailable pins are excluded from actionable Home rows and shown
-  as unavailable in module Settings so they can be removed. Preserve a missing
-  pin for reinstall of the same exact key. Paused profiles remain non-actionable.
-- Core does not calculate usage ranks. Disabling/uninstalling/losing the selected
-  add-on removes its star contribution and actions, retaining the usable complete
-  alphabetical catalog. Retained pins reappear after the same provider reconnects.
-  Add-on uninstall clears its private data according to Android's normal behavior.
+- Core Settings offers a built-in **Most Used** toggle, off by default. When
+  enabled, a `★` section appears before `#`/letters, with a star at the top of
+  the rail. The complete alphabetical catalog follows.
+- Core stores up to 50 pins in manual order by exact package/activity/profile
+  identity. Pins precede unpinned suggestions ranked by Android-reported
+  foreground time, with deterministic alphabetical ties. Suggested count is
+  0–20 (default 8); the usage window is 1–30 days (default 7).
+- Pin, unpin, reorder, and remove controls work without Usage Access. Missing
+  pins remain in management but are not actionable Home rows. The star section
+  offers pinning even when it has no entries.
+- Core requests optional Android `PACKAGE_USAGE_STATS` special access only for
+  usage suggestions. The user explicitly opens Android's Core Usage Access
+  settings. Denied/revoked access leaves pins available; granted access with
+  no history shows a no-history state. Zero-foreground-time apps are not
+  suggested. Core cannot bypass Android restricted-setting controls.
+- Disabling the toggle removes the star destination while retaining saved pins
+  and the complete alphabetical catalog. Search deduplicates by exact app key.
+  An app may appear in both the star and alphabetical sections.
 
 ## 9. Framework and compatibility — HOME-V2-07
 
@@ -258,18 +244,20 @@ Pin/unpin/reorder requests must be authenticated, bounded, idempotent where
 appropriate, and acknowledged only after persistence. Failed saves retain the
 previous state and show an actionable error. Do not log pin lists or usage data.
 
-The public SDK supplies the contract so another compatible add-on can contribute
-without hard-coded Most Used package checks. One featured provider is active at a
-time in this slice. Core's ordinary module Settings handles selection automatically.
+The public SDK keeps this generic contract available for reference and
+third-party providers. Built-in Most Used uses Core state; old add-on packages and
+package IDs remain available for compatibility and SDK testing.
 
 Do not alter the wire layout of existing sort parcels. Old Core/add-on pairings
-must negotiate supported capabilities safely. Upgraded Most Used may continue
-to offer v1 sorting for old Core. New Core should atomically migrate an active,
-compatible Most Used selection to its featured capability, retaining day settings
-and leaving the original advanced context intact. Other legacy sort providers
-remain selectable; non-alphabetical legacy ordering uses a flat list with the
-alphabet rail/letter dividers suppressed, rather than misleading letter jumps.
-Return to built-in alphabetical mode restores the rail and dividers.
+must negotiate supported capabilities safely. New Core automatically imports a
+currently selected official legacy Most Used instance's validated settings and
+pins through authenticated IPC, persists before detaching the old binding, and
+retries after errors. This is idempotent; explicit Core choices and existing Core
+pins take precedence. The imported active selection enables built-in Most Used
+only if the user has not already changed Core settings. Core cannot read an
+uninstalled APK's private files, and the add-on's Usage Access grant cannot
+transfer. Other legacy sort providers remain selectable; non-alphabetical legacy
+ordering uses a flat list with alphabet rail/letter dividers suppressed.
 
 ## 10. Acceptance and completion gate
 
@@ -281,9 +269,9 @@ Return to built-in alphabetical mode restores the rail and dividers.
 | V2-A4 | Tap/slide rail through #, A, K, Z and locale-specific buckets; handle missing buckets, duplicates, rapid changes, interruptions, rotation, RTL labels, reduced motion, and short viewports. |
 | V2-A5 | Pull first row to mid-screen, release, launch it; test upward restoration, HOME/search reset, app/settings return, no accidental launches, and notification/back gesture coexistence. |
 | V2-A6 | Bottom controls stay usable with IME/navigation modes; search yields unique complete matches, clearing restores sections, last row is not obscured. |
-| V2-A7 | On a real cross-APK path, Use on Home creates star; a foreground-used app ranks above an unused one; pins outrank usage and retain custom order after restarts. |
+| V2-A7 | Core-only toggle creates star; a foreground-used app ranks above an unused one after Core Usage Access is granted; pins outrank usage and retain custom order after restarts. |
 | V2-A8 | Pin/unpin/reorder through ordinary UI; duplicate labels/profiles, uninstall/reinstall, denied/revoked Usage Access, zero history, failed writes, and empty star all behave as specified. |
-| V2-A9 | Provider death/removal, timeout, malformed/stale keys, configuration changes, untrusted callers and old/new versions preserve Core and its complete catalog. |
+| V2-A9 | One-time selected legacy migration validates IPC state, persists before detaching, retries after failure, preserves explicit Core choices and pins; provider death/removal and old/new versions preserve the complete catalog. |
 | V2-A10 | No main-thread icon decode/IPC, no unbounded caches, no accumulating animation jobs; exercise 1,000 apps and rapid rail scrubbing on emulator and a representative physical phone. |
 
 Implementation is complete only after the acceptance evidence is recorded for its

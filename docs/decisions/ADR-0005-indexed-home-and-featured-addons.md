@@ -3,6 +3,10 @@
 Status: **Accepted product direction; implementation planned**
 Date: 2026-11-07
 
+Ownership update: [ADR-0006](ADR-0006-core-most-used-and-feature-order.md)
+supersedes this ADR's add-on-owned Most Used setup, ranking, and pins. Its generic
+featured-apps contract and Core Home presentation decisions remain applicable.
+
 ## Context
 
 The product owner supplied Niagara reference screenshots and requested icons,

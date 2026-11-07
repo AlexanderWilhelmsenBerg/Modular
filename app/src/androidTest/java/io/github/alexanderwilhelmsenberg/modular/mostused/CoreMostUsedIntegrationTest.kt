@@ -91,9 +91,10 @@ class CoreMostUsedIntegrationTest {
                 while ((history.currentHistory().scores(7)[fixture] ?: 0.0) <= 0.0) delay(20)
             }
             // ActivityScenario filters lifecycle events by its original launch intent.
-            // Return with that intent so it observes RESUMED before recreation. HOME
-            // intent handling is exercised separately by CoreNavigationTest.
-            context.startActivity(Intent(originalIntent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            // Preserve that identity, but remove its CLEAR_TASK flag so returning
+            // resumes the existing singleTask activity instead of destroying it.
+            // HOME intent handling is exercised separately by CoreNavigationTest.
+            context.startActivity(Intent(originalIntent).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             rule.waitUntil(15_000) { rule.activityRule.scenario.state == Lifecycle.State.RESUMED }
             rule.onNodeWithTag("home-search-field").performTextClearance()
             rule.waitUntil(15_000) {
@@ -119,7 +120,6 @@ class CoreMostUsedIntegrationTest {
             store.setSource(original.source).getOrThrow()
             store.setSuggestedCount(original.suggestedCount).getOrThrow()
             store.setEnabled(original.enabled).getOrThrow()
-            rule.activity.intent = originalIntent
         }
     }
 

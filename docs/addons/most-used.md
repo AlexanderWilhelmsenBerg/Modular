@@ -24,3 +24,10 @@ When Usage Access is off or revoked, saved pins still appear and the starred sec
 The add-on stores ordered pins privately per configured module instance, using the exact package, activity, and profile identity. A pin for an uninstalled app is retained and shown as unavailable in module Settings so it can be removed or restored by reinstalling the same app. Paused or unavailable apps do not become launchable Home rows. Usage history is queried locally, not stored or uploaded.
 
 Use **Use alphabetical order** or select another module to remove the star from Home. The add-on still offers its original whole-list sort capability to older Core versions. A current Core selects the starred capability when available; the legacy mode requires Usage Access and otherwise falls back to alphabetical order.
+
+Core's long-press sheet also offers App info, Rename, Hide, and Android uninstall
+confirmation without an add-on. Pin/Unpin appears when a featured provider is
+selected. Core display-name overrides apply to starred rows too. Hidden apps
+are omitted from Home and search, including starred rows; saved pins are retained
+and reappear when the app is restored under Settings > Appearance > Hidden apps.
+Automatic usage ranking remains optional and continues to belong to this add-on.

@@ -65,6 +65,10 @@ internal fun HomeAppList(
     wallpaperMode: Boolean,
     pinnedKeys: Set<AppKey>,
     onPinApp: ((LaunchableApp, Boolean) -> Unit)?,
+    onAppInfo: ((LaunchableApp) -> Unit)?,
+    onUninstallApp: ((LaunchableApp) -> Unit)?,
+    onRenameApp: ((LaunchableApp) -> Unit)?,
+    onHideApp: ((LaunchableApp) -> Unit)?,
     onLaunch: (LaunchableApp) -> Unit,
     onRefresh: () -> Unit,
     onMakeDefault: () -> Unit,
@@ -106,6 +110,10 @@ internal fun HomeAppList(
                         wallpaperMode = wallpaperMode,
                         pinned = app.key in pinnedKeys,
                         onPinApp = onPinApp,
+                        onAppInfo = onAppInfo,
+                        onUninstallApp = onUninstallApp,
+                        onRenameApp = onRenameApp,
+                        onHideApp = onHideApp,
                         onClick = { onLaunch(app) },
                     )
                 }

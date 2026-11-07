@@ -1,6 +1,8 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
 import android.view.WindowManager
+import android.content.res.Configuration
+import android.os.LocaleList
 import androidx.activity.ComponentActivity
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.layout.Box
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
@@ -26,6 +29,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
@@ -426,7 +430,7 @@ class CoreHomeTest {
     }
 
     @Test
-    fun emptyRailLetterResolvesToNextPopulatedSection() {
+    fun railContainsOnlyPopulatedSectionsAndTapsThemDirectly() {
         val apps = (1..12).map { app("a$it.pkg", "Alpha $it") } + app("charlie.pkg", "Charlie")
         composeRule.setContent {
             HomeScreen(
@@ -435,9 +439,53 @@ class CoreHomeTest {
                 showMakeDefault = false,
             )
         }
-        tapVisibleRailLetter("B")
+        composeRule.onNodeWithTag("rail:B").assertDoesNotExist()
+        composeRule.onNodeWithTag("rail:#").assertDoesNotExist()
+        composeRule.onNodeWithTag("rail:Ø").assertDoesNotExist()
+        tapVisibleRailLetter("C")
         composeRule.onNodeWithTag("section:C").assertIsDisplayed()
         composeRule.onNodeWithText("Choose section").assertDoesNotExist()
+    }
+
+    @Test
+    fun localeRailUpdatesWhenItsLastAppDisappears() {
+        val apps = mutableStateOf(listOf(
+            app("alpha.pkg", "Alpha"), app("ae.pkg", "Ærlig"),
+            app("oe.pkg", "Øvelse"), app("aa.pkg", "Åpen"),
+        ))
+        composeRule.setContent {
+            val configuration = Configuration(LocalConfiguration.current).apply {
+                setLocales(LocaleList(Locale.forLanguageTag("nb-NO")))
+            }
+            CompositionLocalProvider(LocalConfiguration provides configuration) {
+                HomeScreen(AppCatalog(apps = apps.value), {}, {}, {}, {}, showMakeDefault = false)
+            }
+        }
+        listOf("A", "Æ", "Ø", "Å").forEach { letter ->
+            composeRule.onNodeWithTag("rail:$letter").assertIsDisplayed()
+            tapVisibleRailLetter(letter)
+            composeRule.onNodeWithTag("section:$letter").assertIsDisplayed()
+        }
+        composeRule.onNodeWithTag("rail:B").assertDoesNotExist()
+        composeRule.onNodeWithTag("rail:#").assertDoesNotExist()
+        composeRule.runOnIdle { apps.value = apps.value.filter { it.label == "Alpha" } }
+        listOf("Æ", "Ø", "Å").forEach { composeRule.onNodeWithTag("rail:$it").assertDoesNotExist() }
+        tapVisibleRailLetter("A")
+        composeRule.onNodeWithTag("section:A").assertIsDisplayed()
+    }
+
+    @Test
+    fun packageSearchFindsAppWhoseLabelDoesNotMatch() {
+        composeRule.setContent {
+            HomeScreen(
+                AppCatalog(apps = listOf(app("com.nvidia.shieldtv", "SHIELD TV"), app("other.pkg", "Other"))),
+                {}, {}, {}, {}, showMakeDefault = false,
+            )
+        }
+        composeRule.onNodeWithTag("home-search-field").performTextInput("Nvidia")
+        composeRule.onNodeWithText("SHIELD TV").assertIsDisplayed()
+        composeRule.onNodeWithText("Other").assertDoesNotExist()
+        composeRule.onNodeWithTag("alphabet-rail").assertDoesNotExist()
     }
 
     @Test
@@ -483,7 +531,7 @@ class CoreHomeTest {
             }
         }
         val locale = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.locales[0]
-        HomeSectionBuilder(locale).alphabet.forEach { letter ->
+        HomeSectionBuilder(locale).sections(apps).map { it.label }.forEach { letter ->
             composeRule.onNodeWithTag("rail:$letter").assertIsDisplayed()
         }
         listOf("Z", "B", "Z").forEach { letter ->
@@ -579,7 +627,7 @@ class CoreHomeTest {
                 showMakeDefault = false, showAppIcons = false,
             )
         }
-        val alphabet = HomeSectionBuilder(locale).alphabet
+        val alphabet = HomeSectionBuilder(locale).sections(apps).map { it.label }
         val zIndex = alphabet.indexOf("Z")
         assertTrue(zIndex >= 0)
         composeRule.onNodeWithTag("alphabet-hit-lane").performTouchInput {
@@ -607,7 +655,7 @@ class CoreHomeTest {
             )
         }
         val locale = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.locales[0]
-        val alphabet = HomeSectionBuilder(locale).alphabet
+        val alphabet = HomeSectionBuilder(locale).sections(apps).map { it.label }
         val kIndex = alphabet.indexOf("K")
         assertTrue(kIndex >= 0)
         composeRule.onNodeWithTag("alphabet-hit-lane").performTouchInput {

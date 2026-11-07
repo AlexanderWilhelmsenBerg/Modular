@@ -4,6 +4,7 @@ import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityProvider
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRoute
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 
 /** The ordinary Settings path for a module's saved configuration and Home app order. */
@@ -70,7 +71,7 @@ class ModuleSettingsController(
             )
         }
         migrated
-    }
+    }.onFailure { if (it is CancellationException) throw it }
 
     suspend fun save(
         providerId: String,
@@ -96,7 +97,19 @@ class ModuleSettingsController(
                 "Module provider has ambiguous live routes"
             }
 
-            val id = instanceId(normalizedProviderId)
+            val currentContext = state.activeContext()
+            // A migrated Home binding may still use a user-created instance ID.
+            // Keep it so provider-owned pins remain attached to that instance.
+            val id = currentContext
+                ?.takeIf { it.id == HOME_CONTEXT_ID }
+                ?.bindings
+                ?.firstOrNull {
+                    (it.capability == StandardCapabilities.AppsFeatured || it.capability == StandardCapabilities.AppsSort) &&
+                        state.instances.any { instance ->
+                            instance.id == it.instanceId && instance.providerId == normalizedProviderId
+                        }
+                }
+                ?.instanceId ?: instanceId(normalizedProviderId)
             val existing = state.instances.firstOrNull { it.id == id }
             require(existing == null || existing.providerId == normalizedProviderId) {
                 "Managed module instance id conflicts with another provider"
@@ -111,7 +124,6 @@ class ModuleSettingsController(
             val nextInstances = (
                 state.instances.filterNot { it.id == id } + instance
             ).sortedBy { it.id }
-            val currentContext = state.activeContext()
             val selectedInstanceIds = currentContext?.bindings.orEmpty()
                 .filter { it.capability == StandardCapabilities.AppsSort || it.capability == StandardCapabilities.AppsFeatured }
                 .map { it.instanceId }.toSet()
@@ -161,7 +173,7 @@ class ModuleSettingsController(
             }
         }
         Unit
-    }
+    }.onFailure { if (it is CancellationException) throw it }
 
     private fun CompositionState.activeContext(): LauncherContext? =
         contexts.firstOrNull { it.id == activeContextId }

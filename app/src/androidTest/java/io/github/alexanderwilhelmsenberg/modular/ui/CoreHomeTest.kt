@@ -2,6 +2,8 @@ package io.github.alexanderwilhelmsenberg.modular.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
@@ -17,6 +19,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -314,6 +318,22 @@ class CoreHomeTest {
     }
 
     @Test
+    fun nonLatinAndDuplicateLabelsRemainComplete() {
+        val builder = HomeSectionBuilder(Locale.forLanguageTag("el-GR"))
+        val apps = listOf(
+            app("greek.one", "Αθήνα"),
+            app("greek.two", "Αθήνα"),
+            app("greek.omega", "Ωμέγα"),
+            app("numeric.one", "2FA"),
+        )
+        val sections = builder.sections(apps)
+        assertEquals(apps.map { it.key }.toSet(), sections.flatMap { it.apps }.map { it.key }.toSet())
+        assertEquals(apps.size, sections.sumOf { it.apps.size })
+        assertTrue(builder.bucket("Αθήνα") != "#")
+        assertEquals("#", builder.bucket("2FA"))
+    }
+
+    @Test
     fun bottomControlsStayBelowSectionedRowsAndSearchHidesRail() {
         composeRule.setContent {
             HomeScreen(
@@ -353,6 +373,93 @@ class CoreHomeTest {
             assertEquals(1, openedPins)
             assertEquals(1, openedPermission)
         }
+    }
+
+    @Test
+    fun emptyRailLetterResolvesToNextPopulatedSection() {
+        val apps = (1..12).map { app("a$it.pkg", "Alpha $it") } + app("charlie.pkg", "Charlie")
+        composeRule.setContent {
+            HomeScreen(
+                catalog = AppCatalog(apps = apps),
+                onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                showMakeDefault = false,
+            )
+        }
+        val locale = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.locales[0]
+        val alphabet = HomeSectionBuilder(locale).alphabet
+        val bIndex = alphabet.indexOf("B")
+        assertTrue(bIndex >= 0)
+        composeRule.onNodeWithTag("alphabet-rail").performTouchInput {
+            down(Offset(width - 8f, height * (bIndex + 0.5f) / alphabet.size))
+            up()
+        }
+        composeRule.onNodeWithTag("section:C").assertIsDisplayed()
+    }
+
+    @Test
+    fun largeFontRailOffersFullSectionChooser() {
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2.2f)) {
+                Box(Modifier.width(320.dp).height(500.dp)) {
+                    HomeScreen(
+                        catalog = AppCatalog(apps = listOf(app("alpha.pkg", "Alpha"), app("zeta.pkg", "Zeta"))),
+                        onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                        showMakeDefault = false,
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithTag("alphabet-rail").performTouchInput {
+            down(Offset(width - 8f, height * 0.5f))
+            up()
+        }
+        composeRule.onNodeWithText("Choose section").assertIsDisplayed()
+    }
+
+    @Test
+    fun thousandAppsRemainCompleteAndLastSectionIsReachable() {
+        val apps = (0 until 1000).map { index ->
+            app("fixture$index.pkg", "${('A'.code + index % 26).toChar()} app $index")
+        }
+        val locale = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.locales[0]
+        val sections = HomeSectionBuilder(locale).sections(apps)
+        assertEquals(1000, sections.sumOf { it.apps.size })
+        composeRule.setContent {
+            HomeScreen(
+                catalog = AppCatalog(apps = apps),
+                onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                showMakeDefault = false, showAppIcons = false,
+            )
+        }
+        val alphabet = HomeSectionBuilder(locale).alphabet
+        val zIndex = alphabet.indexOf("Z")
+        assertTrue(zIndex >= 0)
+        composeRule.onNodeWithTag("alphabet-rail").performTouchInput {
+            down(Offset(width - 8f, height * (zIndex + 0.5f) / alphabet.size))
+            up()
+        }
+        composeRule.onNodeWithTag("section:Z").assertIsDisplayed()
+    }
+
+    @Test
+    fun clearingSearchRestoresPreviousListAnchor() {
+        val state = LazyListState()
+        val apps = (1..32).map { app("alpha$it.pkg", "Alpha $it") }
+        composeRule.setContent {
+            HomeScreen(
+                catalog = AppCatalog(apps = apps), listState = state,
+                onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                showMakeDefault = false,
+            )
+        }
+        composeRule.runOnIdle { state.requestScrollToItem(20) }
+        composeRule.waitForIdle()
+        val previousIndex = state.firstVisibleItemIndex
+        assertTrue(previousIndex > 0)
+        composeRule.onNodeWithTag("home-search-field").performTextInput("Alpha 1")
+        composeRule.onNodeWithTag("home-search-clear").performClick()
+        composeRule.runOnIdle { assertEquals(previousIndex, state.firstVisibleItemIndex) }
     }
 
     private fun app(

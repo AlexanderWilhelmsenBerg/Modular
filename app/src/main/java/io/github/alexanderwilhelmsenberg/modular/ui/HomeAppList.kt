@@ -3,6 +3,7 @@ package io.github.alexanderwilhelmsenberg.modular.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.geometry.Offset
@@ -85,9 +87,9 @@ internal fun HomeAppList(
         items(entries, key = { it.id }) { entry ->
             when (entry) {
                 is HomeListEntry.Header -> {
-                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(54.dp), contentAlignment = androidx.compose.ui.Alignment.BottomStart) {
+                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(54.dp), contentAlignment = AbsoluteAlignment.BottomLeft) {
                         val start = (maxWidth * 0.126f).coerceAtLeast(16.dp)
-                        Text(entry.label, Modifier.padding(start = start, bottom = 6.dp).testTag("section:${entry.label}"), color = foreground, fontSize = 22.sp, fontWeight = FontWeight.Medium, style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default)
+                        Text(entry.label, Modifier.absoluteOffset(x = start).padding(bottom = 6.dp).testTag("section:${entry.label}"), color = foreground, fontSize = 22.sp, fontWeight = FontWeight.Medium, style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default)
                     }
                 }
                 is HomeListEntry.App -> {

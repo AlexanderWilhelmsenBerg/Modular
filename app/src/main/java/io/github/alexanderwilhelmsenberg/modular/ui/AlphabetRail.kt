@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -73,7 +74,7 @@ internal fun AlphabetRail(
         val visual = if (condensed) alphabet.filterIndexed { i, label -> i == 0 || i == alphabet.lastIndex || i % 2 == 0 || label == "★" } else alphabet
         val density = LocalDensity.current
         val heightPx = with(density) { maxHeight.roundToPx() }
-        Column(Modifier.fillMaxHeight().width(48.dp).align(Alignment.CenterEnd)) {
+        Column(Modifier.fillMaxHeight().width(48.dp).align(AbsoluteAlignment.CenterRight)) {
             visual.forEachIndexed { visualIndex, label ->
                 val centerY = (visualIndex + 0.5f) / visual.size
                 val distance = if (fingerFraction < 0) 9f else abs(centerY - fingerFraction) * visual.size
@@ -94,31 +95,34 @@ internal fun AlphabetRail(
         if (fingerFraction >= 0f && selected != null) {
             Box(
                 Modifier.offset { IntOffset(0, ((fingerFraction * heightPx) - with(density) { 24.dp.toPx() }).roundToInt().coerceIn(0, (heightPx - with(density) { 48.dp.roundToPx() }).coerceAtLeast(0))) }
-                    .size(48.dp).background(Color(0xFF478FF2), CircleShape).align(Alignment.TopStart)
+                    .size(48.dp).background(Color(0xFF478FF2), CircleShape).align(AbsoluteAlignment.TopLeft)
                     .testTag("alphabet-bubble"),
                 contentAlignment = Alignment.Center,
             ) { Text(selected.orEmpty(), color = Color.White, fontSize = 30.sp, maxLines = 1) }
         }
         Box(
-            Modifier.width(48.dp).fillMaxHeight().align(Alignment.CenterEnd)
+            Modifier.width(48.dp).fillMaxHeight().align(AbsoluteAlignment.CenterRight)
                 .pointerInput(alphabet, populated, condensed) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        var moved = false
-                        fun selectedIndex(y: Float) = ((y / size.height.coerceAtLeast(1)) * alphabet.size).toInt().coerceIn(alphabet.indices)
-                        fingerFraction = (down.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
-                        if (!condensed) chooseIndex(selectedIndex(down.position.y))
-                        while (true) {
-                            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) break
-                            if (abs(change.position.y - down.position.y) > 8f || abs(change.position.x - down.position.x) > 8f) moved = true
-                            fingerFraction = (change.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
-                            if (!condensed || moved) chooseIndex(selectedIndex(change.position.y))
-                            change.consume()
+                        try {
+                            var moved = false
+                            fun selectedIndex(y: Float) = ((y / size.height.coerceAtLeast(1)) * alphabet.size).toInt().coerceIn(alphabet.indices)
+                            fingerFraction = (down.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
+                            if (!condensed) chooseIndex(selectedIndex(down.position.y))
+                            while (true) {
+                                val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                if (abs(change.position.y - down.position.y) > 8f || abs(change.position.x - down.position.x) > 8f) moved = true
+                                fingerFraction = (change.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
+                                if (!condensed || moved) chooseIndex(selectedIndex(change.position.y))
+                                change.consume()
+                            }
+                            if (condensed && !moved) chooser = true
+                        } finally {
+                            fingerFraction = -1f
+                            selected = null
                         }
-                        if (condensed && !moved) chooser = true
-                        fingerFraction = -1f
-                        selected = null
                     }
                 }
                 .semantics {

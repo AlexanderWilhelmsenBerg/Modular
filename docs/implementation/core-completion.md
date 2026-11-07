@@ -53,20 +53,26 @@ The earlier Core baseline evidence above does not establish any v2 result.
 
 | Gate | Source and proposed test evidence | Status |
 | --- | --- | --- |
-| V2-A1 | `app/.../ui/HomeSectionBuilder.kt`, `HomeAppList.kt`, `HomeBottomControls.kt`, `apps/AppIconRepository.kt`; Core-only emulator install and catalog completeness check | Source present; CI/emulator pending. |
-| V2-A2 | `app/.../ui/AlphabetRail.kt`, `HomeScreen.kt`; rest and active rail captures at 320/375/414/768 dp and large font | Source present; screenshots and reference comparison pending. |
-| V2-A3 | `app/.../appearance/AppearanceSettingsStore.kt`, `HomeAppearanceControls.kt`, `WallpaperHomeScrim.kt`; `HomeAppearanceSettingsTest`, `HomeAppearanceControlsTest`, `HomeAppearancePersistenceTest` | Source and tests present; CI and bright/busy/dark/live wallpaper device checks pending. |
-| V2-A4 | `app/.../ui/AlphabetRail.kt`, `HomeSectionBuilder.kt`; locale, missing-bucket, drag, cancel, RTL, rotation and reduced-motion scenarios | Source present; CI, emulator and device gesture evidence pending. |
-| V2-A5 | `app/.../ui/HomeReachability.kt`, `HomeScreen.kt`, `HomeAppList.kt`; pull, retained offset, upward restore, HOME/search reset and launch checks | Source present; gesture tests, emulator and physical Samsung checks pending. |
-| V2-A6 | `app/.../ui/HomeBottomControls.kt`, `HomeSearch.kt`, `HomeScreen.kt`; IME/search/last-row checks | Source present; CI and emulator navigation-mode checks pending. |
-| V2-A7 | `module-api/.../IFeaturedAppsCapability.aidl`, `app/.../home/HomeFeaturedController.kt`, `addon-most-used/.../MostUsedSortService.kt`; `FeaturedAppsCrossApkTest`, `MostUsedSorterTest` | Source and tests present; separate-APK positive-usage and pin-order acceptance pending. |
-| V2-A8 | `app/.../ui/FeaturedAppSettingsUi.kt`, `HomeAppList.kt`, `addon-most-used/.../PinState.kt`, `PinStore.kt`; `PinStateTest`, `PinStoreTest` | Source and tests present, including direct Home Usage Access action; UI, denied/revoked, unavailable-profile, corruption and restart checks pending. |
-| V2-A9 | `module-api/.../FeaturedAppsContract.kt`, `module-sdk/.../FeaturedAppsEndpoint.kt`, `app/.../capabilities/FeaturedAppsClient.kt`; `HomeFeaturedControllerTest`, `FeaturedAppsCrossApkTest` | Source and tests present; CI, old/new APK and adversarial runtime checks pending. |
-| V2-A10 | `app/.../apps/AppIconRepository.kt`, `ui/AlphabetRail.kt`, `HomeAppList.kt`; 1,000-app and rapid-scrub profiling | Source present; performance/device evidence pending. |
+| V2-A1 | `app/src/main/java/io/github/alexanderwilhelmsenberg/modular/ui/HomeSectionBuilder.kt`, `HomeAppList.kt`, `HomeBottomControls.kt`, `apps/AppIconRepository.kt`; Core-only emulator install and catalog completeness check | Source present; CI/emulator pending. |
+| V2-A2 | `app/src/main/java/io/github/alexanderwilhelmsenberg/modular/ui/AlphabetRail.kt`, `HomeScreen.kt`; rest and active rail captures at 320/375/414/768 dp and large font | Source present; screenshots and reference comparison pending. |
+| V2-A3 | `app/src/main/java/io/github/alexanderwilhelmsenberg/modular/appearance/AppearanceSettingsStore.kt`, `HomeAppearanceControls.kt`, `WallpaperHomeScrim.kt`; `HomeAppearanceSettingsTest`, `HomeAppearanceControlsTest`, `HomeAppearancePersistenceTest` | Source and tests present; CI and bright/busy/dark/live wallpaper device checks pending. |
+| V2-A4 | `app/src/main/java/io/github/alexanderwilhelmsenberg/modular/ui/AlphabetRail.kt`, `HomeSectionBuilder.kt`; locale, missing-bucket, drag, cancel, RTL, rotation and reduced-motion scenarios | Source present; CI, emulator and device gesture evidence pending. |
+| V2-A5 | `app/src/main/java/io/github/alexanderwilhelmsenberg/modular/ui/HomeReachability.kt`, `HomeScreen.kt`, `HomeAppList.kt`; pull, retained offset, upward restore, HOME/search reset and launch checks | Source present; gesture tests, emulator and physical Samsung checks pending. |
+| V2-A6 | `app/src/main/java/io/github/alexanderwilhelmsenberg/modular/ui/HomeBottomControls.kt`, `HomeSearch.kt`, `HomeScreen.kt`; IME/search/last-row checks | Source present; CI and emulator navigation-mode checks pending. |
+| V2-A7 | `module-api/src/main/aidl/io/github/alexanderwilhelmsenberg/modular/moduleapi/capabilities/IFeaturedAppsCapability.aidl`, `app/src/main/java/io/github/alexanderwilhelmsenberg/modular/home/HomeFeaturedController.kt`, `addon-most-used/src/main/java/io/github/alexanderwilhelmsenberg/modular/addon/sort/mostused/MostUsedSortService.kt`; `FeaturedAppsCrossApkTest`, `MostUsedSorterTest` | Source and tests present; separate-APK positive-usage and pin-order acceptance pending. |
+| V2-A8 | `app/src/main/java/io/github/alexanderwilhelmsenberg/modular/ui/FeaturedAppSettingsUi.kt`, `HomeAppList.kt`, `addon-most-used/src/main/java/io/github/alexanderwilhelmsenberg/modular/addon/sort/mostused/PinState.kt`, `PinStore.kt`; `PinStateTest`, `PinStoreTest` | Source and tests present, including direct Home Usage Access action; UI, denied/revoked, unavailable-profile, corruption and restart checks pending. |
+| V2-A9 | `module-api/src/main/java/io/github/alexanderwilhelmsenberg/modular/moduleapi/FeaturedAppsContract.kt`, `module-sdk/src/main/java/io/github/alexanderwilhelmsenberg/modular/modulesdk/FeaturedAppsEndpoint.kt`, `app/src/main/java/io/github/alexanderwilhelmsenberg/modular/capabilities/FeaturedAppsClient.kt`; `HomeFeaturedControllerTest`, `FeaturedAppsCrossApkTest` | Source and tests present; CI, old/new APK and adversarial runtime checks pending. |
+| V2-A10 | `app/src/main/java/io/github/alexanderwilhelmsenberg/modular/apps/AppIconRepository.kt`, `ui/AlphabetRail.kt`, `HomeAppList.kt`; 1,000-app and rapid-scrub profiling | Source present; performance/device evidence pending. |
 
-Paths abbreviated with `...` above identify module and filename; the
+Paths above start at the repository root; subsequent bare filenames in each
+cell share the preceding full file's directory unless a new directory is named.
+The test source roots are `app/src/test/java/io/github/alexanderwilhelmsenberg/modular/`,
+`app/src/androidTest/java/io/github/alexanderwilhelmsenberg/modular/`,
+`addon-most-used/src/test/java/io/github/alexanderwilhelmsenberg/modular/addon/sort/mostused/`
+and `addon-most-used/src/androidTest/java/io/github/alexanderwilhelmsenberg/modular/addon/sort/mostused/`.
+The
 [implementation plan](home-presentation-v2-plan.md#4-current-implementation-map)
-maps the packages. Record exact test commands, revision and results after CI,
+maps the work packages. Record exact test commands, revision and results after CI,
 then attach measured screenshots/video and physical Samsung observations.
 
 PR #11 passed build/unit/lint and API 35 emulator CI before merging at

@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +23,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Brush
@@ -107,6 +109,8 @@ fun HomeScreen(
             add(HomeListEntry.Actions)
         }
     }
+    var anchorableEntries by remember { mutableStateOf(entries) }
+    SideEffect { if (!searching) anchorableEntries = entries }
     val headerIndices = remember(entries) { entries.mapIndexedNotNull { i, entry -> (entry as? HomeListEntry.Header)?.let { it.label to i + 1 } }.toMap() }
     val alphabet = remember(sectionBuilder, safeFeatured) {
         if (safeFeatured != null) listOf("★") + sectionBuilder.alphabet else sectionBuilder.alphabet
@@ -118,6 +122,7 @@ fun HomeScreen(
     var jumpSerial by remember { mutableIntStateOf(0) }
     var savedAnchorIndex by rememberSaveable { mutableIntStateOf(-1) }
     var savedAnchorOffset by rememberSaveable { mutableIntStateOf(0) }
+    var savedAnchorId by rememberSaveable { mutableStateOf<String?>(null) }
     var previousQuery by remember { mutableStateOf(query) }
     var observedResetToken by rememberSaveable { mutableIntStateOf(homeResetToken) }
     LaunchedEffect(query) {
@@ -125,13 +130,17 @@ fun HomeScreen(
             if (previousQuery.isBlank() && query.isNotBlank()) {
                 savedAnchorIndex = listState.firstVisibleItemIndex
                 savedAnchorOffset = listState.firstVisibleItemScrollOffset
+                savedAnchorId = anchorableEntries.getOrNull(savedAnchorIndex - 1)?.id
                 reachability.reset()
                 navigationSpacePx = 0
                 listState.scrollToItem(0)
             } else if (previousQuery.isNotBlank() && query.isBlank()) {
-                if (savedAnchorIndex >= 0) listState.scrollToItem(savedAnchorIndex.coerceAtMost(entries.lastIndex + 1), savedAnchorOffset)
+                val currentIndex = entries.indexOfFirst { it.id == savedAnchorId }
+                if (currentIndex >= 0) listState.scrollToItem(currentIndex + 1, savedAnchorOffset)
+                else if (savedAnchorIndex >= 0) listState.scrollToItem(savedAnchorIndex.coerceAtMost(entries.lastIndex + 1), savedAnchorOffset)
                 else listState.scrollToItem(0)
                 savedAnchorIndex = -1
+                savedAnchorId = null
             } else if (query.isNotBlank()) listState.scrollToItem(0)
             previousQuery = query
         }
@@ -141,6 +150,7 @@ fun HomeScreen(
             observedResetToken = homeResetToken
             updateQuery("")
             savedAnchorIndex = -1
+            savedAnchorId = null
             previousQuery = ""
             reachability.reset()
             navigationSpacePx = 0
@@ -193,7 +203,7 @@ fun HomeScreen(
                     populated = headerIndices.keys,
                     onSelect = { label -> jumpSerial += 1; jump = label to jumpSerial },
                     wallpaperMode = wallpaperMode,
-                    modifier = Modifier.align(Alignment.CenterEnd),
+                    modifier = Modifier.align(AbsoluteAlignment.CenterRight),
                 )
             }
             Box(Modifier.fillMaxWidth().background(if (wallpaperMode) Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Black.copy(alpha = 0.75f))) else Brush.verticalGradient(listOf(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.background)))) {

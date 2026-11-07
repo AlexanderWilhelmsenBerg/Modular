@@ -82,7 +82,7 @@ class HomeV2ScreenshotTest {
         val position = alphabet.indexOf("K")
         assertTrue("K must be in the rail", position >= 0)
         rail.performTouchInput {
-            down(Offset(size.width - 8f, size.height * (position + 0.5f) / alphabet.size))
+            down(Offset(width - 8f, height * (position + 0.5f) / alphabet.size))
         }
         composeRule.onNodeWithTag("alphabet-bubble").assertIsDisplayed()
         capture("rail-k")
@@ -103,12 +103,13 @@ class HomeV2ScreenshotTest {
         val initialTop = row.fetchSemanticsNode().boundsInRoot.top
         row.performTouchInput {
             down(center)
-            moveTo(center + Offset(0f, 320f))
+            moveTo(center + Offset(0f, 650f))
             up()
         }
         composeRule.waitForIdle()
         val loweredTop = row.fetchSemanticsNode().boundsInRoot.top
         assertTrue("Pull-down should retain lowered app hit targets", loweredTop > initialTop + 40f)
+        assertTrue("First app should be reachable near mid-screen", loweredTop > composeRule.onRoot().fetchSemanticsNode().boundsInRoot.height * 0.35f)
         composeRule.runOnIdle { assertEquals(0, launches) }
         capture("reachability")
         row.performClick()

@@ -227,6 +227,14 @@ class ModuleSettingsControllerTest {
         assertTrue(store.state.value.activeContext()!!.bindings.contains(
             ContextCapabilityBinding(otherCapability, otherInstance.id)))
         assertFalse(controller.migrateActiveLegacySortToFeatured().getOrThrow())
+
+        controller.save(PROVIDER_A, "Most Used", "{\"days\":22}", true).getOrThrow()
+        assertEquals(2, store.state.value.instances.size)
+        assertEquals(selected.id, store.state.value.activeContext()!!.bindings.first {
+            it.capability == StandardCapabilities.AppsFeatured
+        }.instanceId)
+        assertEquals("{\"days\":22}", store.state.value.instances.first { it.id == selected.id }.configurationJson)
+        assertEquals(original, store.state.value.contexts.first { it.id == original.id })
     }
 
     @Test

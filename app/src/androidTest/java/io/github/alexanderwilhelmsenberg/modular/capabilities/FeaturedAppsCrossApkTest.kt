@@ -3,6 +3,8 @@ package io.github.alexanderwilhelmsenberg.modular.capabilities
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Process
+import android.os.UserManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -14,8 +16,11 @@ import io.github.alexanderwilhelmsenberg.modular.composition.ContextManager
 import io.github.alexanderwilhelmsenberg.modular.composition.DataStoreCompositionStateStore
 import io.github.alexanderwilhelmsenberg.modular.composition.ModuleSettingsController
 import io.github.alexanderwilhelmsenberg.modular.home.HomeFeaturedController
+import io.github.alexanderwilhelmsenberg.modular.home.HomeFeaturedState
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.FeaturedAppsResultParcel
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.FeaturedAppsRequestParcel
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortItemParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.FeaturedMutationResultParcel
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.FeaturedPinRequestParcel
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRegistry
@@ -25,6 +30,7 @@ import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
 import io.github.alexanderwilhelmsenberg.modular.security.OfficialModuleBootstrapPolicy
 import java.io.FileInputStream
 import java.util.UUID
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -46,9 +52,14 @@ class FeaturedAppsCrossApkTest {
         assertEquals(PackageManager.SIGNATURE_MATCH,
             context.packageManager.checkSignatures(context.packageName, MODULE_PACKAGE))
         val originalMode = usageMode(context, moduleInfo.uid)
+        val profileSerial = context.getSystemService(UserManager::class.java)
+            .getSerialNumberForUser(Process.myUserHandle())
+        assertTrue(profileSerial >= 0)
         val first = app("fixture.featured.alpha", "Alpha")
         val second = app("fixture.featured.zulu", "Zulu")
-        val repository = FakeAppRepository(listOf(first, second))
+        val used = app(TEST_LAUNCHER_PACKAGE, "Zulu used", profileSerial)
+        val unused = app("fixture.featured.unused", "Alpha unused", profileSerial)
+        val repository = FakeAppRepository(listOf(first, second, used, unused))
         val grants = DataStoreModuleGrantStateStore(context, "featured-grants-${UUID.randomUUID()}")
         val security = ModuleSecurityManager(AndroidModuleIdentityResolver(context), grants,
             OfficialModuleBootstrapPolicy.capabilities)
@@ -120,14 +131,52 @@ class FeaturedAppsCrossApkTest {
             assertEquals(listOf(second.key, first.key), reordered.pinnedApps.map { it.key })
             assertTrue(reordered.suggestedApps.isEmpty())
 
+            // A second v4 session reacquires the same instance endpoint; its
+            // separate Binder must read the pins committed by the first session.
+            val freshRegistry = ModuleRegistry(context, CoreHostFactory(context, repository, security))
+            val freshRouter = CapabilityRouter(freshRegistry)
+            val freshClient = FeaturedAppsClient(freshRouter)
+            try {
+                freshRegistry.refresh()
+                val freshRoute = withTimeout(15_000) {
+                    freshRouter.routes.first { routes -> routes.any {
+                        it.providerId == MODULE_ID && it.capability == StandardCapabilities.AppsFeatured
+                    } }.single { it.providerId == MODULE_ID && it.capability == StandardCapabilities.AppsFeatured }
+                }
+                assertNotEquals("New session should acquire a new endpoint",
+                    route.sessionId, freshRoute.sessionId)
+                val reread = freshClient.getFeaturedApps(freshRoute, binding.copy(route = freshRoute),
+                    FeaturedAppsRequestParcel(UUID.randomUUID().toString(), repository.catalog.value.generation,
+                        "en", repository.catalog.value.apps.map {
+                            AppSortItemParcel(it.key.toParcel(), it.label)
+                        })).getOrThrow()
+                assertEquals(FeaturedAppsResultParcel.STATUS_SUCCESS, reread.status)
+                assertEquals(listOf(second.key.toParcel(), first.key.toParcel()), reread.pinnedKeys)
+                assertEquals(FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED, reread.featureState)
+            } finally {
+                freshClient.close()
+                freshRouter.close()
+                freshRegistry.close()
+            }
+
             // App-op changes are not a StateFlow input, so refresh the catalog to force
             // a new real Binder read after granting and then revoking Usage Access.
             setUsageAccess("allow")
-            repository.publish()
-            withTimeout(10_000) {
-                home.featured.first { it?.featureState != FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED &&
-                    it?.pinnedKeys == listOf(second.key, first.key) }
+            foregroundTestLauncher()
+            var ranked: HomeFeaturedState? = null
+            withTimeout(30_000) {
+                while (ranked == null) {
+                    repository.publish()
+                    ranked = kotlinx.coroutines.withTimeoutOrNull(1_500) {
+                        home.featured.first { it?.suggestedApps?.firstOrNull()?.key == used.key }
+                    }
+                    if (ranked == null) delay(200)
+                }
             }
+            assertEquals(FeaturedAppsResultParcel.STATE_READY, ranked!!.featureState)
+            assertEquals(used.key, ranked!!.suggestedApps.first().key)
+            assertTrue(unused.key !in ranked!!.suggestedApps.map { it.key })
+            assertEquals(listOf(second.key, first.key), ranked!!.pinnedKeys)
             setUsageAccess("ignore")
             repository.publish()
             val revoked = withTimeout(10_000) {
@@ -168,6 +217,13 @@ class FeaturedAppsCrossApkTest {
 
     private fun setUsageAccess(mode: String) { shell("appops set $MODULE_PACKAGE GET_USAGE_STATS $mode") }
 
+    private suspend fun foregroundTestLauncher() {
+        val started = shell("am start -W -n $TEST_LAUNCHER_PACKAGE/android.app.Activity")
+        assertTrue("Could not start independent launcher fixture: $started", started.contains("Status: ok"))
+        try { delay(2_500) }
+        finally { shell("input keyevent KEYCODE_HOME") }
+    }
+
     private fun usageMode(context: Context, uid: Int): Int {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         automation.adoptShellPermissionIdentity("android.permission.GET_APP_OPS_STATS")
@@ -186,8 +242,8 @@ class FeaturedAppsCrossApkTest {
         else -> error("Unknown initial Usage Access app-op mode: $mode")
     }
 
-    private fun app(packageName: String, label: String) = LaunchableApp(
-        AppKey(packageName, "$packageName.MainActivity", 1L), label, 0, true, null)
+    private fun app(packageName: String, label: String, profileSerial: Long = 1L) = LaunchableApp(
+        AppKey(packageName, "$packageName.MainActivity", profileSerial), label, 0, true, null)
 
     private class FakeAppRepository(apps: List<LaunchableApp>) : AppRepository {
         private val state = MutableStateFlow(AppCatalog(generation = 1, apps = apps))
@@ -205,5 +261,6 @@ class FeaturedAppsCrossApkTest {
     private companion object {
         const val MODULE_ID = "modular.addon.sort.mostused"
         const val MODULE_PACKAGE = "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug"
+        const val TEST_LAUNCHER_PACKAGE = "io.github.alexanderwilhelmsenberg.modular.testlauncher"
     }
 }

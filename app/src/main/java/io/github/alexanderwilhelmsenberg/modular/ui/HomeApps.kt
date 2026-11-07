@@ -19,6 +19,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,12 +31,14 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.LayoutDirection
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -68,6 +71,7 @@ internal fun HomeAppRow(
     ) {
         val iconStart = (maxWidth * 0.126f).coerceAtLeast(16.dp)
         val labelStart = (maxWidth * 0.282f).coerceAtLeast(iconStart + 56.dp)
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.width(iconStart))
             Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
@@ -87,9 +91,10 @@ internal fun HomeAppRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             if (onPinApp != null) DropdownMenuItem(
-                text = { Text(if (pinned) "Unpin from Most Used" else "Pin in Most Used") },
+                text = { Text(if (pinned) "Unpin from starred apps" else "Pin to starred apps") },
                 onClick = { menuOpen = false; onPinApp(app, !pinned) },
             )
         }

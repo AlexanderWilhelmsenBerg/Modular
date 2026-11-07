@@ -88,7 +88,7 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 
 First complete Core Home, alphabetical ordering, launching, settings navigation, accessibility, and lifecycle/failure handling. Then validate optional helper add-ons and advanced contexts. External Home/Drawer modules are optional presentation replacements.
 
-Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). Core includes text-only Home, search/gear controls, built-in themes, Settings module management, and selected optional sort-helper output with alphabetical fallback. External presentation and external theme loading remain future work. See [Core completion](docs/implementation/core-completion.md) for baseline test evidence and physical-device acceptance. The [Core framework](docs/implementation/core-framework.md) adds validated discovery descriptors, per-instance configuration, and a separately consumable SDK with an independent example.
+Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). The validated Core baseline includes search/gear controls, built-in themes, Settings module management, and selected optional sort-helper output with alphabetical fallback. External presentation and external theme loading remain future work. See [Core completion](docs/implementation/core-completion.md) for baseline test evidence and physical-device acceptance. The [Core framework](docs/implementation/core-framework.md) adds validated discovery descriptors, per-instance configuration, and a separately consumable SDK with an independent example.
 
 ## Home presentation v2
 

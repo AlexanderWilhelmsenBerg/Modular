@@ -1,11 +1,28 @@
 package io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused
 
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppSortItemParcel
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.AppKeyParcel
 import java.text.Collator
 import java.util.Locale
 
 /** Pure ordering logic; every supplied entry remains in the result. */
 object MostUsedSorter {
+    /** Only recorded foreground time yields suggestions; pins are always separate. */
+    fun suggestions(
+        items: List<AppSortItemParcel>,
+        localeTag: String,
+        ownProfileSerial: Long,
+        foregroundMillisByPackage: Map<String, Long>,
+        pinnedKeys: Set<AppKeyParcel>,
+        limit: Int,
+    ): List<AppKeyParcel> = sort(
+        items.filter { item ->
+            item.key !in pinnedKeys && item.key.profileSerial == ownProfileSerial &&
+                (foregroundMillisByPackage[item.key.packageName] ?: 0L) > 0L
+        },
+        localeTag, ownProfileSerial, foregroundMillisByPackage,
+    ).take(limit.coerceIn(0, 20)).map { it.key }
+
     fun sort(
         items: List<AppSortItemParcel>,
         localeTag: String,

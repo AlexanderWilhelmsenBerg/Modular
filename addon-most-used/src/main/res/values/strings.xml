@@ -2,15 +2,15 @@
 <resources>
     <string name="app_name">Modular Most Used</string>
     <string name="settings_heading">Most Used</string>
-    <string name="settings_explanation">Most Used sorts apps by foreground time reported by Android for this profile over the selected number of recent days. Choose 1–30 recent days in Modular settings (default 7), then select Use on Home.</string>
+    <string name="settings_explanation">Most Used adds a starred section to Modular Home. Pin apps in Modular to keep them at the top in your chosen order. With Usage Access, recent foreground time also supplies suggestions. Set Recent days and Suggested apps in Modular settings, then select Use on Home.</string>
     <string name="settings_access_on">Usage access is on. Android has foreground history from the past 7 days.</string>
-    <string name="settings_access_off">Usage access is off for Most Used. Enable it in Android settings. Modular uses alphabetical order until access is granted.</string>
+    <string name="settings_access_off">Usage access is off for Most Used. Saved pins still appear in the starred section; enable access for suggestions.</string>
     <string name="settings_access_checking">Checking Usage Access and recent history…</string>
-    <string name="settings_access_no_history">Usage access is on, but Android reported no foreground history in the past 7 days. Apps without measured time sort alphabetically.</string>
+    <string name="settings_access_no_history">Usage access is on, but Android reported no foreground history in the past 7 days. Saved pins still appear.</string>
     <string name="settings_access_history_unavailable">Usage access is on, but Android usage history could not be read right now.</string>
     <string name="settings_access_button">Open Usage Access settings</string>
     <string name="settings_core_button">Configure in Modular</string>
     <string name="settings_core_unavailable">Modular settings could not be opened. Check that the matching Modular app is installed.</string>
     <string name="settings_access_unavailable">Android Usage Access settings could not be opened on this device.</string>
-    <string name="settings_profile_note">Android reports usage for this profile only. Apps in other profiles stay in the list and sort alphabetically with zero measured time.</string>
+    <string name="settings_profile_note">Android reports usage for this profile only. You can pin an app from another profile, but it will not receive a usage suggestion.</string>
 </resources>

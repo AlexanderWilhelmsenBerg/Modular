@@ -51,10 +51,14 @@ fun ModuleSettingsDialog(
     onDismiss: () -> Unit,
     onOpenAddonSettings: ((ModuleRecord) -> Unit)? = null,
     available: Boolean = module.status == ModuleConnectionStatus.CONNECTED,
+    featuredSettingsContent: (@Composable () -> Unit)? = null,
 ) {
     val descriptor = module.descriptor
-    val isSortModule = descriptor?.providedCapabilities?.contains(StandardCapabilities.AppsSort.wireValue)
-        ?: module.capabilities.contains(StandardCapabilities.AppsSort.wireValue)
+    val isSortModule = descriptor?.providedCapabilities?.any {
+        it == StandardCapabilities.AppsSort.wireValue || it == StandardCapabilities.AppsFeatured.wireValue
+    } ?: module.capabilities.any {
+        it == StandardCapabilities.AppsSort.wireValue || it == StandardCapabilities.AppsFeatured.wireValue
+    }
     val fields = descriptor?.configurationFields.orEmpty()
     val normalized = remember(descriptor, configurationJson) {
         descriptor?.let { runCatching { ModuleDescriptorCodec.normalizeConfiguration(it, configurationJson) }.getOrNull() }
@@ -149,10 +153,11 @@ fun ModuleSettingsDialog(
                         )
                     }
                     if (isSortModule) Text(
-                        if (isUsedForAppOrder) "This module currently orders apps on Home."
+                        if (isUsedForAppOrder) "This module currently contributes apps on Home."
                         else "Home currently uses another app order.",
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    if (isUsedForAppOrder && editable) featuredSettingsContent?.invoke()
                 }
                 if (descriptor?.managementActivity != null && onOpenAddonSettings != null) {
                     OutlinedButton(

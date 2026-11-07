@@ -70,6 +70,7 @@ fun ModularApp(
     onOpenModuleSettings: (ModuleRecord) -> Unit = {},
     onClearModuleEvents: () -> Unit = {},
     compositionContent: @Composable () -> Unit = {},
+    appearanceContent: @Composable () -> Unit = {},
     corePackageName: String = "io.github.alexanderwilhelmsenberg.modular",
 ) {
         Scaffold(
@@ -99,6 +100,8 @@ fun ModularApp(
                         onSelect = onAppearanceThemeSelected,
                     )
                 }
+
+                item(key = "home-appearance") { appearanceContent() }
 
                 item {
                     Text(

@@ -63,6 +63,19 @@ Core calls `getInstanceCapabilityBinder(sessionId, instanceId, configurationJson
 
 `modular.apps.sort/v1` receives at most 2,000 app keys and labels plus a locale tag. Return a status and an exact permutation of input keys. Core validates the response and retains the current Core app objects. The sort contract supplies no app catalog or launch authority by itself. If your add-on requests a Core host capability, declare it in `requestedCoreCapabilities`; the request only makes it eligible for an explicit package-and-signer-bound grant. `ModuleInstanceContext.appCatalog()`, `appLaunch()`, and `hostCapability()` are convenience accessors, and Core checks the live grant on every host Binder call.
 
+`modular.apps.featured/v1` is a separate optional capability for a small starred
+Home section. It receives at most 2,000 current app keys and labels and returns
+up to 50 saved pins plus 20 suggestions, with a typed ready, permission-required,
+or no-history state. Core renders the section and generic pin picker/reorder
+controls; the provider stores pins and implements authenticated `setPinned` and
+`replacePinOrder` mutations with a persistent feature revision. The SDK's
+`FeaturedAppsEndpoint` enforces caller authentication and structural validation;
+the provider must still enforce revision conflicts and commit before acknowledging
+success. A pin may remain saved after its app leaves the catalog, while a new pin
+must use a key from the latest read. The full contract and compatibility behavior
+are in [featured-apps-v1](architecture/featured-apps-v1.md). The existing sort
+parcel layout and protocol v4 methods are unchanged.
+
 ## Authenticate Core callers
 
 The SDK's default `TrustedCorePolicy.officialSameSigner()` is for official add-ons signed with Core's signer. An independently signed add-on must override `trustedCorePolicy` with `TrustedCorePolicy.pinned(mapOf(corePackageName to setOf(certificateSha256)))`. Pin the exact Core package ID and SHA-256 of its installed **APK signing certificate**. The [published fingerprints](signing-certificates.json) are for the owner's persistent debug and release APKs; disposable CI debug APKs have different certificates. Replace the pins when targeting another Core build. The policy checks both the calling UID's package ownership and the current certificate; the SDK rechecks it on each privileged Binder call. A certificate digest is public identity data, not a private signing key.

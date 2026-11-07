@@ -1,6 +1,9 @@
 package io.github.alexanderwilhelmsenberg.modular.appearance
 
 import android.app.Activity
+import android.app.WallpaperManager
+import android.graphics.drawable.ColorDrawable
+import android.view.WindowManager
 import android.graphics.Color as AndroidColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -88,4 +91,38 @@ fun applySystemBarAppearance(activity: Activity, theme: AppearanceTheme) {
         isAppearanceLightStatusBars = theme == AppearanceTheme.LIGHT
         isAppearanceLightNavigationBars = theme == AppearanceTheme.LIGHT
     }
+}
+
+/** Returns whether wallpaper can actually be shown for this Home frame. */
+fun applyHomeWindowAppearance(
+    activity: Activity,
+    theme: AppearanceTheme,
+    wallpaperRequested: Boolean,
+    homeVisible: Boolean,
+): Boolean {
+    val window = activity.window
+    val useWallpaper = wallpaperRequested && homeVisible && runCatching {
+        WallpaperManager.getInstance(activity).isWallpaperSupported
+    }.getOrDefault(false)
+
+    applySystemBarAppearance(activity, theme)
+    if (useWallpaper) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+        window.setBackgroundDrawable(ColorDrawable(AndroidColor.TRANSPARENT))
+        window.decorView.setBackgroundColor(AndroidColor.TRANSPARENT)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+    } else {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+        val color = when (theme) {
+            AppearanceTheme.LIGHT -> AndroidColor.rgb(250, 250, 252)
+            AppearanceTheme.DARK -> AndroidColor.rgb(17, 19, 24)
+            AppearanceTheme.AMOLED -> AndroidColor.BLACK
+        }
+        window.setBackgroundDrawable(ColorDrawable(color))
+        window.decorView.setBackgroundColor(color)
+    }
+    return useWallpaper
 }

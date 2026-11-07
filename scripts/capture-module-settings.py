@@ -31,6 +31,8 @@ def capture(name, start_args, expected):
             print("Visible settings verified:", name)
             return
         time.sleep(0.5)
+    (out / (name + "-failure.xml")).write_bytes(xml)
+    (out / (name + "-failure.png")).write_bytes(adb("exec-out", "screencap", "-p"))
     raise RuntimeError(f"Missing settings controls in {name}: {expected}; visible: {last_text}")
 
 

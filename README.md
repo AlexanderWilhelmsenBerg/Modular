@@ -88,26 +88,29 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 
 First complete Core Home, alphabetical ordering, launching, settings navigation, accessibility, and lifecycle/failure handling. Then validate optional helper add-ons and advanced contexts. External Home/Drawer modules are optional presentation replacements.
 
-Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). Core includes text-only Home, search/gear controls, built-in themes, Settings module management, and selected optional sort-helper output with alphabetical fallback. External presentation and external theme loading remain future work. See [Core completion](docs/implementation/core-completion.md) for baseline test evidence and physical-device acceptance. The [Core framework](docs/implementation/core-framework.md) adds validated discovery descriptors, per-instance configuration, and a separately consumable SDK with an independent example.
+Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). The validated Core baseline includes search/gear controls, built-in themes, Settings module management, and selected optional sort-helper output with alphabetical fallback. External presentation and external theme loading remain future work. See [Core completion](docs/implementation/core-completion.md) for baseline test evidence and physical-device acceptance. The [Core framework](docs/implementation/core-framework.md) adds validated discovery descriptors, per-instance configuration, and a separately consumable SDK with an independent example.
 
-## Next planned Home presentation
+## Home presentation v2
 
 The [2026-11-07 specification](docs/product/home-presentation-v2.md) revises the
-previous text-only presentation direction: Core will add icons, letter dividers,
-animated side alphabet navigation, optional system wallpaper/dimming, bottom
-search/settings, and pull-down reachability. Most Used will provide a starred
+previous text-only presentation direction. Source now includes Core icons, letter
+dividers, side alphabet navigation, optional system wallpaper/dimming, bottom
+search/settings, and pull-down reachability. Most Used contributes a starred
 section with saved pins before usage-ranked suggestions, while the full
-alphabetical catalog stays available. These features are **specified, not yet
-implemented**; the behavior described above is the delivered baseline.
+alphabetical catalog stays available. Revision-specific CI, emulator,
+cross-APK, visual and physical-device acceptance remain pending; see the
+[v2 acceptance matrix](docs/implementation/core-completion.md#home-presentation-v2-implementation-and-acceptance).
 
 
 ## Most Used add-on
 
-[Most Used](docs/addons/most-used.md) optionally puts apps with the most recorded
-foreground time at the top of Home. It has its own APK and Android Usage Access
-permission screen. Open its Settings in Core, choose a time window, and tap **Use on Home**; Core keeps its alphabetical
-fallback when the add-on is disabled or access is unavailable. Signed debug and
-release downloads are available as separate artifacts in the Signed APKs workflow.
+[Most Used](docs/addons/most-used.md) optionally adds a starred Home section.
+Saved pins come first in manual order and work without Usage Access; suggestions
+follow by recorded foreground time when access is granted. In Core module
+Settings, set Recent days and Suggested apps, then tap **Use on Home**. The
+add-on has its own APK and Android Usage Access screen. Core keeps the full
+alphabetical catalog when the add-on is disabled or unavailable. Signed debug
+and release downloads are separate artifacts in the Signed APKs workflow.
 
 Module cards have a **Settings** button with normal controls and a **Use on Home**
 action for sort helpers. Instances, contexts, and JSON editing are under Advanced

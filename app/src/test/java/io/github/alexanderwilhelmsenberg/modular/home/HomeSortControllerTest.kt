@@ -19,6 +19,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertSame
 import org.junit.Test
 
@@ -46,11 +47,13 @@ class HomeSortControllerTest {
 
         runCurrent()
         assertEquals(listOf("Alpha", "Beta"), controller.orderedApps.value.map { it.label })
+        assertFalse(controller.customOrderActive.value)
         assertEquals(0, calls)
 
         active.value = selected()
         runCurrent()
         assertEquals(listOf("Beta", "Alpha"), controller.orderedApps.value.map { it.label })
+        assertTrue(controller.customOrderActive.value)
         assertSame(beta, controller.orderedApps.value[0])
         assertEquals(1, calls)
         controller.close()
@@ -67,16 +70,19 @@ class HomeSortControllerTest {
             onFailure = { _, message -> failures += message }, scope = this)
         runCurrent()
         assertEquals(listOf("Beta", "Alpha"), controller.orderedApps.value.map { it.label })
+        assertTrue(controller.customOrderActive.value)
 
         response = Result.failure(IllegalStateException("provider died"))
         catalog.value = catalog.value.copy(generation = 1)
         runCurrent()
         assertEquals(listOf("Alpha", "Beta"), controller.orderedApps.value.map { it.label })
+        assertFalse(controller.customOrderActive.value)
 
         response = Result.success(listOf(beta, beta))
         catalog.value = catalog.value.copy(generation = 2)
         runCurrent()
         assertEquals(listOf("Alpha", "Beta"), controller.orderedApps.value.map { it.label })
+        assertFalse(controller.customOrderActive.value)
         assertEquals(1, failures.size)
 
         response = Result.success(listOf(beta, alpha))
@@ -85,6 +91,7 @@ class HomeSortControllerTest {
         routes.value = emptyList()
         runCurrent()
         assertEquals(listOf("Alpha", "Beta"), controller.orderedApps.value.map { it.label })
+        assertFalse(controller.customOrderActive.value)
         assertEquals(1, failures.size)
         controller.close()
     }
@@ -102,6 +109,7 @@ class HomeSortControllerTest {
         advanceTimeBy(101)
         runCurrent()
         assertEquals(listOf("Alpha", "Beta"), controller.orderedApps.value.map { it.label })
+        assertFalse(controller.customOrderActive.value)
         assertEquals(listOf("Sort helper timed out. Retry its connection in Settings."), failures)
 
         catalog.value = AppCatalog(generation = 1, apps = listOf(app("gamma", "Gamma"), alpha))
@@ -125,6 +133,7 @@ class HomeSortControllerTest {
         delayed.complete(Result.success(listOf(beta, alpha)))
         runCurrent()
         assertEquals(listOf("Alpha", "Beta"), controller.orderedApps.value.map { it.label })
+        assertFalse(controller.customOrderActive.value)
         controller.close()
     }
 
@@ -144,10 +153,12 @@ class HomeSortControllerTest {
         active.value = selected(secondRoute)
         runCurrent()
         assertEquals(listOf("Beta", "Alpha"), controller.orderedApps.value.map { it.label })
+        assertTrue(controller.customOrderActive.value)
 
         oldResponse.complete(Result.success(listOf(alpha, beta)))
         runCurrent()
         assertEquals(listOf("Beta", "Alpha"), controller.orderedApps.value.map { it.label })
+        assertTrue(controller.customOrderActive.value)
         controller.close()
     }
 
@@ -168,11 +179,13 @@ class HomeSortControllerTest {
         active.value = selected(configurationJson = "{\"order\":\"reverse\"}")
         runCurrent()
         assertEquals(listOf("Beta", "Alpha"), controller.orderedApps.value.map { it.label })
+        assertTrue(controller.customOrderActive.value)
         assertEquals(listOf("instance" to "{}", "instance" to "{\"order\":\"reverse\"}"), seen)
 
         oldResponse.complete(Result.success(listOf(alpha, beta)))
         runCurrent()
         assertEquals(listOf("Beta", "Alpha"), controller.orderedApps.value.map { it.label })
+        assertTrue(controller.customOrderActive.value)
         controller.close()
     }
 
@@ -194,10 +207,12 @@ class HomeSortControllerTest {
         active.value = selected(newRoute)
         runCurrent()
         assertEquals(listOf("Beta", "Alpha"), controller.orderedApps.value.map { it.label })
+        assertTrue(controller.customOrderActive.value)
 
         oldResponse.complete(Result.success(listOf(alpha, beta)))
         runCurrent()
         assertEquals(listOf("Beta", "Alpha"), controller.orderedApps.value.map { it.label })
+        assertTrue(controller.customOrderActive.value)
         controller.close()
     }
 

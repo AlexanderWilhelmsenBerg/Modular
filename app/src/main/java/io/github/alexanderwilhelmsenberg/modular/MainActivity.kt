@@ -20,6 +20,16 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceHomeControls
+import io.github.alexanderwilhelmsenberg.modular.appearance.HomeBackground
+import io.github.alexanderwilhelmsenberg.modular.appearance.applyHomeWindowAppearance
+import io.github.alexanderwilhelmsenberg.modular.capabilities.FeaturedAppsClient
+import io.github.alexanderwilhelmsenberg.modular.home.HomeFeaturedController
+import io.github.alexanderwilhelmsenberg.modular.home.HomeFeaturedState
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.FeaturedAppsResultParcel
+import io.github.alexanderwilhelmsenberg.modular.ui.FeaturedAppSettingsUi
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,7 +37,6 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceSettingsStore
 import io.github.alexanderwilhelmsenberg.modular.appearance.ModularTheme
-import io.github.alexanderwilhelmsenberg.modular.appearance.applySystemBarAppearance
 import io.github.alexanderwilhelmsenberg.modular.capabilities.AppSortClient
 import io.github.alexanderwilhelmsenberg.modular.home.HomeSortController
 import io.github.alexanderwilhelmsenberg.modular.apps.AndroidAppRepository
@@ -77,6 +86,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var appearanceStore: AppearanceSettingsStore
     private lateinit var appSortClient: AppSortClient
     private lateinit var homeSortController: HomeSortController
+    private lateinit var featuredAppsClient: FeaturedAppsClient
+    private lateinit var homeFeaturedController: HomeFeaturedController
     private var homeSearchQuery by mutableStateOf("")
     private var homeIntentGeneration by mutableStateOf(0)
 
@@ -118,6 +129,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         homeSearchQuery = savedInstanceState?.getString("homeSearchQuery").orEmpty()
+        homeIntentGeneration = savedInstanceState?.getInt("homeIntentGeneration") ?: 0
         appearanceStore = AppearanceSettingsStore(this)
         settingsVisible = savedInstanceState?.getBoolean("settingsVisible") ?: false
         pendingUninstallPackage = savedInstanceState?.getString("pendingUninstallPackage")
@@ -174,6 +186,21 @@ class MainActivity : ComponentActivity() {
             },
         )
 
+        featuredAppsClient = FeaturedAppsClient(capabilityRouter)
+        homeFeaturedController = HomeFeaturedController(
+            catalog = appRepository.catalog,
+            activeContext = contextManager.active,
+            routes = capabilityRouter.routes,
+            client = featuredAppsClient,
+            localeTag = resources.configuration.locales[0].toLanguageTag(),
+            onFailure = { route, message ->
+                moduleRegistry.managementStore.record(
+                    route.component?.flattenToString() ?: route.providerId,
+                    "featured", message, true,
+                )
+            },
+        )
+
         eventBus = CoreEventBus()
         eventSources = CoreEventSources(
             eventBus = eventBus,
@@ -191,13 +218,26 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             // Read local appearance before the first Compose frame, without blocking Main.
             val initialTheme = appearanceStore.currentTheme()
-            applySystemBarAppearance(this@MainActivity, initialTheme)
+            val initialHomeAppearance = appearanceStore.currentSettings()
+            val initialWallpaper = applyHomeWindowAppearance(
+                this@MainActivity, initialTheme,
+                initialHomeAppearance.background == HomeBackground.SYSTEM_WALLPAPER,
+                !settingsVisible,
+            )
             setContent {
                 val appearanceTheme by appearanceStore.theme.collectAsState(initial = initialTheme)
                 val appearanceError by appearanceStore.error.collectAsState()
+                val homeAppearance by appearanceStore.settings.collectAsState(initial = initialHomeAppearance)
+                val featured by homeFeaturedController.featured.collectAsState()
+                var wallpaperActive by remember { mutableStateOf(initialWallpaper) }
                 val homeOrderedApps by homeSortController.orderedApps.collectAsState()
-                LaunchedEffect(appearanceTheme) {
-                    applySystemBarAppearance(this@MainActivity, appearanceTheme)
+                val customHomeOrderActive by homeSortController.customOrderActive.collectAsState()
+                LaunchedEffect(appearanceTheme, homeAppearance.background, settingsVisible) {
+                    wallpaperActive = applyHomeWindowAppearance(
+                        this@MainActivity, appearanceTheme,
+                        homeAppearance.background == HomeBackground.SYSTEM_WALLPAPER,
+                        !settingsVisible,
+                    )
                 }
                 ModularTheme(appearanceTheme) {
                     val modules by moduleRegistry.modules.collectAsState()
@@ -232,14 +272,61 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    val homeListState = rememberLazyListState()
+                    LaunchedEffect(availableRoutes, activeContext.context) {
+                        moduleSettingsController.migrateActiveLegacySortToFeatured().onFailure {
+                            moduleRegistry.managementStore.record(
+                                "Core", "featured-migration",
+                                "Could not upgrade the selected app order. Retry in module Settings.", true,
+                            )
+                        }
+                    }
+                    val homeStateHolder = rememberSaveableStateHolder()
                     BackHandler { settingsVisible = false }
 
                     if (!settingsVisible) {
+                        homeStateHolder.SaveableStateProvider("home") {
                         key(homeIntentGeneration) {
+                            val homeListState = rememberLazyListState()
                             HomeScreen(
                                 catalog = appCatalog,
                                 orderedApps = homeOrderedApps,
+                                showAppIcons = homeAppearance.showAppIcons,
+                                wallpaperMode = wallpaperActive,
+                                wallpaperDimmingPercent = homeAppearance.wallpaperDimming,
+                                featuredApps = featured?.featuredApps,
+                                pinnedAppKeys = featured?.pinnedKeys?.toSet().orEmpty(),
+                                featuredNeedsPermission = featured?.featureState ==
+                                    FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED,
+                                featuredMessage = featured?.message?.takeIf(String::isNotBlank) ?: when (featured?.featureState) {
+                                    FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED ->
+                                        "Usage Access is off. Pins still appear; open add-on settings to grant access."
+                                    FeaturedAppsResultParcel.STATE_NO_HISTORY ->
+                                        "No usage history yet. Pin apps from add-on settings."
+                                    else -> null
+                                },
+                                alphabeticalSections = !customHomeOrderActive,
+                                onOpenFeaturedSettings = featured?.let { current -> {
+                                    if (homeFeaturedController.featured.value?.binding == current.binding) {
+                                        selectedModuleComponent = current.binding.route.component?.flattenToString()
+                                        settingsVisible = true
+                                    } else {
+                                        Toast.makeText(this@MainActivity, "The selected add-on changed. Try again.", Toast.LENGTH_LONG).show()
+                                    }
+                                } },
+                                onOpenFeaturedManagement = featured?.let { current -> {
+                                    openFeaturedManagement(current, modules)
+                                } },
+                                onPinApp = featured?.let { current -> { app, pinned ->
+                                    lifecycleScope.launch {
+                                        val result = if (homeFeaturedController.featured.value?.binding != current.binding) {
+                                            Result.failure(IllegalStateException("The selected add-on changed. Try again."))
+                                        } else homeFeaturedController.setPinned(app.key, pinned, current.binding)
+                                        recordManagementResult(
+                                            current.binding.route.component?.flattenToString() ?: "Core",
+                                            "pins", result, "Updated pinned apps",
+                                        )
+                                    }
+                                } },
                                 searchQuery = homeSearchQuery,
                                 onSearchQueryChange = { homeSearchQuery = it },
                                 listState = homeListState,
@@ -257,6 +344,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenSettings = { settingsVisible = true },
                             )
                         }
+                        }
                     } else {
                         val securityStatuses = modules.groupBy { it.component.packageName }.map { (packageName, packageModules) ->
                             securityManager.status(
@@ -271,6 +359,14 @@ class MainActivity : ComponentActivity() {
                             appearanceError = appearanceError,
                             onAppearanceThemeSelected = { selected ->
                                 lifecycleScope.launch { appearanceStore.setTheme(selected) }
+                            },
+                            appearanceContent = {
+                                AppearanceHomeControls(
+                                    settings = homeAppearance,
+                                    onBackgroundSelected = { value -> lifecycleScope.launch { appearanceStore.setBackground(value) } },
+                                    onWallpaperDimmingSelected = { value -> lifecycleScope.launch { appearanceStore.setWallpaperDimming(value) } },
+                                    onShowAppIconsChanged = { value -> lifecycleScope.launch { appearanceStore.setShowAppIcons(value) } },
+                                )
                             },
                             onBack = { settingsVisible = false },
                             corePackageName = packageName,
@@ -374,6 +470,12 @@ class MainActivity : ComponentActivity() {
                             val usedForAppOrder = remember(providerId, compositionState) {
                                 providerId?.let(moduleSettingsController::isUsedForAppOrder) ?: false
                             }
+                            val selectedFeaturedBinding = activeContext.resolvedBindings.firstOrNull {
+                                it.capability == StandardCapabilities.AppsFeatured &&
+                                    it.route.component == selected.component &&
+                                    it.instance.providerId == providerId
+                            }
+                            val selectedFeatured = featured?.takeIf { it.binding == selectedFeaturedBinding }
                             ModuleSettingsDialog(
                                 module = selected,
                                 configurationJson = configuration,
@@ -391,6 +493,32 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onOpenAddonSettings = if (selected.descriptor?.managementActivity != null)
                                     ::openAddonSettings else null,
+                                featuredSettingsContent = if (selected.descriptor?.providedCapabilities
+                                        ?.contains(StandardCapabilities.AppsFeatured.wireValue) == true) {
+                                    {
+                                        FeaturedAppSettingsUi(
+                                            catalog = appCatalog.apps,
+                                            featured = selectedFeatured,
+                                            onSetPinned = { key, pinned ->
+                                                if (selectedFeaturedBinding == null ||
+                                                    homeFeaturedController.featured.value?.binding != selectedFeaturedBinding ||
+                                                    selectedModuleComponent != selected.component.flattenToString()) {
+                                                    Result.failure(IllegalStateException("The selected add-on changed. Reopen its settings and try again."))
+                                                } else homeFeaturedController.setPinned(key, pinned, selectedFeaturedBinding)
+                                            },
+                                            onReorderPins = { keys ->
+                                                if (selectedFeaturedBinding == null ||
+                                                    homeFeaturedController.featured.value?.binding != selectedFeaturedBinding ||
+                                                    selectedModuleComponent != selected.component.flattenToString()) {
+                                                    Result.failure(IllegalStateException("The selected add-on changed. Reopen its settings and try again."))
+                                                } else homeFeaturedController.reorderPins(keys, selectedFeaturedBinding)
+                                            },
+                                            onRefresh = {
+                                                if (selectedFeaturedBinding != null) homeFeaturedController.refresh()
+                                            },
+                                        )
+                                    }
+                                } else null,
                                 onDismiss = { selectedModuleComponent = null },
                             )
                         }
@@ -402,6 +530,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("homeSearchQuery", homeSearchQuery)
+        outState.putInt("homeIntentGeneration", homeIntentGeneration)
         outState.putBoolean("settingsVisible", settingsVisible)
         outState.putString("selectedModuleComponent", selectedModuleComponent)
         outState.putString("pendingUninstallPackage", pendingUninstallPackage)
@@ -432,9 +561,12 @@ class MainActivity : ComponentActivity() {
         if (::appRepository.isInitialized) {
             appRepository.refresh()
         }
+        if (::homeFeaturedController.isInitialized) homeFeaturedController.refresh()
     }
 
     override fun onDestroy() {
+        if (::homeFeaturedController.isInitialized) homeFeaturedController.close()
+        if (::featuredAppsClient.isInitialized) featuredAppsClient.close()
         if (::homeSortController.isInitialized) homeSortController.close()
         if (::appSortClient.isInitialized) appSortClient.close()
         if (::eventSources.isInitialized) {
@@ -506,6 +638,22 @@ class MainActivity : ComponentActivity() {
         } catch (error: RuntimeException) {
             recordManagementResult(module.component.flattenToString(), "settings",
                 Result.failure(IllegalStateException("Add-on settings could not be opened. Refresh modules or reinstall the add-on.", error)), "")
+        }
+    }
+
+    private fun openFeaturedManagement(current: HomeFeaturedState, modules: List<ModuleRecord>) {
+        if (homeFeaturedController.featured.value?.binding != current.binding) {
+            Toast.makeText(this, "The selected add-on changed. Try again.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val component = current.binding.route.component ?: return
+        val module = modules.firstOrNull { it.component == component }
+        if (module?.descriptor?.managementActivity != null) {
+            // The descriptor target is validated by the same path used in module Settings.
+            openAddonSettings(module)
+        } else {
+            selectedModuleComponent = component.flattenToString()
+            settingsVisible = true
         }
     }
 

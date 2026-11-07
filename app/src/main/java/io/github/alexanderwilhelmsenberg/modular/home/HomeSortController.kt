@@ -42,6 +42,8 @@ class HomeSortController(
     private val localeTags = MutableStateFlow(localeTag)
     private val _orderedApps = MutableStateFlow<List<LaunchableApp>>(emptyList())
     val orderedApps: StateFlow<List<LaunchableApp>> = _orderedApps.asStateFlow()
+    private val _customOrderActive = MutableStateFlow(false)
+    val customOrderActive: StateFlow<Boolean> = _customOrderActive.asStateFlow()
     private var failedBinding: Pair<CapabilityRoute, String>? = null
 
     init {
@@ -51,6 +53,7 @@ class HomeSortController(
                 Snapshot(apps, context, available, locale)
             }.collectLatest { snapshot ->
                 val source = snapshot.catalog.apps
+                _customOrderActive.value = false
                 _orderedApps.value = alphabetical(source, snapshot.localeTag)
 
                 val binding = snapshot.activeContext
@@ -102,6 +105,7 @@ class HomeSortController(
                     else {
                         failedBinding = null
                         _orderedApps.value = original
+                        _customOrderActive.value = true
                     }
                 }
             }

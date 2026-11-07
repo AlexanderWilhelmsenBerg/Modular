@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "moduleId": "modular.addon.sort.mostused",
-  "moduleVersion": "0.1.0",
+  "moduleVersion": "0.2.0",
   "displayName": "Most Used",
-  "description": "Orders apps by this profile's recent foreground time when Android Usage Access is enabled.",
+  "description": "Shows saved pins and recent foreground-time suggestions in a starred Home section.",
   "coreProtocol": { "min": 4, "max": 4 },
-  "providedCapabilities": ["modular.apps.sort/v1"],
+  "providedCapabilities": ["modular.apps.sort/v1", "modular.apps.featured/v1"],
   "requestedCoreCapabilities": [],
   "instanceConfiguration": {
     "schemaVersion": 1,
@@ -17,6 +17,14 @@
         "default": 7,
         "min": 1,
         "max": 30
+      },
+      {
+        "key": "suggestedCount",
+        "title": "Suggested apps",
+        "type": "integer",
+        "default": 8,
+        "min": 0,
+        "max": 20
       }
     ]
   },

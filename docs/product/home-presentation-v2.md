@@ -1,12 +1,12 @@
 <!-- Hallmark · reference study and specification · P4 H4 E4 S5 R4 V3 · native Android; rendering validation pending -->
 # Home presentation v2
 
-Status: **Specified; not implemented.** Product request: 2026-11-07.
+Status: **Implementation in progress; acceptance pending.** Product request: 2026-11-07.
 
-This is the next target after the implemented Core baseline at
+This target follows the Core baseline at
 `3e5559f552d9218c23b67b3b45e73d1f3113839d`. It supersedes the earlier text-only,
-add-on-only icons/alphabet-index requirements. It does not mark the new features
-as delivered. See the [implementation plan](../implementation/home-presentation-v2-plan.md)
+add-on-only icons/alphabet-index requirements. Source implementation is present,
+but the acceptance matrix below is not yet complete. See the [implementation plan](../implementation/home-presentation-v2-plan.md)
 and [boundary decision](../decisions/ADR-0005-indexed-home-and-featured-addons.md).
 
 ## 1. Reference and design intent
@@ -244,3 +244,6 @@ Implementation is complete only after the acceptance evidence is recorded for it
 specific revision. Existing baseline tests and earlier user acceptance do not
 automatically cover these new requirements. Samsung/system gesture and wallpaper
 behavior need physical-device checks; automated coverage should precede that pass.
+
+Current source paths and pending evidence for V2-A1 through V2-A10 are tracked in
+the [v2 implementation matrix](../implementation/core-completion.md#home-presentation-v2-implementation-and-acceptance).

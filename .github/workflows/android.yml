@@ -168,6 +168,8 @@ jobs:
             adb install -r addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
             gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; exit 1; }
 
+            python3 scripts/capture-home-v2.py
+
             adb install -r reference-sort-alphabetical/build/outputs/apk/release/reference-sort-alphabetical-release.apk
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell pm path io.github.alexanderwilhelmsenberg.modular

@@ -314,7 +314,7 @@ contract proposal, not an implemented external theme loader.
 
 See [Module settings](../implementation/module-settings.md) for UI and acceptance evidence.
 
-## 19. Reference-led Home presentation and featured apps (specified, not implemented)
+## 19. Reference-led Home presentation and featured apps (source implementation; acceptance pending)
 
 The 2026-11-07 product request supersedes the text-only/add-on-only icons and
 alphabet-index rules. The normative detail is in [Home presentation v2](home-presentation-v2.md),

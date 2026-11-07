@@ -15,7 +15,7 @@ class ModuleSettingsController(
         val state = stateStore.state.value
         val active = state.activeContext()
         val activeInstance = active?.bindings
-            ?.sortedByDescending { it.capability == StandardCapabilities.AppsSort }
+            ?.sortedByDescending { it.capability == StandardCapabilities.AppsFeatured || it.capability == StandardCapabilities.AppsSort }
             ?.firstNotNullOfOrNull { binding ->
                 state.instances.firstOrNull {
                     it.id == binding.instanceId && it.providerId == providerId
@@ -30,10 +30,46 @@ class ModuleSettingsController(
 
     fun isUsedForAppOrder(providerId: String): Boolean {
         val state = stateStore.state.value
-        val sortInstanceId = state.activeContext()?.bindings
-            ?.firstOrNull { it.capability == StandardCapabilities.AppsSort }
-            ?.instanceId
-        return state.instances.any { it.id == sortInstanceId && it.providerId == providerId }
+        val selectedIds = state.activeContext()?.bindings.orEmpty()
+            .filter { it.capability == StandardCapabilities.AppsSort || it.capability == StandardCapabilities.AppsFeatured }
+            .map { it.instanceId }.toSet()
+        return state.instances.any { it.id in selectedIds && it.providerId == providerId }
+    }
+
+    /** Upgrade a selected legacy provider, retaining its instance and any advanced context. */
+    suspend fun migrateActiveLegacySortToFeatured(): Result<Boolean> = runCatching {
+        val initial = stateStore.state.value
+        val initialContext = initial.activeContext() ?: return@runCatching false
+        if (initialContext.bindings.none { it.capability == StandardCapabilities.AppsSort } ||
+            initialContext.bindings.any { it.capability == StandardCapabilities.AppsFeatured }) return@runCatching false
+        var migrated = false
+        stateStore.update { state ->
+            val context = state.activeContext() ?: return@update state
+            if (context.bindings.any { it.capability == StandardCapabilities.AppsFeatured }) return@update state
+            val old = context.bindings.firstOrNull { it.capability == StandardCapabilities.AppsSort }
+                ?: return@update state
+            val instance = state.instances.firstOrNull { it.id == old.instanceId } ?: return@update state
+            val featuredRoutes = routes.value.filter {
+                it.providerKind == CapabilityProviderKind.MODULE &&
+                    it.providerId == instance.providerId && it.capability == StandardCapabilities.AppsFeatured
+            }
+            if (featuredRoutes.size != 1) return@update state
+            val nextContext = context.copy(bindings = context.bindings.map {
+                if (it == old) ContextCapabilityBinding(StandardCapabilities.AppsFeatured, old.instanceId) else it
+            }.sortedBy { it.capability.wireValue })
+            val home = if (context.id == HOME_CONTEXT_ID) nextContext else LauncherContext(
+                HOME_CONTEXT_ID, HOME_CONTEXT_NAME, nextContext.bindings,
+            )
+            val existingHome = state.contexts.firstOrNull { it.id == HOME_CONTEXT_ID }
+            if (existingHome != null && existingHome.name != HOME_CONTEXT_NAME) return@update state
+            if (!ProviderSelectionResolver.resolve(home, state.instances, routes.value).isReady) return@update state
+            migrated = true
+            state.copy(
+                contexts = (state.contexts.filterNot { it.id == HOME_CONTEXT_ID } + home).sortedBy { it.id },
+                activeContextId = HOME_CONTEXT_ID,
+            )
+        }
+        migrated
     }
 
     suspend fun save(
@@ -76,18 +112,21 @@ class ModuleSettingsController(
                 state.instances.filterNot { it.id == id } + instance
             ).sortedBy { it.id }
             val currentContext = state.activeContext()
-            val currentSortInstance = currentContext?.bindings
-                ?.firstOrNull { it.capability == StandardCapabilities.AppsSort }
-                ?.let { binding -> state.instances.firstOrNull { it.id == binding.instanceId } }
-            val wasSelected = currentSortInstance?.providerId == normalizedProviderId
+            val selectedInstanceIds = currentContext?.bindings.orEmpty()
+                .filter { it.capability == StandardCapabilities.AppsSort || it.capability == StandardCapabilities.AppsFeatured }
+                .map { it.instanceId }.toSet()
+            val wasSelected = state.instances.any { it.id in selectedInstanceIds && it.providerId == normalizedProviderId }
 
             if (!useForAppOrder && !wasSelected) {
                 state.copy(instances = nextInstances)
             } else {
-                if (useForAppOrder) {
-                    require(providerRoutes.count { it.capability == StandardCapabilities.AppsSort } == 1) {
-                        "Module provider does not have a unique apps.sort route"
-                    }
+                val selectedCapability = when {
+                    providerRoutes.count { it.capability == StandardCapabilities.AppsFeatured } == 1 -> StandardCapabilities.AppsFeatured
+                    providerRoutes.count { it.capability == StandardCapabilities.AppsSort } == 1 -> StandardCapabilities.AppsSort
+                    else -> null
+                }
+                if (useForAppOrder) require(selectedCapability != null) {
+                    "Module provider does not have a unique Home apps route"
                 }
 
                 // Copy the active context so a user's advanced context is never edited in place.
@@ -98,9 +137,9 @@ class ModuleSettingsController(
                 }
                 val sourceBindings = currentContext?.bindings.orEmpty()
                 val bindings = sourceBindings.filterNot {
-                    it.capability == StandardCapabilities.AppsSort
+                    it.capability == StandardCapabilities.AppsSort || it.capability == StandardCapabilities.AppsFeatured
                 } + if (useForAppOrder) {
-                    listOf(ContextCapabilityBinding(StandardCapabilities.AppsSort, id))
+                    listOf(ContextCapabilityBinding(requireNotNull(selectedCapability), id))
                 } else {
                     emptyList()
                 }

@@ -173,6 +173,76 @@ class ModuleSettingsControllerTest {
         assertEquals("{\"days\":14}", controller.configurationFor(PROVIDER_A))
     }
 
+    @Test
+    fun dualCapabilityProviderUsesFeaturedAndLeavesOtherBindingsIntact() = runBlocking {
+        val store = FakeStore()
+        val other = CapabilityId("modular.other.capability", 1)
+        val otherInstance = ModuleInstance("other", "Other", PROVIDER_B)
+        store.state.value = CompositionState(
+            instances = listOf(otherInstance),
+            contexts = listOf(LauncherContext("advanced", "Advanced", listOf(
+                ContextCapabilityBinding(other, otherInstance.id),
+            ))),
+            activeContextId = "advanced",
+        )
+        val controller = ModuleSettingsController(store, MutableStateFlow(listOf(
+            featuredRoute(PROVIDER_A).copy(capability = StandardCapabilities.AppsSort),
+            featuredRoute(PROVIDER_A), route(PROVIDER_B).copy(capability = other),
+        )))
+
+        controller.save(PROVIDER_A, "Most Used", "{\"days\":12}", true).getOrThrow()
+
+        val active = store.state.value.activeContext()!!
+        assertEquals(1, active.bindings.count { it.capability == StandardCapabilities.AppsFeatured })
+        assertEquals(0, active.bindings.count { it.capability == StandardCapabilities.AppsSort })
+        assertTrue(active.bindings.any { it.capability == other })
+        assertEquals("Advanced", store.state.value.contexts.first { it.id == "advanced" }.name)
+        assertTrue(controller.isUsedForAppOrder(PROVIDER_A))
+    }
+
+    @Test
+    fun migrationKeepsSelectedInstanceAndAdvancedContext() = runBlocking {
+        val store = FakeStore()
+        val selected = ModuleInstance("custom-instance", "Custom", PROVIDER_A, "{\"days\":21}")
+        val otherCapability = CapabilityId("modular.other.capability", 1)
+        val otherInstance = ModuleInstance("other-instance", "Other", PROVIDER_B)
+        val original = LauncherContext("custom-context", "Custom", listOf(
+            ContextCapabilityBinding(StandardCapabilities.AppsSort, selected.id),
+            ContextCapabilityBinding(otherCapability, otherInstance.id),
+        ))
+        store.state.value = CompositionState(listOf(selected, otherInstance), listOf(original), original.id)
+        val routes = MutableStateFlow(listOf(
+            featuredRoute(PROVIDER_A).copy(capability = StandardCapabilities.AppsSort),
+            featuredRoute(PROVIDER_A),
+            route(PROVIDER_B).copy(capability = otherCapability),
+        ))
+        val controller = ModuleSettingsController(store, routes)
+
+        assertTrue(controller.migrateActiveLegacySortToFeatured().getOrThrow())
+        assertEquals(selected, store.state.value.instances.first { it.id == selected.id })
+        assertEquals(original, store.state.value.contexts.first { it.id == original.id })
+        assertEquals("module-settings:home:v1", store.state.value.activeContextId)
+        assertTrue(store.state.value.activeContext()!!.bindings.contains(
+            ContextCapabilityBinding(StandardCapabilities.AppsFeatured, selected.id)))
+        assertTrue(store.state.value.activeContext()!!.bindings.contains(
+            ContextCapabilityBinding(otherCapability, otherInstance.id)))
+        assertFalse(controller.migrateActiveLegacySortToFeatured().getOrThrow())
+    }
+
+    @Test
+    fun migrationWaitsForCompatibleFeaturedRoute() = runBlocking {
+        val store = FakeStore()
+        val selected = ModuleInstance("custom-instance", "Custom", PROVIDER_A, "{\"days\":21}")
+        val original = LauncherContext("custom-context", "Custom", listOf(
+            ContextCapabilityBinding(StandardCapabilities.AppsSort, selected.id),
+        ))
+        store.state.value = CompositionState(listOf(selected), listOf(original), original.id)
+        val controller = ModuleSettingsController(store, MutableStateFlow(listOf(route(PROVIDER_A))))
+
+        assertFalse(controller.migrateActiveLegacySortToFeatured().getOrThrow())
+        assertEquals(original, store.state.value.activeContext())
+    }
+
     private fun controller(store: FakeStore) = ModuleSettingsController(
         store, MutableStateFlow(listOf(route(PROVIDER_A), route(PROVIDER_B))),
     )
@@ -186,6 +256,20 @@ class ModuleSettingsControllerTest {
              "displayName":"Sort","description":"Sorting provider",
              "coreProtocol":{"min":1,"max":4},
              "providedCapabilities":["modular.apps.sort/v1"],
+             "requestedCoreCapabilities":[],
+             "instanceConfiguration":{"schemaVersion":1,"fields":[
+               {"key":"days","title":"Days","type":"integer","default":7,"min":1,"max":365}
+             ]}}
+        """.trimIndent()),
+    )
+
+    private fun featuredRoute(providerId: String): CapabilityRoute = route(providerId).copy(
+        capability = StandardCapabilities.AppsFeatured,
+        descriptor = ModuleDescriptorCodec.parse("""
+            {"schemaVersion":1,"moduleId":"$providerId","moduleVersion":"1",
+             "displayName":"Featured","description":"Featured provider",
+             "coreProtocol":{"min":1,"max":4},
+             "providedCapabilities":["modular.apps.sort/v1","modular.apps.featured/v1"],
              "requestedCoreCapabilities":[],
              "instanceConfiguration":{"schemaVersion":1,"fields":[
                {"key":"days","title":"Days","type":"integer","default":7,"min":1,"max":365}

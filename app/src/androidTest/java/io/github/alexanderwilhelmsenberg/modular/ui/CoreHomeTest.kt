@@ -29,6 +29,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import java.util.Locale
 
 class CoreHomeTest {
     @get:Rule
@@ -301,6 +302,57 @@ class CoreHomeTest {
                 SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription),
             useUnmergedTree = true,
         ).assertCountEquals(0)
+    }
+
+    @Test
+    fun sectionHeadersAndRailUseSameLocaleBuckets() {
+        val builder = HomeSectionBuilder(Locale.forLanguageTag("nb-NO"))
+        val apps = listOf(app("a.pkg", "Åpen"), app("o.pkg", "Økonomi"), app("ae.pkg", "Ærlig"), app("num.pkg", "123"))
+        val sections = builder.sections(apps)
+        assertEquals(listOf("#", "Æ", "Ø", "Å"), sections.map { it.label })
+        assertTrue(builder.alphabet.containsAll(listOf("#", "Æ", "Ø", "Å")))
+    }
+
+    @Test
+    fun bottomControlsStayBelowSectionedRowsAndSearchHidesRail() {
+        composeRule.setContent {
+            HomeScreen(
+                catalog = AppCatalog(apps = listOf(app("alpha.pkg", "Alpha"), app("beta.pkg", "Beta"))),
+                onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+            )
+        }
+        composeRule.onNodeWithTag("section:A").assertIsDisplayed()
+        composeRule.onNodeWithTag("section:B").assertIsDisplayed()
+        composeRule.onNodeWithTag("alphabet-rail").assertIsDisplayed()
+        val searchTop = composeRule.onNodeWithTag("home-search").fetchSemanticsNode().boundsInRoot.top
+        val betaBottom = composeRule.onNodeWithText("Beta").fetchSemanticsNode().boundsInRoot.bottom
+        assertTrue("Search is fixed beneath the list", searchTop > betaBottom)
+        composeRule.onNodeWithTag("home-search-field").performTextInput("bet")
+        composeRule.onNodeWithTag("alphabet-rail").assertDoesNotExist()
+        composeRule.onNodeWithText("Beta").assertIsDisplayed()
+    }
+
+    @Test
+    fun emptyFeaturedSectionOffersPinAndPermissionActions() {
+        var openedPins = 0
+        var openedPermission = 0
+        composeRule.setContent {
+            HomeScreen(
+                catalog = AppCatalog(apps = listOf(app("alpha.pkg", "Alpha"))),
+                onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                featuredApps = emptyList(),
+                featuredNeedsPermission = true,
+                onOpenFeaturedSettings = { openedPins++ },
+                onOpenFeaturedManagement = { openedPermission++ },
+            )
+        }
+        composeRule.onNodeWithTag("section:★").assertIsDisplayed()
+        composeRule.onNodeWithTag("featured-settings").performClick()
+        composeRule.onNodeWithTag("featured-permission").performClick()
+        composeRule.runOnIdle {
+            assertEquals(1, openedPins)
+            assertEquals(1, openedPermission)
+        }
     }
 
     private fun app(

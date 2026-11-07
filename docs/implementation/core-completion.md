@@ -45,6 +45,30 @@ diagnostic event without preventing app launching or Settings.
 
 ## Validation status
 
+### Home presentation v2 implementation and acceptance
+
+The v2 source changes are present in this workspace. They have not yet passed
+revision-specific CI, emulator, cross-APK, visual, or physical-device acceptance.
+The earlier Core baseline evidence above does not establish any v2 result.
+
+| Gate | Source and proposed test evidence | Status |
+| --- | --- | --- |
+| V2-A1 | `app/.../ui/HomeSectionBuilder.kt`, `HomeAppList.kt`, `HomeBottomControls.kt`, `apps/AppIconRepository.kt`; Core-only emulator install and catalog completeness check | Source present; CI/emulator pending. |
+| V2-A2 | `app/.../ui/AlphabetRail.kt`, `HomeScreen.kt`; rest and active rail captures at 320/375/414/768 dp and large font | Source present; screenshots and reference comparison pending. |
+| V2-A3 | `app/.../appearance/AppearanceSettingsStore.kt`, `HomeAppearanceControls.kt`, `WallpaperHomeScrim.kt`; `HomeAppearanceSettingsTest`, `HomeAppearanceControlsTest`, `HomeAppearancePersistenceTest` | Source and tests present; CI and bright/busy/dark/live wallpaper device checks pending. |
+| V2-A4 | `app/.../ui/AlphabetRail.kt`, `HomeSectionBuilder.kt`; locale, missing-bucket, drag, cancel, RTL, rotation and reduced-motion scenarios | Source present; CI, emulator and device gesture evidence pending. |
+| V2-A5 | `app/.../ui/HomeReachability.kt`, `HomeScreen.kt`, `HomeAppList.kt`; pull, retained offset, upward restore, HOME/search reset and launch checks | Source present; gesture tests, emulator and physical Samsung checks pending. |
+| V2-A6 | `app/.../ui/HomeBottomControls.kt`, `HomeSearch.kt`, `HomeScreen.kt`; IME/search/last-row checks | Source present; CI and emulator navigation-mode checks pending. |
+| V2-A7 | `module-api/.../IFeaturedAppsCapability.aidl`, `app/.../home/HomeFeaturedController.kt`, `addon-most-used/.../MostUsedSortService.kt`; `FeaturedAppsCrossApkTest`, `MostUsedSorterTest` | Source and tests present; separate-APK positive-usage and pin-order acceptance pending. |
+| V2-A8 | `app/.../ui/FeaturedAppSettingsUi.kt`, `HomeAppList.kt`, `addon-most-used/.../PinState.kt`, `PinStore.kt`; `PinStateTest`, `PinStoreTest` | Source and tests present, including direct Home Usage Access action; UI, denied/revoked, unavailable-profile, corruption and restart checks pending. |
+| V2-A9 | `module-api/.../FeaturedAppsContract.kt`, `module-sdk/.../FeaturedAppsEndpoint.kt`, `app/.../capabilities/FeaturedAppsClient.kt`; `HomeFeaturedControllerTest`, `FeaturedAppsCrossApkTest` | Source and tests present; CI, old/new APK and adversarial runtime checks pending. |
+| V2-A10 | `app/.../apps/AppIconRepository.kt`, `ui/AlphabetRail.kt`, `HomeAppList.kt`; 1,000-app and rapid-scrub profiling | Source present; performance/device evidence pending. |
+
+Paths abbreviated with `...` above identify module and filename; the
+[implementation plan](home-presentation-v2-plan.md#4-current-implementation-map)
+maps the packages. Record exact test commands, revision and results after CI,
+then attach measured screenshots/video and physical Samsung observations.
+
 PR #11 passed build/unit/lint and API 35 emulator CI before merging at
 `bc070fdaee380fa6810e996157bc38b5d5e392ec`.
 

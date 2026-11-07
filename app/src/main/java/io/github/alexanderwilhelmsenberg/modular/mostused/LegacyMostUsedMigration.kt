@@ -5,6 +5,8 @@ import io.github.alexanderwilhelmsenberg.modular.composition.ModuleSettingsContr
 import io.github.alexanderwilhelmsenberg.modular.home.HomeFeaturedState
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
@@ -17,22 +19,26 @@ class LegacyMostUsedMigration(
     private val corePackageName: String,
 ) {
     suspend fun migrate(featured: HomeFeaturedState): Result<Boolean> {
-        return try {
-        if (!isLegacy(featured, corePackageName)) return Result.success(false)
-        val binding = featured.binding
-        val expectedContext = moduleSettings.selectedHomeContextFor(binding)
-            ?: return Result.success(false)
-        val sourceId = "${binding.route.providerId}:${binding.route.component!!.packageName}:${binding.instance.id}"
-        val config = Json.parseToJsonElement(binding.instance.configurationJson) as JsonObject
-        val days = config["days"]?.jsonPrimitive?.int ?: 7
-        val suggestedCount = config["suggestedCount"]?.jsonPrimitive?.int ?: 8
-        saveBeforeDetach(
-            save = { coreSettings.importLegacy(sourceId, featured.pinnedKeys, days, suggestedCount) },
-            detach = { moduleSettings.detachSelectedHomeBinding(binding, expectedContext) },
-        )
-    } catch (failure: Exception) {
-        if (failure is CancellationException) throw failure
-        Result.failure(failure)
+        return migrateSelected(featured)
+    }
+
+    private suspend fun migrateSelected(featured: HomeFeaturedState): Result<Boolean> {
+        try {
+            if (!isLegacy(featured, corePackageName)) return Result.success(false)
+            val binding = featured.binding
+            val expectedContext = moduleSettings.selectedHomeContextFor(binding)
+                ?: return Result.success(false)
+            val sourceId = "${binding.route.providerId}:${binding.route.component!!.packageName}:${binding.instance.id}"
+            val config = Json.parseToJsonElement(binding.instance.configurationJson) as JsonObject
+            val days = config["days"]?.jsonPrimitive?.int ?: 7
+            val suggestedCount = config["suggestedCount"]?.jsonPrimitive?.int ?: 8
+            return saveBeforeDetach(
+                save = { coreSettings.importLegacy(sourceId, featured.pinnedKeys, days, suggestedCount) },
+                detach = { moduleSettings.detachSelectedHomeBinding(binding, expectedContext) },
+            )
+        } catch (failure: Exception) {
+            if (failure is CancellationException) throw failure
+            return Result.failure(failure)
         }
     }
 
@@ -62,5 +68,7 @@ internal suspend fun saveBeforeDetach(
     detach: suspend () -> Result<Boolean>,
 ): Result<Boolean> {
     save().getOrThrow()
-    return detach()
+    // The context change cancels the caller's LaunchedEffect. Complete the exact
+    // selection check and detach once the settings commit has finished.
+    return withContext(NonCancellable) { detach() }
 }

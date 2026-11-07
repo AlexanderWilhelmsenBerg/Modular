@@ -25,9 +25,10 @@ Core package; grants to the old add-on cannot transfer to Core.
 Core stores its own pin and setting state. On upgrade, automatically import a
 currently selected official legacy Most Used instance's validated pins and
 settings over authenticated IPC, once and idempotently. Persist the import
-before detaching the old binding; retry after errors. Turn built-in Most Used on
-for that active legacy selection only when the user has not already changed
-Core's toggle or settings. Preserve existing Core pins and explicit Core choices.
+before detaching the old binding; retry after errors. Import never changes Core's
+toggle: enabling Most Used is an explicit choice in Settings. Preserve existing
+Core pins and each explicitly changed Core setting. Imported settings are available
+even if the user switches contexts during migration; a stale binding is not detached.
 Core does not read another APK's private files, and an uninstalled add-on cannot
 be queried for migration. Exact
 package/activity/profile keys remain distinct; missing pins are non-actionable

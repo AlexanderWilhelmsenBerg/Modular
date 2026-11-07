@@ -135,7 +135,6 @@ class MostUsedSettingsStore internal constructor(private val dataStore: DataStor
             val merged = current.pins + pins.map(SavedAppKey::from).filterNot { it in current.pins }
             require(merged.size <= MAX_PINS) { "Migration would exceed the pin limit" }
             current.copy(
-                enabled = if (current.enabledTouched) current.enabled else true,
                 days = if (current.daysTouched) current.days else days,
                 suggestedCount = if (current.countTouched) current.suggestedCount else suggestedCount,
                 pins = merged,

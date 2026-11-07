@@ -54,6 +54,7 @@ class CoreMostUsedSettingsUiTest {
         rule.onNodeWithText("Usage Access is off. Saved pins still appear on Home; suggestions need Usage Access.")
             .performScrollTo().assertIsDisplayed()
         rule.onNodeWithText("Usage Access blocked?").performScrollTo().performClick()
+        rule.onNodeWithText("first tap Modular's disabled row", substring = true).assertIsDisplayed()
         rule.onNodeWithText("Allow restricted settings", substring = true).assertIsDisplayed()
         assertEquals(0, infoOpens)
         rule.onNodeWithText("Open App info").performClick()
@@ -79,18 +80,18 @@ class CoreMostUsedSettingsUiTest {
         } }
 
         rule.onNodeWithText("Configure Most Used").performClick()
-        rule.onAllNodesWithText("Down")[0].performClick()
+        rule.onAllNodesWithText("Down")[0].performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals(listOf(second.key, first.key), ordered)
-        rule.onAllNodesWithText("Remove")[0].performClick()
+        rule.onAllNodesWithText("Remove")[0].performScrollTo().performClick()
         rule.waitForIdle()
-        rule.onNodeWithText("Could not save pin").assertIsDisplayed()
+        rule.onNodeWithText("Could not save pin").performScrollTo().assertIsDisplayed()
         assertEquals(listOf(second.key, first.key), pins)
 
         rule.onNodeWithText("Pin apps").performScrollTo().performClick()
         rule.onNodeWithTag("core-most-used-picker-search").performScrollTo().performTextInput("Same")
         rule.onNodeWithText("Same · example.same.two/SameActivity · profile 2")
-            .assertIsDisplayed().performClick()
+            .performScrollTo().assertIsDisplayed().performClick()
         rule.waitForIdle()
         assertEquals(sameTwo.key to true, selected)
     }

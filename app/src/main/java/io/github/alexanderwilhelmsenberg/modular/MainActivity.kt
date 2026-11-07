@@ -463,6 +463,7 @@ class MainActivity : ComponentActivity() {
                                     loadError = mostUsedError,
                                     statusMessage = mostUsedState.message,
                                     configureRequest = mostUsedConfigureRequest,
+                                    hasImportedSettings = mostUsedSettings.importedLegacySources.isNotEmpty() && !mostUsedSettings.userConfigured,
                                 )
                                 migrationError?.let { message ->
                                     Text(message, color = androidx.compose.material3.MaterialTheme.colorScheme.error)

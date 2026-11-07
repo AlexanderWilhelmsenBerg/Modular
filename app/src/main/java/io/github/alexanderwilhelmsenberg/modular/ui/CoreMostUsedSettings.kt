@@ -59,6 +59,7 @@ fun CoreMostUsedSettingsUi(
     loadError: String? = null,
     statusMessage: String? = null,
     configureRequest: Int = 0,
+    hasImportedSettings: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
@@ -117,6 +118,10 @@ fun CoreMostUsedSettingsUi(
             OutlinedButton(onClick = { detailsOpen = true }, modifier = Modifier.testTag("core-most-used-configure")) {
                 Text("Configure Most Used")
             }
+            if (!enabled && hasImportedSettings) Text(
+                "Previous Most Used settings are saved. Turn on Most Used to show your pins on Home.",
+                style = MaterialTheme.typography.bodySmall,
+            )
             if (!detailsOpen) {
                 loadError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -135,7 +140,7 @@ fun CoreMostUsedSettingsUi(
     if (restrictedTipOpen) AlertDialog(
         onDismissRequest = { restrictedTipOpen = false },
         title = { Text("If Usage Access is blocked") },
-        text = { Text("Android may block Usage Access for this app. In Modular's App info, open the menu in the top right and tap “Allow restricted settings”. Then return to Usage Access and enable Modular. This option appears only when Android has restricted the app.") },
+        text = { Text("On Samsung, first tap Modular's disabled row in Usage Access and dismiss the “Restricted setting” dialog. Then reopen Modular's App info, open the top-right menu, and tap “Allow restricted settings”. Return to Usage Access and enable Modular. This menu option appears only after Android has restricted the app.") },
         confirmButton = { Button(onClick = { restrictedTipOpen = false; onOpenAppInfo() }) { Text("Open App info") } },
         dismissButton = { TextButton(onClick = { restrictedTipOpen = false }) { Text("Close") } },
     )
@@ -226,7 +231,9 @@ fun CoreMostUsedSettingsUi(
                 OutlinedButton(onClick = onOpenUsageAccess, modifier = Modifier.fillMaxWidth()) {
                     Text("Open Usage Access")
                 }
-                TextButton(onClick = { restrictedTipOpen = true }) { Text("Usage Access blocked?") }
+                TextButton(onClick = { detailsOpen = false; restrictedTipOpen = true }) {
+                    Text("Usage Access blocked?")
+                }
                 TextButton(onClick = { error = null; onRefresh() }) { Text("Refresh") }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }

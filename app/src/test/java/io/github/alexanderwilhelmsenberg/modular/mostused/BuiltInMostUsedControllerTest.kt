@@ -98,6 +98,7 @@ class BuiltInMostUsedControllerTest {
     @Test fun unavailablePinsRemainOrderedAndCannotBeNewlyAdded() = runTest {
         val store = MostUsedSettingsStore(MemoryPreferences())
         store.importLegacy("old-instance", listOf(missing, first), 7, 8)
+        store.setEnabled(true).getOrThrow()
         val repository = FakeRepository(listOf(app(first)))
         val controller = BuiltInMostUsedController(repository, store, FakeUsage(allowed = false), controllerScope(),
             StandardTestDispatcher(testScheduler))
@@ -161,7 +162,7 @@ class BuiltInMostUsedControllerTest {
         assertEquals(listOf(first, second), store.currentSettings().pinnedKeys)
         assertEquals(4, store.currentSettings().days)
         assertEquals(12, store.currentSettings().suggestedCount)
-        assertTrue(store.currentSettings().enabled)
+        assertFalse(store.currentSettings().enabled)
         assertTrue(store.setPinned(second, false, emptySet()).isSuccess)
         assertTrue(store.importLegacy("legacy", listOf(second), 20, 3).isSuccess)
         assertEquals(listOf(first), store.currentSettings().pinnedKeys)

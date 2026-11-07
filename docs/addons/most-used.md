@@ -6,8 +6,9 @@ appear in manual order before usage-ranked suggestions. An app remains in its
 alphabetical section as well. See [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md)
 for the ownership decision and implementation status.
 
-In Core Settings, enable **Most Used**, set **Recent days** (1–30, default 7)
-and **Suggested apps** (0–20, default 8), and manage up to 50 pins. The feature
+In Core Settings, enable **Most Used**, open **Configure Most Used**, set
+**History** (1–30 days, default 7) and **Suggestions** (0–20 apps, default 8),
+and manage up to 50 pins. The feature
 is off by default. Pinning and reordering work without Usage Access. Suggestions
 use locally reported foreground time only after the user explicitly grants
 Android Usage Access to **Modular Core**. If access is denied or revoked, pins
@@ -27,7 +28,9 @@ the star destination while preserving the alphabetical catalog and saved pins.
 The separate `addon-most-used` APK remains in source for compatibility and SDK
 testing. It uses its own package ID and Android Usage Access grant. An already
 selected compatible instance may be imported through validated, authenticated
-IPC into Core's store, once and idempotently. Core cannot read an uninstalled
+IPC into Core's store, once and idempotently. Import preserves Core's toggle;
+enable Most Used in Core Settings to show the imported pins. Keep the old add-on
+installed until the import completes. Core cannot read an uninstalled
 APK or its private files. Installing the reference APK is not required for
 ordinary Most Used use. The Signed APKs workflow builds it only when
 `include_reference_addons` is selected.

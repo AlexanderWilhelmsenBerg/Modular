@@ -60,7 +60,7 @@ class CoreMostUsedScreenshotTest {
             statusMessage = "No usage history yet. Saved pins still appear on Home.",
         )
         rule.onNodeWithText("Configure Most Used").performClick()
-        rule.onNodeWithText("No usage history yet.", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("No usage history yet.", substring = true).performScrollTo().assertIsDisplayed()
         capture("access-on-no-history")
     }
 

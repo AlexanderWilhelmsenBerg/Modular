@@ -253,8 +253,8 @@ must negotiate supported capabilities safely. New Core automatically imports a
 currently selected official legacy Most Used instance's validated settings and
 pins through authenticated IPC, persists before detaching the old binding, and
 retries after errors. This is idempotent; explicit Core choices and existing Core
-pins take precedence. The imported active selection enables built-in Most Used
-only if the user has not already changed Core settings. Core cannot read an
+pins take precedence. Import never changes Core's toggle; the user enables
+Most Used in Settings to use imported pins. Core cannot read an
 uninstalled APK's private files, and the add-on's Usage Access grant cannot
 transfer. Other legacy sort providers remain selectable; non-alphabetical legacy
 ordering uses a flat list with alphabet rail/letter dividers suppressed.

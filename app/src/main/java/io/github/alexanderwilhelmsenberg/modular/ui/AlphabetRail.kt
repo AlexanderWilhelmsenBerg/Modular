@@ -38,6 +38,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -72,90 +73,98 @@ internal fun AlphabetRail(
         lastNavigationLabel = destination
         onSelect(destination)
     }
-    BoxWithConstraints(modifier.width(204.dp).fillMaxHeight(0.72f).absoluteOffset(x = (-8).dp).testTag("alphabet-rail")) {
-        val condensed = maxHeight / alphabet.size < (18f * LocalDensity.current.fontScale).dp
-        val density = LocalDensity.current
-        val heightPx = with(density) { maxHeight.roundToPx() }
-        Box(Modifier.fillMaxHeight().width(48.dp).align(AbsoluteAlignment.CenterRight)) {
-            alphabet.forEachIndexed { index, label ->
-                // Omitted labels keep their slots, so a visible letter's position
-                // agrees with the same fixed hit map used while dragging.
-                val visible = !condensed || index == 0 || index == alphabet.lastIndex || index % 2 == 0 || label == "★" || label == "#"
-                val centerY = (index + 0.5f) / alphabet.size
-                val distance = if (fingerFraction < 0) 9f else abs(centerY - fingerFraction) * alphabet.size
-                val target = if (fingerFraction < 0) 0f else -120f * exp(-0.02f * distance * distance)
-                val shift by animateFloatAsState(targetValue = target, animationSpec = tween(180), label = "rail curve")
-                // Round each boundary independently. Column weights distribute all
-                // remainder pixels at the start, drifting labels away from hit slots.
-                val startPx = (index.toFloat() * heightPx / alphabet.size).roundToInt()
-                val endPx = ((index + 1f) * heightPx / alphabet.size).roundToInt()
-                Box(
-                    Modifier.absoluteOffset { IntOffset(0, startPx) }
-                        .height(with(density) { (endPx - startPx).toDp() }).fillMaxWidth(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (visible) Text(
-                        label,
-                        Modifier.absoluteOffset(x = shift.dp).testTag("rail:$label"),
-                        color = if (label in populated) foreground else foreground.copy(alpha = 0.38f),
-                        fontSize = if (condensed) 12.sp else 18.sp,
-                        fontWeight = if (label == selected) FontWeight.Bold else FontWeight.Normal,
-                        style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default,
-                        maxLines = 1,
-                    )
-                }
-            }
-        }
-        // Placement can run once after pointer release and before recomposition removes
-        // the bubble. Capture the last valid position so it cannot jump to y = 0.
-        val bubbleFraction = fingerFraction
-        if (bubbleFraction >= 0f && selected != null) {
-            Box(
-                Modifier.offset { IntOffset(0, ((bubbleFraction * heightPx) - with(density) { 24.dp.toPx() }).roundToInt().coerceIn(0, (heightPx - with(density) { 48.dp.roundToPx() }).coerceAtLeast(0))) }
-                    .size(48.dp).background(Color(0xFF478FF2), CircleShape).align(AbsoluteAlignment.TopLeft)
-                    .testTag("alphabet-bubble"),
-                contentAlignment = Alignment.Center,
-            ) { Text(selected.orEmpty(), color = Color.White, fontSize = 30.sp, maxLines = 1) }
-        }
-        Box(
-            Modifier.width(48.dp).fillMaxHeight().align(AbsoluteAlignment.CenterRight).testTag("alphabet-hit-lane")
-                .pointerInput(alphabet, populated) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        try {
-                            fun selectedIndex(y: Float) = ((y / size.height.coerceAtLeast(1)) * alphabet.size).toInt().coerceIn(alphabet.indices)
-                            selected = null
-                            fingerFraction = (down.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
-                            chooseIndex(selectedIndex(down.position.y))
-                            down.consume()
-                            while (true) {
-                                val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
-                                if (!change.pressed) break
-                                fingerFraction = (change.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
-                                chooseIndex(selectedIndex(change.position.y))
-                                change.consume()
-                            }
-                        } finally {
-                            fingerFraction = -1f
-                            selected = null
-                        }
+    BoxWithConstraints(modifier.width(204.dp).fillMaxHeight().absoluteOffset(x = (-8).dp)) {
+        // Use the reference's lower rail when it fits. Short viewports get the
+        // full list height so every glyph has as much vertical room as possible.
+        val heightFraction = if (maxHeight * 0.72f / alphabet.size < 14.dp) 1f else 0.72f
+        BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight(heightFraction).align(AbsoluteAlignment.BottomRight).testTag("alphabet-rail")) {
+            val density = LocalDensity.current
+            val heightPx = with(density) { maxHeight.roundToPx() }
+            Box(Modifier.fillMaxHeight().width(48.dp).align(AbsoluteAlignment.CenterRight)) {
+                alphabet.forEachIndexed { index, label ->
+                    val centerY = (index + 0.5f) / alphabet.size
+                    val distance = if (fingerFraction < 0) 9f else abs(centerY - fingerFraction) * alphabet.size
+                    val target = if (fingerFraction < 0) 0f else -120f * exp(-0.02f * distance * distance)
+                    val shift by animateFloatAsState(targetValue = target, animationSpec = tween(180), label = "rail curve")
+                    // Round each boundary independently. Column weights distribute all
+                    // remainder pixels at the start, drifting labels away from hit slots.
+                    val startPx = (index.toFloat() * heightPx / alphabet.size).roundToInt()
+                    val endPx = ((index + 1f) * heightPx / alphabet.size).roundToInt()
+                    val slotPx = (endPx - startPx).coerceAtLeast(1)
+                    val glyphSize = with(density) { minOf(slotPx * 0.85f, 18.sp.toPx()).toSp() }
+                    val lineHeight = with(density) { slotPx.toFloat().toSp() }
+                    Box(
+                        Modifier.absoluteOffset { IntOffset(0, startPx) }
+                            .height(with(density) { (endPx - startPx).toDp() }).fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            Modifier.absoluteOffset(x = shift.dp).testTag("rail:$label"),
+                            color = if (label in populated) foreground else foreground.copy(alpha = 0.38f),
+                            fontWeight = if (label == selected) FontWeight.Bold else FontWeight.Normal,
+                            style = TextStyle(
+                                fontSize = glyphSize,
+                                lineHeight = lineHeight,
+                                platformStyle = PlatformTextStyle(includeFontPadding = false),
+                                shadow = if (wallpaperMode) Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f) else null,
+                            ),
+                            maxLines = 1,
+                        )
                     }
                 }
-                .semantics {
-                    contentDescription = "Alphabet navigation"
-                    customActions = listOf(
-                        CustomAccessibilityAction("Next section") {
-                            val current = lastNavigationLabel?.let { alphabet.indexOf(it) } ?: -1
-                            chooseIndex((current + 1).coerceAtMost(alphabet.lastIndex)); true
-                        },
-                        CustomAccessibilityAction("Previous section") {
-                            val current = lastNavigationLabel?.let { alphabet.indexOf(it) } ?: alphabet.lastIndex + 1
-                            chooseIndex(current - 1); true
-                        },
-                        CustomAccessibilityAction("Choose section") { chooser = true; true },
-                    )
-                },
-        )
+            }
+            // Placement can run once after pointer release and before recomposition removes
+            // the bubble. Capture the last valid position so it cannot jump to y = 0.
+            val bubbleFraction = fingerFraction
+            if (bubbleFraction >= 0f && selected != null) {
+                Box(
+                    Modifier.offset { IntOffset(0, ((bubbleFraction * heightPx) - with(density) { 24.dp.toPx() }).roundToInt().coerceIn(0, (heightPx - with(density) { 48.dp.roundToPx() }).coerceAtLeast(0))) }
+                        .size(48.dp).background(Color(0xFF478FF2), CircleShape).align(AbsoluteAlignment.TopLeft)
+                        .testTag("alphabet-bubble"),
+                    contentAlignment = Alignment.Center,
+                ) { Text(selected.orEmpty(), color = Color.White, fontSize = 30.sp, maxLines = 1) }
+            }
+            Box(
+                Modifier.width(48.dp).fillMaxHeight().align(AbsoluteAlignment.CenterRight).testTag("alphabet-hit-lane")
+                    .pointerInput(alphabet, populated) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            try {
+                                fun selectedIndex(y: Float) = ((y / size.height.coerceAtLeast(1)) * alphabet.size).toInt().coerceIn(alphabet.indices)
+                                selected = null
+                                fingerFraction = (down.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
+                                chooseIndex(selectedIndex(down.position.y))
+                                down.consume()
+                                while (true) {
+                                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+                                    fingerFraction = (change.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
+                                    chooseIndex(selectedIndex(change.position.y))
+                                    change.consume()
+                                }
+                            } finally {
+                                fingerFraction = -1f
+                                selected = null
+                            }
+                        }
+                    }
+                    .semantics {
+                        contentDescription = "Alphabet navigation"
+                        customActions = listOf(
+                            CustomAccessibilityAction("Next section") {
+                                val current = lastNavigationLabel?.let { alphabet.indexOf(it) } ?: -1
+                                chooseIndex((current + 1).coerceAtMost(alphabet.lastIndex)); true
+                            },
+                            CustomAccessibilityAction("Previous section") {
+                                val current = lastNavigationLabel?.let { alphabet.indexOf(it) } ?: alphabet.lastIndex + 1
+                                chooseIndex(current - 1); true
+                            },
+                            CustomAccessibilityAction("Choose section") { chooser = true; true },
+                        )
+                    },
+            )
+        }
     }
     if (chooser) AlertDialog(
         onDismissRequest = { chooser = false },

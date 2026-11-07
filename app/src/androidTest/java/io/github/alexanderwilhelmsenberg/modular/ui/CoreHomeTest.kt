@@ -411,13 +411,16 @@ class CoreHomeTest {
             moveTo(Offset(width / 2f, height * 0.5f), 120L)
         }
         composeRule.onNodeWithTag("alphabet-bubble").assertIsDisplayed()
+        val bubbleBounds = composeRule.onNodeWithTag("alphabet-bubble").fetchSemanticsNode().boundsInRoot
+        val laneBounds = lane.fetchSemanticsNode().boundsInRoot
+        assertTrue("Selected-letter bubble stays left of the touch lane", bubbleBounds.right < laneBounds.left)
         lane.performTouchInput { cancel() }
         composeRule.onNodeWithTag("alphabet-bubble").assertDoesNotExist()
         composeRule.runOnIdle { assertEquals(0, launches) }
     }
 
     @Test
-    fun largeFontRailTapsVisibleLettersDirectlyWithoutOpeningChooser() {
+    fun largeFontRailKeepsEveryLetterVisibleAndTappable() {
         var launches = 0
         val apps = ('A'..'Z').flatMap { letter ->
             (1..3).map { app("fixture.$letter.$it", "$letter app $it") }
@@ -433,6 +436,10 @@ class CoreHomeTest {
                     )
                 }
             }
+        }
+        val locale = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.locales[0]
+        HomeSectionBuilder(locale).alphabet.forEach { letter ->
+            composeRule.onNodeWithTag("rail:$letter").assertIsDisplayed()
         }
         listOf("Z", "B", "Z").forEach { letter ->
             tapVisibleRailLetter(letter)
@@ -454,11 +461,35 @@ class CoreHomeTest {
                 }
             }
         }
-        // All coordinates come from rendered labels, not the implementation's hit formula.
-        listOf("★", "#", "A", "K", "Y", "Æ", "Å", "★").forEach { letter ->
+        // Every glyph is present, including formerly omitted odd slots B and Ø.
+        // Tap each rendered center to exercise the displayed position and hit map.
+        var previousCenter = Float.NEGATIVE_INFINITY
+        alphabet.forEach { letter ->
+            val bounds = composeRule.onNodeWithTag("rail:$letter").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertTrue("Rail labels must retain distinct ordered slots", bounds.center.y > previousCenter)
+            previousCenter = bounds.center.y
             tapVisibleRailLetter(letter)
             composeRule.runOnIdle { assertEquals(letter, selected.last()) }
             composeRule.onNodeWithText("Choose section").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun shortLargeFontRailStillShowsAllLocaleLabels() {
+        val alphabet = listOf("★", "#") + ('A'..'Z').map(Char::toString) + listOf("Æ", "Ø", "Å")
+        val selected = mutableListOf<String>()
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2.2f)) {
+                Box(Modifier.width(320.dp).height(280.dp)) {
+                    AlphabetRail(alphabet, alphabet.toSet(), { selected.add(it) }, false)
+                }
+            }
+        }
+        alphabet.forEach { letter -> composeRule.onNodeWithTag("rail:$letter").assertIsDisplayed() }
+        listOf("★", "#", "B", "D", "Ø", "Å").forEach { letter ->
+            tapVisibleRailLetter(letter)
+            composeRule.runOnIdle { assertEquals(letter, selected.last()) }
         }
     }
 

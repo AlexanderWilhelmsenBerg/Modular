@@ -94,3 +94,48 @@ removes its local data. No uninstall is performed automatically.
 This setup is for APK distribution. If Play App Signing is introduced later,
 distinguish Google's app-signing certificate from the upload key and review
 same-signer module trust before mixing distribution channels.
+
+## Installation warnings and restricted settings
+
+For normal use choose matching signed **release** APKs for Core and add-ons;
+debug builds are intended for development. Neither variant guarantees acceptance
+by Play Protect or exemption from Android's restricted settings. Keep existing
+keys and package identities: rotating them is not a fix for a classification.
+
+A **Harmful app blocked** warning is different from an unknown-app scan prompt.
+Review the affected APK and dependencies, then request a classification review
+through [Google's Play Protect appeal form](https://support.google.com/googleplay/android-developer/contact/protectappeals)
+if the warning appears incorrect. Do not disable Play Protect as a fix.
+The form currently asks for the affected package and the SHA-256 of the APK
+uploaded to VirusTotal. Sharing/submitting the APK is a separate owner action.
+Use the APK file hash, not its signing certificate fingerprint or the ZIP hash:
+
+```powershell
+Get-FileHash -Algorithm SHA256 '.\addon-most-used-debug.apk'
+```
+
+Debug package names:
+
+- Core: `io.github.alexanderwilhelmsenberg.modular.debug`
+- Most Used: `io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug`
+
+Suggested review description (use only for the matching reviewed build):
+
+> Modular is an open-source Android launcher. Core requests REQUEST_DELETE_PACKAGES
+> for user-confirmed uninstall actions. The separate Most Used add-on requests
+> PACKAGE_USAGE_STATS to rank apps locally, following explicit user permission.
+> Neither APK declares Internet, SMS, accessibility-service, or notification-listener
+> access. Please review the submitted APK's harmful-app classification. The warning
+> was observed on Android 17 / One UI 9. Source: https://github.com/AlexanderWilhelmsenBerg/Modular
+
+The published APKs from signed run `42395463536` were inspected: signatures match
+the pinned certificates, the release APKs are not debuggable, and their declared
+permissions match the descriptions above (Core also has AndroidX's internal
+signature-protected receiver permission). This verifies identity and manifest
+contents, not Google's private detection rules or a complete malware assessment.
+
+For the separate grey Usage Access switch and missing App info menu, follow the
+[Most Used setup guide](addons/most-used.md). Usage Access is special access, so
+Android's ordinary Permissions page can correctly say no permissions are required.
+
+Reference: [Google's developer guidance for Play Protect warnings](https://developers.google.com/android/play-protect/warning-dev-guidance).

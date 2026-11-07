@@ -2,6 +2,8 @@
 <resources>
     <item name="usage_access_status" type="id" />
     <item name="usage_access_button" type="id" />
+    <item name="app_info_button" type="id" />
+    <item name="restricted_settings_guidance" type="id" />
     <item name="core_settings_button" type="id" />
     <item name="settings_feedback" type="id" />
 </resources>

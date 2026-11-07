@@ -56,16 +56,19 @@ class ModuleRegistry(
     private val appContext = context.applicationContext
     private val packageManager = appContext.packageManager
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // Connections and deadlines are owned by this registry monitor; callbacks skip after close.
     private val connections = mutableMapOf<ComponentName, ServiceConnection>()
     private val sessions = ConcurrentHashMap<ComponentName, SessionBinding>()
     private val attempts = ConcurrentHashMap<ComponentName, HandshakeAttempt>()
     private val deadlines = mutableMapOf<ComponentName, Job>()
     @Volatile private var connectionDemand: Set<ComponentName>? = null
+    @Volatile private var closed = false
 
     private val _modules = MutableStateFlow<List<ModuleRecord>>(emptyList())
     val modules: StateFlow<List<ModuleRecord>> = _modules.asStateFlow()
 
-    fun refresh() {
+    @Synchronized fun refresh() {
+        if (closed) return
         val services = try {
             queryModuleServices()
         } catch (exception: Exception) {
@@ -170,14 +173,16 @@ class ModuleRegistry(
     }
 
     /** null keeps all enabled modules eligible; an empty set releases every module connection. */
-    fun setConnectionDemand(components: Set<ComponentName>?) {
+    @Synchronized fun setConnectionDemand(components: Set<ComponentName>?) {
+        if (closed) return
         val normalized = components?.toSet()
         if (connectionDemand == normalized) return
         connectionDemand = normalized
         refresh()
     }
 
-    fun setEnabled(component: ComponentName, enabled: Boolean) {
+    @Synchronized fun setEnabled(component: ComponentName, enabled: Boolean) {
+        if (closed) return
         managementStore.setEnabled(component, enabled)
         if (!enabled) {
             unbind(component)
@@ -194,7 +199,8 @@ class ModuleRegistry(
         if (demanded && component !in connections) bind(component)
     }
 
-    fun retry(component: ComponentName) {
+    @Synchronized fun retry(component: ComponentName) {
+        if (closed) return
         val module = modules.value.firstOrNull { it.component == component } ?: return
         if (!module.enabled || !managementStore.isEnabled(component)) return
         unbind(component)
@@ -210,6 +216,7 @@ class ModuleRegistry(
         configurationJson: String = "{}",
         expectedSessionId: String? = null,
     ): Result<IBinder> {
+        if (closed) return Result.failure(IllegalStateException("Module registry is closed"))
         val module = modules.value.firstOrNull {
             it.component == component &&
                 it.status == ModuleConnectionStatus.CONNECTED
@@ -258,7 +265,7 @@ class ModuleRegistry(
 
         return withContext(Dispatchers.IO) {
             runCatching {
-                check(sessions[component] === session) { "Module session changed" }
+                check(!closed && sessions[component] === session) { "Module session changed" }
                 val binder = if (v4) {
                     session.remote.getInstanceCapabilityBinder(
                         session.sessionId,
@@ -272,7 +279,7 @@ class ModuleRegistry(
                 requireNotNull(binder) {
                     "Module returned no Binder for " + capability.wireValue
                 }
-                check(sessions[component] === session &&
+                check(!closed && sessions[component] === session &&
                     modules.value.any { it.component == component && it.sessionId == session.sessionId &&
                         it.status == ModuleConnectionStatus.CONNECTED }) { "Module session changed" }
                 binder
@@ -315,52 +322,60 @@ class ModuleRegistry(
         lateinit var connection: ServiceConnection
         connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName, service: IBinder) {
-                if (connections[name] !== this || !isEligible(name)) {
-                    managementStore.record(name.flattenToShortString(), "bind", "Ignored stale service connection", isError = true)
-                    return
+                synchronized(this@ModuleRegistry) {
+                    if (closed) return@synchronized
+                    if (connections[name] !== this || !isEligible(name)) {
+                        managementStore.record(name.flattenToShortString(), "bind", "Ignored stale service connection", isError = true)
+                        return@synchronized
+                    }
+                    val remote = IModularModuleService.Stub.asInterface(service)
+                    startHandshake(name, remote, connection)
                 }
-                val remote = IModularModuleService.Stub.asInterface(service)
-
-                startHandshake(name, remote, connection)
             }
 
             override fun onServiceDisconnected(name: ComponentName) {
-                if (connections[name] !== connection || !isEligible(name)) return
-                dropDeadSession(name)
-                update(name) {
-                    it.copy(
-                        status = ModuleConnectionStatus.DISCONNECTED,
-                        sessionId = null,
-                    )
+                synchronized(this@ModuleRegistry) {
+                    if (closed || connections[name] !== connection || !isEligible(name)) return@synchronized
+                    dropDeadSession(name)
+                    update(name) {
+                        it.copy(
+                            status = ModuleConnectionStatus.DISCONNECTED,
+                            sessionId = null,
+                        )
+                    }
+                    managementStore.record(name.flattenToShortString(), "disconnect", "Module disconnected", isError = true)
                 }
-                managementStore.record(name.flattenToShortString(), "disconnect", "Module disconnected", isError = true)
             }
 
             override fun onBindingDied(name: ComponentName) {
-                if (connections[name] !== connection) return
-                dropDeadSession(name)
-                update(name) {
-                    it.copy(
-                        status = ModuleConnectionStatus.FAILED,
-                        sessionId = null,
-                        error = "Module binding died",
-                    )
+                synchronized(this@ModuleRegistry) {
+                    if (closed || connections[name] !== connection) return@synchronized
+                    dropDeadSession(name)
+                    update(name) {
+                        it.copy(
+                            status = ModuleConnectionStatus.FAILED,
+                            sessionId = null,
+                            error = "Module binding died",
+                        )
+                    }
+                    managementStore.record(name.flattenToShortString(), "disconnect", "Module binding died", isError = true)
+                    unbind(name, closeSession = false)
                 }
-                managementStore.record(name.flattenToShortString(), "disconnect", "Module binding died", isError = true)
-                unbind(name, closeSession = false)
             }
 
             override fun onNullBinding(name: ComponentName) {
-                if (connections[name] !== connection) return
-                update(name) {
-                    it.copy(
-                        status = ModuleConnectionStatus.FAILED,
-                        sessionId = null,
-                        error = "Module returned a null binding",
-                    )
+                synchronized(this@ModuleRegistry) {
+                    if (closed || connections[name] !== connection) return@synchronized
+                    update(name) {
+                        it.copy(
+                            status = ModuleConnectionStatus.FAILED,
+                            sessionId = null,
+                            error = "Module returned a null binding",
+                        )
+                    }
+                    managementStore.record(name.flattenToShortString(), "bind", "Module returned a null binding", isError = true)
+                    unbind(name, closeSession = false)
                 }
-                managementStore.record(name.flattenToShortString(), "bind", "Module returned a null binding", isError = true)
-                unbind(name, closeSession = false)
             }
         }
 
@@ -404,22 +419,24 @@ class ModuleRegistry(
         deadlines.remove(component)?.cancel()
         deadlines[component] = scope.launch {
             delay(handshakeTimeoutMillis)
-            if (connections[component] !== connection) return@launch
-            cancelAttempt(component)
-            update(component) {
-                it.copy(
-                    status = ModuleConnectionStatus.FAILED,
-                    sessionId = null,
-                    error = "Module connection timed out",
+            synchronized(this@ModuleRegistry) {
+                if (closed || connections[component] !== connection) return@synchronized
+                cancelAttempt(component)
+                update(component) {
+                    it.copy(
+                        status = ModuleConnectionStatus.FAILED,
+                        sessionId = null,
+                        error = "Module connection timed out",
+                    )
+                }
+                managementStore.record(
+                    component.flattenToShortString(),
+                    "handshake",
+                    "Timed out waiting for module connection or handshake",
+                    isError = true,
                 )
+                unbind(component)
             }
-            managementStore.record(
-                component.flattenToShortString(),
-                "handshake",
-                "Timed out waiting for module connection or handshake",
-                isError = true,
-            )
-            unbind(component)
         }
     }
 
@@ -454,53 +471,56 @@ class ModuleRegistry(
                 }
 
                 scope.launch {
-                    if (connections[component] !== connection || attempt.cancelled) {
+                    synchronized(this@ModuleRegistry) {
+                        if (closed) return@synchronized
+                        if (connections[component] !== connection || attempt.cancelled) {
+                            attempts.remove(component, attempt)
+                            return@launch
+                        }
                         attempts.remove(component, attempt)
-                        return@launch
-                    }
-                    attempts.remove(component, attempt)
-                    deadlines.remove(component)?.cancel()
-                    result.fold(
-                        onSuccess = { handshake ->
-                            if (handshake.record.status == ModuleConnectionStatus.CONNECTED &&
-                                handshake.sessionId != null && handshake.coreHostSession != null
-                            ) {
-                                val sessionEstablished = establishSessionDeathTracking(
-                                    component = component,
-                                    remote = remote,
-                                    sessionId = handshake.sessionId,
-                                    coreHostSession = handshake.coreHostSession,
-                                )
-                                if (!sessionEstablished) {
-                                    unbind(component)
-                                    return@fold
+                        deadlines.remove(component)?.cancel()
+                        result.fold(
+                            onSuccess = { handshake ->
+                                if (handshake.record.status == ModuleConnectionStatus.CONNECTED &&
+                                    handshake.sessionId != null && handshake.coreHostSession != null
+                                ) {
+                                    val sessionEstablished = establishSessionDeathTracking(
+                                        component = component,
+                                        remote = remote,
+                                        sessionId = handshake.sessionId,
+                                        coreHostSession = handshake.coreHostSession,
+                                    )
+                                    if (!sessionEstablished) {
+                                        unbind(component)
+                                        return@fold
+                                    }
                                 }
-                            }
-                            replace(component, handshake.record.copy(enabled = true))
-                            handshake.record.moduleId?.let { managementStore.rememberProviderId(component, it) }
-                            if (handshake.record.status == ModuleConnectionStatus.INCOMPATIBLE) {
-                                val error = handshake.record.error ?: "Unsupported module protocol"
-                                managementStore.record(component.flattenToShortString(), "handshake", error, isError = true)
+                                replace(component, handshake.record.copy(enabled = true))
+                                handshake.record.moduleId?.let { managementStore.rememberProviderId(component, it) }
+                                if (handshake.record.status == ModuleConnectionStatus.INCOMPATIBLE) {
+                                    val error = handshake.record.error ?: "Unsupported module protocol"
+                                    managementStore.record(component.flattenToShortString(), "handshake", error, isError = true)
+                                    unbind(component)
+                                } else {
+                                    managementStore.record(component.flattenToShortString(), "handshake", "Module handshake completed")
+                                }
+                            },
+                            onFailure = { throwable ->
+                                if (throwable is CancellationException) return@fold
+                                val cause = generateSequence(throwable) { it.cause }
+                                    .firstOrNull { it is SecurityException } ?: throwable
+                                val detail = when (cause) {
+                                    is SecurityException -> "SecurityException: ${cause.message ?: "access denied"}"
+                                    else -> "${cause::class.java.simpleName}: ${cause.message ?: "handshake failed"}"
+                                }.take(MAX_ERROR_LENGTH)
+                                update(component) {
+                                    it.copy(status = ModuleConnectionStatus.FAILED, sessionId = null, error = detail)
+                                }
+                                managementStore.record(component.flattenToShortString(), "handshake", detail, isError = true)
                                 unbind(component)
-                            } else {
-                                managementStore.record(component.flattenToShortString(), "handshake", "Module handshake completed")
-                            }
-                        },
-                        onFailure = { throwable ->
-                            if (throwable is CancellationException) return@fold
-                            val cause = generateSequence(throwable) { it.cause }
-                                .firstOrNull { it is SecurityException } ?: throwable
-                            val detail = when (cause) {
-                                is SecurityException -> "SecurityException: ${cause.message ?: "access denied"}"
-                                else -> "${cause::class.java.simpleName}: ${cause.message ?: "handshake failed"}"
-                            }.take(MAX_ERROR_LENGTH)
-                            update(component) {
-                                it.copy(status = ModuleConnectionStatus.FAILED, sessionId = null, error = detail)
-                            }
-                            managementStore.record(component.flattenToShortString(), "handshake", detail, isError = true)
-                            unbind(component)
-                        },
-                    )
+                            },
+                        )
+                    }
                 }
             }
         } catch (exception: RejectedExecutionException) {
@@ -702,16 +722,19 @@ class ModuleRegistry(
         val binder = remote.asBinder()
         val deathRecipient = IBinder.DeathRecipient {
             scope.launch {
-                if (!isEligible(component) || sessions[component]?.sessionId != sessionId) return@launch
-                dropDeadSession(component)
-                update(component) {
-                    it.copy(
-                        status = ModuleConnectionStatus.DISCONNECTED,
-                        sessionId = null,
-                        error = "Module process died",
-                    )
+                synchronized(this@ModuleRegistry) {
+                    if (closed) return@synchronized
+                    if (!isEligible(component) || sessions[component]?.sessionId != sessionId) return@launch
+                    dropDeadSession(component)
+                    update(component) {
+                        it.copy(
+                            status = ModuleConnectionStatus.DISCONNECTED,
+                            sessionId = null,
+                            error = "Module process died",
+                        )
+                    }
+                    managementStore.record(component.flattenToShortString(), "disconnect", "Module process died", isError = true)
                 }
-                managementStore.record(component.flattenToShortString(), "disconnect", "Module process died", isError = true)
             }
         }
 
@@ -793,7 +816,7 @@ class ModuleRegistry(
     }
 
     private fun isEligible(component: ComponentName): Boolean =
-        managementStore.isEnabled(component) &&
+        !closed && managementStore.isEnabled(component) &&
             (connectionDemand?.contains(component) ?: true)
 
     private fun unbind(
@@ -817,7 +840,9 @@ class ModuleRegistry(
         }
     }
 
-    override fun close() {
+    @Synchronized override fun close() {
+        if (closed) return
+        closed = true
         connections.keys.toList().forEach(::unbind)
         attempts.keys.toList().forEach(::cancelAttempt)
         deadlines.values.toList().forEach(Job::cancel)

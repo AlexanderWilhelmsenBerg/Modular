@@ -7,13 +7,13 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -76,7 +76,7 @@ internal fun AlphabetRail(
         val condensed = maxHeight / alphabet.size < (18f * LocalDensity.current.fontScale).dp
         val density = LocalDensity.current
         val heightPx = with(density) { maxHeight.roundToPx() }
-        Column(Modifier.fillMaxHeight().width(48.dp).align(AbsoluteAlignment.CenterRight)) {
+        Box(Modifier.fillMaxHeight().width(48.dp).align(AbsoluteAlignment.CenterRight)) {
             alphabet.forEachIndexed { index, label ->
                 // Omitted labels keep their slots, so a visible letter's position
                 // agrees with the same fixed hit map used while dragging.
@@ -85,7 +85,15 @@ internal fun AlphabetRail(
                 val distance = if (fingerFraction < 0) 9f else abs(centerY - fingerFraction) * alphabet.size
                 val target = if (fingerFraction < 0) 0f else -120f * exp(-0.02f * distance * distance)
                 val shift by animateFloatAsState(targetValue = target, animationSpec = tween(180), label = "rail curve")
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                // Round each boundary independently. Column weights distribute all
+                // remainder pixels at the start, drifting labels away from hit slots.
+                val startPx = (index.toFloat() * heightPx / alphabet.size).roundToInt()
+                val endPx = ((index + 1f) * heightPx / alphabet.size).roundToInt()
+                Box(
+                    Modifier.absoluteOffset { IntOffset(0, startPx) }
+                        .height(with(density) { (endPx - startPx).toDp() }).fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
                     if (visible) Text(
                         label,
                         Modifier.absoluteOffset(x = shift.dp).testTag("rail:$label"),

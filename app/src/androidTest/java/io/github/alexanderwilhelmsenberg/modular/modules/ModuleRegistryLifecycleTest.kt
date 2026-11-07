@@ -39,6 +39,7 @@ import org.junit.runner.RunWith
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class ModuleRegistryLifecycleTest {
@@ -49,6 +50,46 @@ class ModuleRegistryLifecycleTest {
         baseContext = ApplicationProvider.getApplicationContext()
         baseContext.getSharedPreferences("module_management", Context.MODE_PRIVATE)
             .edit().clear().commit()
+    }
+
+    @Test
+    fun closeSerializesWithRefreshAndRejectsLateCallbacks() {
+        val bindings = CopyOnWriteArrayList<ServiceConnection>()
+        val registry = newRegistry(RegistryContext(baseContext), 30_000L, bindings)
+        registry.refresh()
+        assertEquals(1, bindings.size)
+        val originalConnection = bindings.single()
+        val start = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>(null)
+        val refresher = Thread {
+            try {
+                start.await()
+                repeat(100) { registry.refresh() }
+            } catch (error: Throwable) { failure.compareAndSet(null, error) }
+        }
+        val closer = Thread {
+            try {
+                start.await()
+                registry.close()
+            } catch (error: Throwable) { failure.compareAndSet(null, error) }
+        }
+        refresher.start()
+        closer.start()
+        start.countDown()
+        refresher.join(5_000)
+        closer.join(5_000)
+        assertTrue(!refresher.isAlive && !closer.isAlive)
+        assertTrue(failure.get()?.toString() ?: "No concurrent failure", failure.get() == null)
+
+        val countAfterClose = bindings.size
+        val recordsAfterClose = registry.modules.value
+        registry.refresh()
+        originalConnection.onServiceDisconnected(COMPONENT)
+        originalConnection.onNullBinding(COMPONENT)
+        originalConnection.onServiceConnected(COMPONENT, Binder())
+        assertEquals(countAfterClose, bindings.size)
+        assertEquals(recordsAfterClose, registry.modules.value)
+        registry.close()
     }
 
     @Test

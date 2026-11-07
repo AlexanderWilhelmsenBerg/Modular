@@ -89,3 +89,11 @@ Automation, Python, MCP, and terminal capabilities follow later. See the [roadma
 
 Product clarification (2026-11-04): default Home rows contain only app-name text. Icons and profile labels require an explicitly enabled presentation add-on. Core retains profile identity internally for correct launching.
 
+
+## Most Used add-on
+
+[Most Used](docs/addons/most-used.md) optionally puts apps with the most recorded
+foreground time at the top of Home. It has its own APK and Android Usage Access
+permission screen. Choose a time window per instance; Core keeps its alphabetical
+fallback when the add-on is disabled or access is unavailable. Signed debug and
+release downloads are available as separate artifacts in the Signed APKs workflow.

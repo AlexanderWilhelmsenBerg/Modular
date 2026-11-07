@@ -122,13 +122,13 @@ are retained. Wallpaper stays off until chosen.
 - On release/cancel, settle the rail to its straight rest state and remove the
   bubble. The selected section stays in view. No app may launch from the rail
   pointer sequence. Optional light haptics follow the platform preference.
-- Anchor the rail above the bottom controls and below status/cutout areas. Fit
-  locale alphabets and larger fonts using adaptive spacing. When all labels cannot
-  fit legibly, use a condensed visual rail while preserving each letter's position
-  in the full alphabet hit map. A tap jumps directly to that letter (or its next
-  populated bucket); it must never open the section chooser. Dragging can reach
-  omitted letters. The chooser remains an explicit accessibility action;
-  every populated section must remain reachable. Rail labels are one composite
+- Anchor the rail above the bottom controls and below status/cutout areas. Keep
+  every locale label visible, including `★`, `#`, and locale-specific letters.
+  Size each glyph and line height to its actual slot; use more of the list height
+  on short viewports. Preserve each letter's position in the full alphabet hit
+  map. A tap jumps directly to that letter (or its next populated bucket); it
+  must never open the section chooser. The chooser remains an explicit
+  accessibility action. Rail labels are one composite
   drag control, not a claim that every tiny glyph has a separate 48 dp target.
 - Provide discrete next/previous section actions and a section chooser for users
   who cannot drag. Respect disabled/reduced system animations with direct jumps

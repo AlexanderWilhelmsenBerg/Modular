@@ -1,5 +1,8 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
+import android.view.WindowManager
+import androidx.activity.ComponentActivity
+import androidx.core.view.WindowCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
@@ -14,9 +17,10 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -31,13 +35,24 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppProfile
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import java.util.Locale
 
 class CoreHomeTest {
     @get:Rule
-    val composeRule = createComposeRule()
+    val composeRule = createAndroidComposeRule<ComponentActivity>()
+
+    @Before
+    fun matchHomeWindowInsets() {
+        composeRule.activityRule.scenario.onActivity { activity ->
+            // Match MainActivity: the keyboard resizes the available viewport;
+            // automatic window panning must not move the first result off-screen.
+            WindowCompat.setDecorFitsSystemWindows(activity.window, false)
+            activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+    }
 
     @Test
     fun appsAreSortedAlphabeticallyAndEnabledRowsLaunchTheSelectedApp() {
@@ -335,9 +350,11 @@ class CoreHomeTest {
 
     @Test
     fun bottomControlsStayBelowSectionedRowsAndSearchHidesRail() {
+        val listState = LazyListState()
         composeRule.setContent {
             HomeScreen(
                 catalog = AppCatalog(apps = listOf(app("alpha.pkg", "Alpha"), app("beta.pkg", "Beta"))),
+                listState = listState,
                 onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
             )
         }
@@ -349,12 +366,40 @@ class CoreHomeTest {
         assertTrue("Search is fixed beneath the list", searchTop > betaBottom)
         composeRule.onNodeWithTag("home-search-field").performTextInput("bet")
         composeRule.onNodeWithTag("alphabet-rail").assertDoesNotExist()
-        // IME inset animation can resize the list after text input has returned.
-        // Keep the visibility requirement, allowing that bounded layout transition.
-        composeRule.waitUntil(5_000) {
-            runCatching { composeRule.onNodeWithText("Beta").assertIsDisplayed(); true }.getOrDefault(false)
+        try {
+            composeRule.onNodeWithText("Beta").assertIsDisplayed()
+        } catch (failure: AssertionError) {
+            val visible = listState.layoutInfo.visibleItemsInfo.joinToString { "${it.index}:${it.key}@${it.offset}+${it.size}" }
+            val betaBounds = runCatching { composeRule.onNodeWithText("Beta").fetchSemanticsNode().boundsInRoot }.getOrNull()
+            val listBounds = composeRule.onNodeWithTag("home-list").fetchSemanticsNode().boundsInRoot
+            val rootBounds = composeRule.onRoot().fetchSemanticsNode().boundsInRoot
+            throw AssertionError("Beta hidden after search: first=${listState.firstVisibleItemIndex}/${listState.firstVisibleItemScrollOffset}, visible=[$visible], beta=$betaBounds, list=$listBounds, root=$rootBounds").apply { initCause(failure) }
         }
-        composeRule.onNodeWithText("Beta").assertIsDisplayed()
+    }
+
+    @Test
+    fun searchFromRetainedLateKeyShowsFirstResultAndRestoresAnchor() {
+        val listState = LazyListState()
+        val apps = listOf("Alpha", "Beta", "Zeta").flatMap { label ->
+            (1..40).map { app("${label.lowercase()}$it.pkg", "$label ${it.toString().padStart(2, '0')}") }
+        }
+        composeRule.setContent {
+            HomeScreen(
+                catalog = AppCatalog(apps = apps), listState = listState,
+                onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                showMakeDefault = false,
+            )
+        }
+        composeRule.onNodeWithTag("home-search-field").performClick()
+        composeRule.runOnIdle { listState.requestScrollToItem(70) }
+        composeRule.waitForIdle()
+        val oldIndex = listState.firstVisibleItemIndex
+        assertTrue(oldIndex > 1)
+        composeRule.onNodeWithTag("home-search-field").performTextInput("beta")
+        composeRule.onNodeWithText("Beta 01").assertIsDisplayed()
+        composeRule.runOnIdle { assertTrue("Filtered result must start at the list top", listState.firstVisibleItemIndex <= 1) }
+        composeRule.onNodeWithTag("home-search-clear").performClick()
+        composeRule.runOnIdle { assertEquals(oldIndex, listState.firstVisibleItemIndex) }
     }
 
     @Test
@@ -411,13 +456,16 @@ class CoreHomeTest {
             moveTo(Offset(width / 2f, height * 0.5f), 120L)
         }
         composeRule.onNodeWithTag("alphabet-bubble").assertIsDisplayed()
+        val bubbleBounds = composeRule.onNodeWithTag("alphabet-bubble").fetchSemanticsNode().boundsInRoot
+        val laneBounds = lane.fetchSemanticsNode().boundsInRoot
+        assertTrue("Selected-letter bubble stays left of the touch lane", bubbleBounds.right < laneBounds.left)
         lane.performTouchInput { cancel() }
         composeRule.onNodeWithTag("alphabet-bubble").assertDoesNotExist()
         composeRule.runOnIdle { assertEquals(0, launches) }
     }
 
     @Test
-    fun largeFontRailTapsVisibleLettersDirectlyWithoutOpeningChooser() {
+    fun largeFontRailKeepsEveryLetterVisibleAndTappable() {
         var launches = 0
         val apps = ('A'..'Z').flatMap { letter ->
             (1..3).map { app("fixture.$letter.$it", "$letter app $it") }
@@ -433,6 +481,10 @@ class CoreHomeTest {
                     )
                 }
             }
+        }
+        val locale = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.locales[0]
+        HomeSectionBuilder(locale).alphabet.forEach { letter ->
+            composeRule.onNodeWithTag("rail:$letter").assertIsDisplayed()
         }
         listOf("Z", "B", "Z").forEach { letter ->
             tapVisibleRailLetter(letter)
@@ -454,11 +506,35 @@ class CoreHomeTest {
                 }
             }
         }
-        // All coordinates come from rendered labels, not the implementation's hit formula.
-        listOf("★", "#", "A", "K", "Y", "Æ", "Å", "★").forEach { letter ->
+        // Every glyph is present, including formerly omitted odd slots B and Ø.
+        // Tap each rendered center to exercise the displayed position and hit map.
+        var previousCenter = Float.NEGATIVE_INFINITY
+        alphabet.forEach { letter ->
+            val bounds = composeRule.onNodeWithTag("rail:$letter").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertTrue("Rail labels must retain distinct ordered slots", bounds.center.y > previousCenter)
+            previousCenter = bounds.center.y
             tapVisibleRailLetter(letter)
             composeRule.runOnIdle { assertEquals(letter, selected.last()) }
             composeRule.onNodeWithText("Choose section").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun shortLargeFontRailStillShowsAllLocaleLabels() {
+        val alphabet = listOf("★", "#") + ('A'..'Z').map(Char::toString) + listOf("Æ", "Ø", "Å")
+        val selected = mutableListOf<String>()
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2.2f)) {
+                Box(Modifier.width(320.dp).height(280.dp)) {
+                    AlphabetRail(alphabet, alphabet.toSet(), { selected.add(it) }, false)
+                }
+            }
+        }
+        alphabet.forEach { letter -> composeRule.onNodeWithTag("rail:$letter").assertIsDisplayed() }
+        listOf("★", "#", "B", "D", "Ø", "Å").forEach { letter ->
+            tapVisibleRailLetter(letter)
+            composeRule.runOnIdle { assertEquals(letter, selected.last()) }
         }
     }
 

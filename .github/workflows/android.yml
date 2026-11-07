@@ -172,6 +172,7 @@ jobs:
 
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            python3 scripts/check-search-transitions.py
             adb shell cmd package set-home-activity io.github.alexanderwilhelmsenberg.modular.debug/io.github.alexanderwilhelmsenberg.modular.MainActivity
             adb shell am force-stop com.google.android.apps.nexuslauncher
             python3 scripts/capture-home-v2.py
@@ -194,6 +195,7 @@ jobs:
             app/build/reports/androidTests/
             addon-most-used/build/reports/androidTests/
             reference-sort-alphabetical/build/reports/androidTests/
+            build/reports/search-transitions.log
 
       - name: Upload settings screen captures
         if: always()

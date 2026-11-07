@@ -139,11 +139,14 @@ fun HomeScreen(
             savedJumpHeaderLabel = jumpHeaderLabel
             savedNavigationSpacePx = navigationSpacePx
         }
+        if (value.isNotBlank()) listState.requestScrollToItem(0)
         if (searchQuery == null) localQuery = value else onSearchQueryChange?.invoke(value)
     }
     LaunchedEffect(query) {
-        if (query != previousQuery) {
-            if (previousQuery.isBlank() && query.isNotBlank()) {
+        val oldQuery = previousQuery
+        if (query != oldQuery) {
+            previousQuery = query
+            if (oldQuery.isBlank() && query.isNotBlank()) {
                 if (savedAnchorIndex < 0) {
                     savedAnchorIndex = listState.firstVisibleItemIndex
                     savedAnchorOffset = listState.firstVisibleItemScrollOffset
@@ -154,21 +157,20 @@ fun HomeScreen(
                 reachability.reset()
                 navigationSpacePx = 0
                 jumpHeaderLabel = null
-                listState.scrollToItem(0)
-            } else if (previousQuery.isNotBlank() && query.isBlank()) {
+                listState.requestScrollToItem(0)
+            } else if (oldQuery.isNotBlank() && query.isBlank()) {
                 jumpHeaderLabel = savedJumpHeaderLabel?.takeIf { label -> entries.any { it is HomeListEntry.Header && it.label == label } }
                 navigationSpacePx = if (jumpHeaderLabel != null) savedNavigationSpacePx else 0
                 androidx.compose.runtime.withFrameNanos { }
                 val currentIndex = entries.indexOfFirst { it.id == savedAnchorId }
-                if (currentIndex >= 0) listState.scrollToItem(currentIndex + 1, savedAnchorOffset)
-                else if (savedAnchorIndex >= 0) listState.scrollToItem(savedAnchorIndex.coerceAtMost(entries.lastIndex + 1), savedAnchorOffset)
-                else listState.scrollToItem(0)
+                if (currentIndex >= 0) listState.requestScrollToItem(currentIndex + 1, savedAnchorOffset)
+                else if (savedAnchorIndex >= 0) listState.requestScrollToItem(savedAnchorIndex.coerceAtMost(entries.lastIndex + 1), savedAnchorOffset)
+                else listState.requestScrollToItem(0)
                 savedAnchorIndex = -1
                 savedAnchorId = null
                 savedJumpHeaderLabel = null
                 savedNavigationSpacePx = 0
-            } else if (query.isNotBlank()) listState.scrollToItem(0)
-            previousQuery = query
+            } else if (query.isNotBlank()) listState.requestScrollToItem(0)
         }
     }
     LaunchedEffect(homeResetToken) {

@@ -2,6 +2,7 @@ package io.github.alexanderwilhelmsenberg.modular.appearance
 
 import android.app.Activity
 import android.app.WallpaperManager
+import android.graphics.PixelFormat
 import android.graphics.drawable.ColorDrawable
 import android.view.WindowManager
 import android.graphics.Color as AndroidColor
@@ -107,6 +108,9 @@ fun applyHomeWindowAppearance(
 
     applySystemBarAppearance(activity, theme)
     if (useWallpaper) {
+        // Transparent drawing requires an alpha-capable window surface. Otherwise
+        // HWUI may preserve opaque-buffer pixels from scrolling or from Settings.
+        window.setFormat(PixelFormat.TRANSLUCENT)
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
         window.setBackgroundDrawable(ColorDrawable(AndroidColor.TRANSPARENT))
         window.decorView.setBackgroundColor(AndroidColor.TRANSPARENT)
@@ -116,6 +120,7 @@ fun applyHomeWindowAppearance(
         }
     } else {
         window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+        window.setFormat(PixelFormat.OPAQUE)
         val color = when (theme) {
             AppearanceTheme.LIGHT -> AndroidColor.rgb(250, 250, 252)
             AppearanceTheme.DARK -> AndroidColor.rgb(17, 19, 24)

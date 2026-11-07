@@ -11,6 +11,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.test.assertIsDisplayed
@@ -123,12 +125,16 @@ class HomeV2ScreenshotTest {
         val icon = fixtureIcon()
         composeRule.setContent {
             Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFFFFF5B8), Color(0xFF14406F), Color(0xFFFFA58C))))) {
+                // System wallpaper is a separate compositor surface. Isolate this
+                // fixture's Home layer so its frame clear preserves that backdrop.
+                Box(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
                 ModularTheme(AppearanceTheme.DARK) {
                     HomeScreen(
                         AppCatalog(apps = apps), {}, {}, {}, {}, showMakeDefault = false,
                         wallpaperMode = true, wallpaperDimmingPercent = 0,
                         featuredApps = emptyList(), onOpenFeaturedSettings = {}, iconForApp = { icon },
                     )
+                }
                 }
             }
         }

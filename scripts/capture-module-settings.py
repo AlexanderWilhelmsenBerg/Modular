@@ -27,7 +27,7 @@ def capture(name, start_args, expected):
             for node in root.iter("node")
         )
         if name.startswith("most-used"):
-            later = next((node for node in root.iter("node") if node.get("text") == "Not now"
+            later = next((node for node in root.iter("node") if node.get("text", "").casefold() == "not now"
                           and node.get("resource-id") == "android:id/button2"), None)
             if later is not None:
                 # Review the genuine first-open prompt before choosing its explicit

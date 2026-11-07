@@ -23,6 +23,7 @@ import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceTheme
 import io.github.alexanderwilhelmsenberg.modular.appearance.ModularTheme
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
+import io.github.alexanderwilhelmsenberg.modular.mostused.MostUsedSource
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
@@ -46,22 +47,30 @@ class CoreMostUsedScreenshotTest {
         capture("disabled-card")
     }
 
-    @Test fun enabledWithoutAccessWithPins() {
+    @Test fun enabledLocalWithPins() {
         fixture(enabled = true, hasUsageAccess = false, pins = listOf(apps[0].key, apps[1].key))
         rule.onNodeWithText("Configure Most Used").performClick()
         rule.onNodeWithText("Calendar").performScrollTo().assertIsDisplayed()
-        capture("enabled-pins-access-off")
+        capture("enabled-local-pins")
     }
 
-    @Test fun grantedAccessWithoutHistory() {
+    @Test fun androidAccessWithoutHistory() {
         fixture(
             enabled = true,
             hasUsageAccess = true,
+            source = MostUsedSource.ANDROID,
             statusMessage = "No usage history yet. Saved pins still appear on Home.",
         )
         rule.onNodeWithText("Configure Most Used").performClick()
         rule.onNodeWithText("No usage history yet.", substring = true).performScrollTo().assertIsDisplayed()
-        capture("access-on-no-history")
+        capture("android-access-on-no-history")
+    }
+
+    @Test fun androidAccessUnavailableFallsBackToLocal() {
+        fixture(enabled = true, hasUsageAccess = false, source = MostUsedSource.ANDROID, usingLocalFallback = true)
+        rule.onNodeWithText("Configure Most Used").performClick()
+        rule.onNodeWithText("Android history is unavailable.", substring = true).performScrollTo().assertIsDisplayed()
+        capture("android-local-fallback")
     }
 
     private fun fixture(
@@ -69,6 +78,8 @@ class CoreMostUsedScreenshotTest {
         hasUsageAccess: Boolean,
         pins: List<AppKey> = emptyList(),
         statusMessage: String? = null,
+        source: MostUsedSource = MostUsedSource.LOCAL,
+        usingLocalFallback: Boolean = false,
     ) {
         rule.setContent {
             NativeTheme {
@@ -90,6 +101,8 @@ class CoreMostUsedScreenshotTest {
                         onOpenAppInfo = {},
                         onRefresh = {},
                         statusMessage = statusMessage,
+                        source = source,
+                        usingLocalFallback = usingLocalFallback,
                     )
                 }
             }

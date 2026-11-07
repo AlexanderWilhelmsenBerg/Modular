@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="file" path="datastore/core_most_used_local_history.preferences_pb" />
+</full-backup-content>

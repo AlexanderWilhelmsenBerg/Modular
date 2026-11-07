@@ -17,7 +17,7 @@ Installing the Core APK provides:
 - secondary Settings with add-on controls, retained failure history, and Android-confirmed uninstall;
 - accessibility and automatic app-list updates.
 
-Home opens immediately. No extra APK, network, account, or context setup is required. Pins work without Usage Access; usage suggestions require an explicit Android grant to Core. Add-ons extend the finished Core with alternative sorting/presentation, automation, scripts, and integrations. Built-in Home remains available when an add-on fails.
+Home opens immediately. No extra APK, network, account, or context setup is required. Pins and local launch suggestions work without Usage Access. Android foreground time is an optional suggestion source that requires an explicit grant to Core. Add-ons extend the finished Core with alternative sorting/presentation, automation, scripts, and integrations. Built-in Home remains available when an add-on fails.
 
 A single module implementation may have multiple configured **instances**. For example, one App Drawer module can have a **Work** instance and a **Personal** instance with different filters, sort providers, layouts, and rules.
 
@@ -71,6 +71,7 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 - [Home presentation specification](docs/product/home-presentation-v2.md)
 - [Home presentation implementation plan](docs/implementation/home-presentation-v2-plan.md)
 - [Core Most Used ownership and feature order ADR](docs/decisions/ADR-0006-core-most-used-and-feature-order.md)
+- [Local Most Used learning ADR](docs/decisions/ADR-0007-local-most-used-learning.md)
 - [Indexed Home and generic featured add-on contract ADR](docs/decisions/ADR-0005-indexed-home-and-featured-addons.md)
 - [System architecture](docs/architecture/system-architecture.md)
 - [Module model and contract](docs/architecture/module-model.md)
@@ -110,11 +111,14 @@ acceptance remains pending. See the
 ## Built-in Most Used
 
 [Most Used](docs/addons/most-used.md) optionally adds a starred Home section in Core.
-Saved pins come first in manual order and work without Usage Access; suggestions
-follow by recorded foreground time when access is granted to Core. The built-in
-toggle is off by default. Core keeps the full alphabetical catalog when the
-feature is disabled. The Signed APKs workflow distributes Core debug and release
-by default; reference add-on APKs are an optional SDK-testing output.
+Saved pins come first in manual order. With Most Used enabled, suggestions learn
+from successful app launches through Home, search, and the star section by default;
+no Usage Access is needed. Users can instead select Android foreground time and
+grant Core Usage Access. If that access is unavailable, local launch suggestions
+remain available. The built-in toggle is off by default. Core keeps the full
+alphabetical catalog when the feature is disabled. The Signed APKs workflow
+distributes Core debug and release by default; reference add-on APKs are an
+optional SDK-testing output.
 
 Basic categories will be specified after the Core Most Used implementation.
 

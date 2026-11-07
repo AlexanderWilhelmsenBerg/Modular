@@ -2,7 +2,9 @@
 
 Status: **Delivered Core baseline plus specified Home v2 requirements (2026-11-07)**
 
-Most Used ownership follows [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md).
+Most Used ownership follows [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md),
+with local learning as the default under
+[ADR-0007](../decisions/ADR-0007-local-most-used-learning.md).
 Earlier add-on-owned language in the Home v2 history is superseded. Basic
 categories will be specified after Core Most Used is implemented.
 
@@ -301,7 +303,8 @@ contract proposal, not an implemented external theme loader.
 The Most Used add-on statements in this section record the earlier reference
 implementation. Current built-in Most Used setup is in
 [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md); its
-Usage Access grant targets Core.
+optional Android Usage Access grant targets Core. Local launch learning is the
+default source under [ADR-0007](../decisions/ADR-0007-local-most-used-learning.md).
 
 - Every discovered module has a visible **Settings** action in Core. Show an explicit
   unavailable, connecting, incompatible, or no-settings state instead of an empty screen.
@@ -326,7 +329,8 @@ See [Module settings](../implementation/module-settings.md) for UI and acceptanc
 ## 19. Reference-led Home presentation and featured apps (source implementation; acceptance pending)
 
 The Most Used ownership portion below is superseded by [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md): Core owns the built-in toggle, pins,
-usage suggestions, and optional Usage Access; the generic featured contract remains.
+usage suggestions, and optional Usage Access. [ADR-0007](../decisions/ADR-0007-local-most-used-learning.md)
+sets local launch learning as the default source; the generic featured contract remains.
 
 The 2026-11-07 product request supersedes the text-only/add-on-only icons and
 alphabet-index rules. The normative detail is in [Home presentation v2](home-presentation-v2.md),
@@ -340,7 +344,10 @@ and [ADR-0005](../decisions/ADR-0005-indexed-home-and-featured-addons.md).
   pull-down reachability that brings the first app to mid-screen.
 - Built-in Core Most Used: an optional starred section and star rail destination, ordered pins
   before usage-ranked suggestions, ordinary pin/unpin/reorder controls, and
-  persistent exact-identity pins that also work without Usage Access.
+  persistent exact-identity pins that also work without Usage Access. Local
+  suggestions learn from successful explicit Core launches while enabled;
+  Android foreground-time suggestions are an optional source requiring explicit
+  special access. Confirmed reset clears only learned local usage.
 - Core always retains the complete alphabetical catalog. Featured entries may
   also appear there; search deduplicates. A new bounded featured-app capability
   carries data/actions without changing the existing sort ABI or injecting UI.

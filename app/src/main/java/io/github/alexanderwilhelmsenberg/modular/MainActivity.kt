@@ -49,6 +49,8 @@ import io.github.alexanderwilhelmsenberg.modular.ui.HiddenAppsControls
 import io.github.alexanderwilhelmsenberg.modular.ui.RenameAppDialog
 import io.github.alexanderwilhelmsenberg.modular.ui.CoreMostUsedSettingsUi
 import io.github.alexanderwilhelmsenberg.modular.mostused.MostUsedSettingsStore
+import io.github.alexanderwilhelmsenberg.modular.mostused.LocalMostUsedHistoryStore
+import io.github.alexanderwilhelmsenberg.modular.mostused.MostUsedSource
 import io.github.alexanderwilhelmsenberg.modular.mostused.BuiltInMostUsedController
 import io.github.alexanderwilhelmsenberg.modular.mostused.AndroidMostUsedUsageSource
 import io.github.alexanderwilhelmsenberg.modular.mostused.LegacyMostUsedMigration
@@ -167,6 +169,7 @@ class MainActivity : ComponentActivity() {
             appRepository, mostUsedStore, AndroidMostUsedUsageSource(this),
             CoroutineScope(lifecycleScope.coroutineContext + Dispatchers.Default),
             displayCustomizations = appCustomizationStore.customizations,
+            localHistory = LocalMostUsedHistoryStore(this),
         )
         grantStore =
             DataStoreModuleGrantStateStore(this)
@@ -357,7 +360,7 @@ class MainActivity : ComponentActivity() {
                                 featuredApps = if (mostUsedSettings.enabled) mostUsedState.featuredApps else externalFeatured?.featuredApps,
                                 pinnedAppKeys = if (mostUsedSettings.enabled) mostUsedSettings.pinnedKeys.toSet() else externalFeatured?.pinnedKeys?.toSet().orEmpty(),
                                 featuredNeedsPermission = if (mostUsedSettings.enabled)
-                                    mostUsedSettings.suggestedCount > 0 && mostUsedState.featureState == FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED
+                                    mostUsedSettings.source == MostUsedSource.ANDROID && mostUsedSettings.suggestedCount > 0 && !mostUsedState.hasUsageAccess
                                     else externalFeatured?.featureState == FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED,
                                 featuredMessage = if (mostUsedSettings.enabled) mostUsedState.message else externalFeatured?.message?.takeIf(String::isNotBlank) ?: when (externalFeatured?.featureState) {
                                     FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED ->
@@ -404,7 +407,7 @@ class MainActivity : ComponentActivity() {
                                 showMakeDefault = homeRoleAvailable && !homeRoleHeld,
                                 onLaunch = { app ->
                                     lifecycleScope.launch {
-                                        appRepository.launch(app.key).onFailure {
+                                        builtInMostUsed.launchFromHome(app.key).onFailure {
                                             Toast.makeText(this@MainActivity, "Unable to open ${app.label}", Toast.LENGTH_LONG).show()
                                             appRepository.refresh()
                                         }
@@ -460,10 +463,14 @@ class MainActivity : ComponentActivity() {
                                     } },
                                     onRefresh = builtInMostUsed::refresh,
                                     loading = mostUsedState.loading,
-                                    loadError = mostUsedError,
+                                    loadError = mostUsedError ?: mostUsedState.historyError,
                                     statusMessage = mostUsedState.message,
                                     configureRequest = mostUsedConfigureRequest,
                                     hasImportedSettings = mostUsedSettings.importedLegacySources.isNotEmpty() && !mostUsedSettings.userConfigured,
+                                    source = mostUsedSettings.source,
+                                    onSetSource = mostUsedStore::setSource,
+                                    onResetLearnedUsage = builtInMostUsed::resetLearnedUsage,
+                                    usingLocalFallback = mostUsedState.usingLocalFallback,
                                 )
                                 migrationError?.let { message ->
                                     Text(message, color = androidx.compose.material3.MaterialTheme.colorScheme.error)

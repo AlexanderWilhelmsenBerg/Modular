@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,6 +18,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,12 +30,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
+import io.github.alexanderwilhelmsenberg.modular.mostused.MostUsedSource
 import java.util.Locale
 import kotlinx.coroutines.launch
 
@@ -60,13 +64,18 @@ fun CoreMostUsedSettingsUi(
     statusMessage: String? = null,
     configureRequest: Int = 0,
     hasImportedSettings: Boolean = false,
+    source: MostUsedSource = MostUsedSource.LOCAL,
+    usingLocalFallback: Boolean = false,
+    onSetSource: suspend (MostUsedSource) -> Result<Unit> = { Result.success(Unit) },
+    onResetLearnedUsage: suspend () -> Result<Unit> = { Result.success(Unit) },
 ) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var detailsOpen by remember { mutableStateOf(false) }
-    var permissionTipOpen by remember { mutableStateOf(false) }
     var restrictedTipOpen by remember { mutableStateOf(false) }
+    var resetConfirmOpen by remember { mutableStateOf(false) }
+    var resetNotice by remember { mutableStateOf(false) }
     var pickerOpen by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     val byKey = remember(catalog) { catalog.associateBy { it.key } }
@@ -102,17 +111,20 @@ fun CoreMostUsedSettingsUi(
                     checked = enabled,
                     enabled = !busy,
                     onCheckedChange = { checked ->
-                        save(afterSuccess = {
-                            if (checked && suggestedCount > 0 && !hasUsageAccess) permissionTipOpen = true
-                        }) { onSetEnabled(checked) }
+                        save { onSetEnabled(checked) }
                     },
                     modifier = Modifier.semantics { contentDescription = "Most Used" }
                         .testTag("core-most-used-toggle"),
                 )
             }
             Text(
-                if (hasUsageAccess) "Usage Access is on"
-                else "Usage Access is off · saved pins work without it",
+                when (source) {
+                    MostUsedSource.LOCAL -> "Learns from apps launched through Modular · no permission needed"
+                    MostUsedSource.ANDROID -> when {
+                        usingLocalFallback || !hasUsageAccess -> "Android history unavailable · using Modular launches for suggestions"
+                        else -> "Android usage history is available"
+                    }
+                },
                 style = MaterialTheme.typography.bodySmall,
             )
             OutlinedButton(onClick = { detailsOpen = true }, modifier = Modifier.testTag("core-most-used-configure")) {
@@ -129,18 +141,10 @@ fun CoreMostUsedSettingsUi(
         }
     }
 
-    if (permissionTipOpen) AlertDialog(
-        onDismissRequest = { permissionTipOpen = false },
-        title = { Text("Suggestions need Usage Access") },
-        text = { Text("Most Used is enabled. Your pinned apps work now. To add suggestions based on recent activity, allow Usage Access for Modular in Android Settings. You can do this later.") },
-        confirmButton = { Button(onClick = { permissionTipOpen = false; onOpenUsageAccess() }) { Text("Open Usage Access") } },
-        dismissButton = { TextButton(onClick = { permissionTipOpen = false }) { Text("Later") } },
-    )
-
     if (restrictedTipOpen) AlertDialog(
         onDismissRequest = { restrictedTipOpen = false },
         title = { Text("If Usage Access is blocked") },
-        text = { Text("On Samsung, first tap Modular's disabled row in Usage Access and dismiss the “Restricted setting” dialog. Then reopen Modular's App info, open the top-right menu, and tap “Allow restricted settings”. Return to Usage Access and enable Modular. This menu option appears only after Android has restricted the app.") },
+        text = { Text("On Samsung, first tap Modular's disabled row in Usage Access and dismiss the “Restricted setting” dialog. Then reopen Modular's App info, open the top-right menu, and tap “Allow restricted settings”. Return to Usage Access and enable Modular. This menu option appears only after Android has restricted the app. Android controls this restriction; Modular cannot bypass it.") },
         confirmButton = { Button(onClick = { restrictedTipOpen = false; onOpenAppInfo() }) { Text("Open App info") } },
         dismissButton = { TextButton(onClick = { restrictedTipOpen = false }) { Text("Close") } },
     )
@@ -154,9 +158,40 @@ fun CoreMostUsedSettingsUi(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text("Pinned apps always come first. Suggestions use activity from the past $days days.", style = MaterialTheme.typography.bodyMedium)
+                Text("Suggestion source", style = MaterialTheme.typography.titleMedium)
+                SourceChoice(
+                    label = "Learn from Modular",
+                    description = "Counts apps you launch through Modular while Most Used is enabled. No access needed.",
+                    selected = source == MostUsedSource.LOCAL,
+                    enabled = !busy,
+                    tag = "core-most-used-source-local",
+                ) { save { onSetSource(MostUsedSource.LOCAL) } }
+                SourceChoice(
+                    label = "Android usage history",
+                    description = "Uses foreground time across the whole device. Requires Usage Access.",
+                    selected = source == MostUsedSource.ANDROID,
+                    enabled = !busy,
+                    tag = "core-most-used-source-android",
+                ) { save { onSetSource(MostUsedSource.ANDROID) } }
+                if (source == MostUsedSource.ANDROID) {
+                    Text(
+                        when {
+                            usingLocalFallback || !hasUsageAccess -> "Android history is unavailable. Suggestions use Modular launches until Android history becomes available."
+                            else -> "Usage Access is on for Modular."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(onClick = onOpenUsageAccess, modifier = Modifier.fillMaxWidth()) {
+                        Text("Open Usage Access")
+                    }
+                    TextButton(onClick = { detailsOpen = false; restrictedTipOpen = true }) {
+                        Text("Usage Access blocked?")
+                    }
+                }
                 if (loading) Text("Loading saved settings…")
                 loadError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 statusMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                if (resetNotice) Text("Modular's learned usage was reset.", style = MaterialTheme.typography.bodySmall)
                 NumberSetting("History", "days", days, 1, 30, busy) {
                     save { onSetDays(it) }
                 }
@@ -164,7 +199,7 @@ fun CoreMostUsedSettingsUi(
                     save { onSetSuggestedCount(it) }
                 }
                 Text("Pinned apps", style = MaterialTheme.typography.titleMedium)
-                if (pinnedKeys.isEmpty()) Text("No apps pinned yet. Pins work without Usage Access.")
+                if (pinnedKeys.isEmpty()) Text("No apps pinned yet. Pins appear before suggestions.")
                 pinnedKeys.forEachIndexed { index, key ->
                     val app = byKey[key]
                     val unavailable = key in unavailablePinnedKeys || app == null
@@ -223,23 +258,62 @@ fun CoreMostUsedSettingsUi(
                         if (choices.isEmpty()) item { Text("No matching apps.") }
                     }
                 }
-                Text(
-                    if (hasUsageAccess) "Usage Access is on for Modular."
-                    else "Usage Access is off. Saved pins still appear on Home; suggestions need Usage Access.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                OutlinedButton(onClick = onOpenUsageAccess, modifier = Modifier.fillMaxWidth()) {
-                    Text("Open Usage Access")
-                }
-                TextButton(onClick = { detailsOpen = false; restrictedTipOpen = true }) {
-                    Text("Usage Access blocked?")
+                OutlinedButton(enabled = !busy, onClick = { resetNotice = false; error = null; resetConfirmOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Reset learned usage…")
                 }
                 TextButton(onClick = { error = null; onRefresh() }) { Text("Refresh") }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                if (!resetConfirmOpen) error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },
         confirmButton = { TextButton(enabled = !busy, onClick = { detailsOpen = false }) { Text("Done") } },
     )
+
+    if (resetConfirmOpen) AlertDialog(
+        onDismissRequest = { if (!busy) resetConfirmOpen = false },
+        title = { Text("Reset learned usage?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("This clears only launch history learned by Modular. Your pins, Most Used settings, and Android usage history stay as they are.")
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(enabled = !busy, onClick = {
+                save(afterSuccess = { resetConfirmOpen = false; resetNotice = true }) { onResetLearnedUsage() }
+            }) { Text("Reset learned usage") }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = { resetConfirmOpen = false }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun SourceChoice(
+    label: String,
+    description: String,
+    selected: Boolean,
+    enabled: Boolean,
+    tag: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().selectable(
+            selected = selected,
+            enabled = enabled,
+            role = Role.RadioButton,
+            onClick = onClick,
+        ).testTag(tag),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        RadioButton(
+            selected = selected,
+            onClick = null,
+            enabled = enabled,
+        )
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(description, style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 @Composable

@@ -16,7 +16,7 @@ VIEWPORTS = [
     (768, "yes", "1.0"),
     (375, "no", "1.5"),
 ]
-SCENES = ("disabled-card", "enabled-pins-access-off", "access-on-no-history")
+SCENES = ("disabled-card", "enabled-local-pins", "android-access-on-no-history", "android-local-fallback")
 
 
 def adb(*args, timeout=120):
@@ -30,7 +30,7 @@ try:
         adb("shell", "cmd", "uimode", "night", night)
         adb("shell", "settings", "put", "system", "font_scale", font)
         result = adb("shell", "am", "instrument", "-w", "-e", "class", TEST_CLASS, RUNNER, timeout=300)
-        if "OK (3 tests)" not in result:
+        if "OK (4 tests)" not in result:
             raise RuntimeError(f"Core Most Used screenshots failed at {width}dp, font {font}:\n{result}")
         print(f"Captured Core Most Used at {width}dp, font {font}")
     subprocess.run(

@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
@@ -75,6 +76,10 @@ class CoreMostUsedIntegrationTest {
             store.setSource(MostUsedSource.LOCAL).getOrThrow()
             store.setSuggestedCount(1).getOrThrow()
             store.setEnabled(true).getOrThrow()
+            // Enabling while Home is visible preserves the current LazyColumn anchor.
+            // Wait for the non-lazy rail, then reveal the newly inserted star section.
+            rule.waitUntil(15_000) { rule.onAllNodesWithTag("rail:★").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithTag("home-list").performScrollToIndex(0)
             rule.waitUntil(15_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithTag("featured-permission").assertDoesNotExist()
             rule.onNodeWithTag("home-search-field").performTextInput(fixture.packageName)

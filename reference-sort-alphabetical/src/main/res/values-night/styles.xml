@@ -2,6 +2,7 @@
 <resources>
     <style name="AlphabeticalTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
+        <item name="android:textViewStyle">@style/ModuleSettingsText</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

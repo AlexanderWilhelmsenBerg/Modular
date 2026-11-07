@@ -2,6 +2,10 @@
 <resources>
     <style name="MostUsedTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
+        <item name="android:textViewStyle">@style/ModuleSettingsText</item>
         <item name="android:windowLightStatusBar">true</item>
+    </style>
+    <style name="ModuleSettingsText" parent="android:style/Widget.Material.TextView">
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
     </style>
 </resources>

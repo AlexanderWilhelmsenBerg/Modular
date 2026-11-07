@@ -15,6 +15,7 @@ import android.os.UserManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,7 +33,12 @@ import kotlinx.coroutines.withContext
  * UserHandle objects remain an implementation detail and are resolved only
  * when talking to LauncherApps.
  */
-class AndroidAppRepository(context: Context) : AppRepository {
+class AndroidAppRepository internal constructor(
+    context: Context,
+    private val onCachedCatalogPublished: ((AppCatalog) -> Unit)?,
+) : AppRepository {
+    constructor(context: Context) : this(context, null)
+
     private val appContext = context.applicationContext
     private val launcherApps = requireNotNull(
         appContext.getSystemService(LauncherApps::class.java),
@@ -47,7 +53,12 @@ class AndroidAppRepository(context: Context) : AppRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
+    private val requestLock = Any()
+    private var fullRefreshPending = false
+    private val packagesPending = linkedSetOf<RefreshRequest.Package>()
+    private val cache = AppCatalogCache(appContext)
     private var generation = 0L
+    private var activeLocaleTags = localeTags()
     private var profileReceiverRegistered = false
 
     private val _catalog = MutableStateFlow(AppCatalog(isRefreshing = true))
@@ -55,23 +66,23 @@ class AndroidAppRepository(context: Context) : AppRepository {
 
     private val launcherCallback = object : LauncherApps.Callback() {
         override fun onPackageAdded(packageName: String, user: UserHandle) {
-            refresh()
+            packageChanged(packageName, user)
         }
 
         override fun onPackageRemoved(packageName: String, user: UserHandle) {
-            refresh()
+            packageChanged(packageName, user)
         }
 
         override fun onPackageChanged(packageName: String, user: UserHandle) {
-            refresh()
+            packageChanged(packageName, user)
         }
 
         override fun onPackagesSuspended(packageNames: Array<out String>, user: UserHandle) {
-            refresh()
+            packageNames.forEach { packageChanged(it, user) }
         }
 
         override fun onPackagesUnsuspended(packageNames: Array<out String>, user: UserHandle) {
-            refresh()
+            packageNames.forEach { packageChanged(it, user) }
         }
 
         override fun onPackagesAvailable(
@@ -79,7 +90,7 @@ class AndroidAppRepository(context: Context) : AppRepository {
             user: UserHandle,
             replacing: Boolean,
         ) {
-            refresh()
+            packageNames.forEach { packageChanged(it, user) }
         }
 
         override fun onPackagesUnavailable(
@@ -87,7 +98,7 @@ class AndroidAppRepository(context: Context) : AppRepository {
             user: UserHandle,
             replacing: Boolean,
         ) {
-            refresh()
+            packageNames.forEach { packageChanged(it, user) }
         }
     }
 
@@ -104,28 +115,69 @@ class AndroidAppRepository(context: Context) : AppRepository {
         )
         registerProfileReceiver()
 
+        refresh()
         scope.launch {
+            loadCachedCatalog()
             for (ignored in refreshRequests) {
-                loadCatalog()
+                val pending = synchronized(requestLock) {
+                    val requests = if (fullRefreshPending) {
+                        listOf(RefreshRequest.Full)
+                    } else {
+                        packagesPending.toList()
+                    }
+                    fullRefreshPending = false
+                    packagesPending.clear()
+                    requests
+                }
+                if (pending.isEmpty()) continue
+                if (pending.any { it is RefreshRequest.Full }) {
+                    loadCatalog()
+                } else {
+                    updatePackages(pending.filterIsInstance<RefreshRequest.Package>())
+                }
             }
         }
-
-        refresh()
     }
 
     override fun refresh() {
+        synchronized(requestLock) {
+            fullRefreshPending = true
+            packagesPending.clear()
+        }
+        refreshRequests.trySend(Unit)
+    }
+
+    private fun packageChanged(packageName: String, user: UserHandle) {
+        synchronized(requestLock) {
+            if (!fullRefreshPending) {
+                packagesPending += RefreshRequest.Package(packageName, user)
+                if (packagesPending.size > 256) {
+                    packagesPending.clear()
+                    fullRefreshPending = true
+                }
+            }
+        }
         refreshRequests.trySend(Unit)
     }
 
     override suspend fun launch(key: AppKey): Result<Unit> =
-        withContext(Dispatchers.Main.immediate) {
+        withContext(Dispatchers.IO) {
             runCatching {
                 val user = requireNotNull(
                     userManager.getUserForSerialNumber(key.profileSerial),
                 ) {
                     "Profile no longer exists: " + key.profileSerial
                 }
+                require(!userManager.isQuietModeEnabled(user)) {
+                    "Profile is unavailable: ${key.profileSerial}"
+                }
 
+                val activity = launcherApps.getActivityList(key.packageName, user)
+                    .firstOrNull { it.componentName ==
+                        ComponentName(key.packageName, key.activityName) }
+                require(activity != null && isEnabled(activity.applicationInfo)) {
+                    "App is no longer launchable: ${key.stableId}"
+                }
                 launcherApps.startMainActivity(
                     ComponentName(key.packageName, key.activityName),
                     user,
@@ -135,29 +187,44 @@ class AndroidAppRepository(context: Context) : AppRepository {
             }
         }
 
+    private suspend fun loadCachedCatalog() {
+        val snapshot = withContext(Dispatchers.IO) { cache.read() } ?: return
+        val records = try {
+            withContext(Dispatchers.IO) { queryProfiles() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return
+        }
+        if (!snapshot.isUsable(localeTags(), records.map { it.profile })) return
+        generation = 1
+        activeLocaleTags = snapshot.localeTags
+        _catalog.value = AppCatalog(
+            generation = generation,
+            profiles = snapshot.profiles,
+            apps = snapshot.apps,
+            isRefreshing = true,
+        )
+        onCachedCatalogPublished?.invoke(_catalog.value)
+    }
+
     private suspend fun loadCatalog() {
         _catalog.update { state ->
             state.copy(isRefreshing = true, lastError = null)
         }
 
         val result = runCatching {
-            withContext(Dispatchers.Default) {
+            withContext(Dispatchers.IO) {
                 queryCatalog()
             }
         }
 
         result.fold(
             onSuccess = { data ->
-                generation += 1
-                _catalog.value = AppCatalog(
-                    generation = generation,
-                    profiles = data.profiles,
-                    apps = data.apps,
-                    isRefreshing = false,
-                    lastError = null,
-                )
+                publish(data)
             },
             onFailure = { throwable ->
+                if (throwable is CancellationException) throw throwable
                 _catalog.update { state ->
                     state.copy(
                         isRefreshing = false,
@@ -169,8 +236,77 @@ class AndroidAppRepository(context: Context) : AppRepository {
         )
     }
 
+    private suspend fun updatePackages(requests: List<RefreshRequest.Package>) {
+        val result = runCatching {
+            withContext(Dispatchers.IO) {
+                val records = queryProfiles()
+                val profiles = records.map { it.profile }
+                if (generation == 0L) return@withContext null
+                var apps = _catalog.value.apps
+                val distinct = requests.map { request ->
+                    userManager.getSerialNumberForUser(request.user) to request.packageName
+                }.distinct()
+                if (distinct.any { (serial, _) ->
+                        !AppCatalogReconciler.canUpdatePackage(
+                            _catalog.value.profiles, profiles, serial,
+                            activeLocaleTags, localeTags(),
+                        )
+                    }
+                ) return@withContext null
+                distinct.forEach { (serial, packageName) ->
+                    val record = records.first { it.profile.serialNumber == serial }
+                    val replacement = queryActivities(record, packageName)
+                    apps = AppCatalogReconciler.replacePackage(
+                        apps, serial, packageName, replacement,
+                    )
+                }
+                CatalogData(
+                    profiles,
+                    apps,
+                )
+            }
+        }
+        result.fold(
+            onSuccess = { data ->
+                if (data == null) loadCatalog() else publish(data)
+            },
+            onFailure = { error ->
+                if (error is CancellationException) throw error
+                loadCatalog()
+            },
+        )
+    }
+
+    private suspend fun publish(data: CatalogData) {
+        val current = _catalog.value
+        val changed = generation == 0L ||
+            current.profiles != data.profiles || current.apps != data.apps
+        val locale = localeTags()
+        if (changed) {
+            generation += 1
+        }
+        val shouldWrite = changed || activeLocaleTags != locale
+        activeLocaleTags = locale
+        _catalog.value = AppCatalog(
+            generation = generation,
+            profiles = data.profiles,
+            apps = data.apps,
+            isRefreshing = false,
+        )
+        if (shouldWrite) withContext(Dispatchers.IO) {
+            cache.write(CachedAppCatalog(locale, data.profiles, data.apps))
+        }
+    }
+
     private fun queryCatalog(): CatalogData {
-        val profileRecords = launcherApps.profiles
+        val profileRecords = queryProfiles()
+        val apps = AppCatalogReconciler.sorted(profileRecords.flatMap {
+            queryActivities(it, null)
+        })
+        return CatalogData(profileRecords.map { it.profile }, apps)
+    }
+
+    private fun queryProfiles(): List<ProfileRecord> = launcherApps.profiles
             .mapNotNull { user ->
                 val serial = userManager.getSerialNumberForUser(user)
                 if (serial < 0L) {
@@ -187,13 +323,15 @@ class AndroidAppRepository(context: Context) : AppRepository {
             }
             .sortedBy { it.profile.serialNumber }
 
-        val apps = buildList {
-            profileRecords.forEach { profileRecord ->
+    private fun queryActivities(
+        profileRecord: ProfileRecord,
+        packageName: String?,
+    ): List<LaunchableApp> = buildList {
                 val profileSerial = profileRecord.profile.serialNumber
-                launcherApps
-                    .getActivityList(null, profileRecord.user)
+                launcherApps.getActivityList(packageName, profileRecord.user)
                     .forEach { activity ->
                         val component = activity.componentName
+                        if (packageName != null && component.packageName != packageName) return@forEach
                         add(
                             LaunchableApp(
                                 key = AppKey(
@@ -203,8 +341,7 @@ class AndroidAppRepository(context: Context) : AppRepository {
                                 ),
                                 label = activity.label.toString(),
                                 firstInstallTime = activity.firstInstallTime,
-                                enabled = activity.applicationInfo.enabled &&
-                                    (activity.applicationInfo.flags and ApplicationInfo.FLAG_SUSPENDED) == 0,
+                                enabled = isEnabled(activity.applicationInfo),
                                 loadingProgress =
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                         activity.loadingProgress
@@ -214,20 +351,12 @@ class AndroidAppRepository(context: Context) : AppRepository {
                             ),
                         )
                     }
-            }
-        }.sortedWith(
-            compareBy(
-                { it.key.profileSerial },
-                { it.key.packageName },
-                { it.key.activityName },
-            ),
-        )
+        }
 
-        return CatalogData(
-            profiles = profileRecords.map { it.profile },
-            apps = apps,
-        )
-    }
+    private fun isEnabled(info: ApplicationInfo): Boolean = info.enabled &&
+        (info.flags and ApplicationInfo.FLAG_SUSPENDED) == 0
+
+    private fun localeTags(): String = appContext.resources.configuration.locales.toLanguageTags()
 
     private fun registerProfileReceiver() {
         val filter = IntentFilter().apply {
@@ -287,5 +416,10 @@ class AndroidAppRepository(context: Context) : AppRepository {
         val profiles: List<AppProfile>,
         val apps: List<LaunchableApp>,
     )
+
+    private sealed interface RefreshRequest {
+        data object Full : RefreshRequest
+        data class Package(val packageName: String, val user: UserHandle) : RefreshRequest
+    }
 }
 

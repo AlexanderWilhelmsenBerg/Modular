@@ -8,6 +8,18 @@ import org.junit.Test
 
 class HomeSearchTest {
     @Test
+    fun packageSearchIsCaseInsensitiveAndKeepsAlphabeticalOrder() {
+        val shield = app("com.nvidia.shieldtv", "SHIELD TV")
+        val game = app("com.nvidia.games", "Games")
+        val unrelated = app("com.example.other", "Other")
+        val apps = listOf(game, unrelated, shield)
+        assertEquals(listOf(game, shield), filterHomeApps(apps, "  NVIDIA  ", Locale.forLanguageTag("tr-TR")))
+        assertEquals(listOf(shield), filterHomeApps(apps, "com.nvidia.shieldtv", Locale.ENGLISH))
+        assertEquals(listOf(shield), filterHomeApps(apps, "SHIELD", Locale.ENGLISH))
+        assertEquals(apps, filterHomeApps(apps, " ", Locale.ENGLISH))
+    }
+
+    @Test
     fun baselineOrderUsesLocaleAndStableIdentityForEqualLabels() {
         val later = app("z.pkg", "Alpha")
         val earlier = app("a.pkg", "Alpha")

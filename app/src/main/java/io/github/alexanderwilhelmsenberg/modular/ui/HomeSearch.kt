@@ -35,5 +35,10 @@ internal fun filterHomeApps(
 ): List<LaunchableApp> {
     val needle = query.trim().lowercase(locale)
     if (needle.isEmpty()) return apps
-    return apps.filter { it.label.lowercase(locale).contains(needle) }
+    // Package identifiers are locale-independent (notably I/i in Turkish).
+    val packageNeedle = query.trim().lowercase(Locale.ROOT)
+    return apps.filter {
+        it.label.lowercase(locale).contains(needle) ||
+            it.key.packageName.lowercase(Locale.ROOT).contains(packageNeedle)
+    }
 }

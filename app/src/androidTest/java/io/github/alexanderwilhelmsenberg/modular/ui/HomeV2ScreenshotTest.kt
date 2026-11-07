@@ -22,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
@@ -80,7 +81,7 @@ class HomeV2ScreenshotTest {
             }
         }
         val rail = composeRule.onNodeWithTag("alphabet-hit-lane")
-        val alphabet = HomeSectionBuilder(Locale.getDefault()).alphabet
+        val alphabet = HomeSectionBuilder(Locale.getDefault()).sections(apps).map { it.label }
         val position = alphabet.indexOf("K")
         assertTrue("K must be in the rail", position >= 0)
         rail.performTouchInput {
@@ -156,7 +157,33 @@ class HomeV2ScreenshotTest {
         capture("amoled")
     }
 
-    private fun capture(name: String) {
+    @Test fun longPressShowsFullAppActionsSheet() {
+        val longName = apps.first().copy(label = "A long application name that stretches across the sheet header")
+        val icon = fixtureIcon()
+        composeRule.setContent {
+            ModularTheme(if (isSystemInDarkTheme()) AppearanceTheme.DARK else AppearanceTheme.LIGHT) {
+                HomeScreen(
+                    catalog = AppCatalog(apps = listOf(longName) + apps.drop(1)),
+                    onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                    showMakeDefault = false,
+                    featuredApps = emptyList(),
+                    onPinApp = { _, _ -> },
+                    onAppInfo = {},
+                    onUninstallApp = {},
+                    onRenameApp = {},
+                    onHideApp = {},
+                    iconForApp = { icon },
+                )
+            }
+        }
+        composeRule.onNodeWithTag("app-row:${longName.key.stableId}").performTouchInput { longClick() }
+        listOf("pin", "rename", "hide", "info", "uninstall").forEach { action ->
+            composeRule.onNodeWithTag("app-action:$action").assertIsDisplayed()
+        }
+        capture("actions", entireScreen = true)
+    }
+
+    private fun capture(name: String, entireScreen: Boolean = false) {
         composeRule.waitForIdle()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val configuration = context.resources.configuration
@@ -166,7 +193,9 @@ class HomeV2ScreenshotTest {
         val dir = requireNotNull(context.getExternalFilesDir("home-v2-screenshots"))
         val file = File(dir, "home-$name-${width}dp-$night-font$font.png")
         FileOutputStream(file).use { out ->
-            check(composeRule.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, out))
+            val bitmap = if (entireScreen) InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+                else composeRule.onRoot().captureToImage().asAndroidBitmap()
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
         }
         // UTP uninstalls the target APK after connected tests; preserve fixture
         // captures outside its private directory before that cleanup occurs.

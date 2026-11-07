@@ -338,3 +338,25 @@ and [ADR-0005](../decisions/ADR-0005-indexed-home-and-featured-addons.md).
 These are new acceptance requirements, not additions to the previous delivery's
 passed-test claims. V2-A1 through V2-A10 in the detailed specification must be
 verified as implementation proceeds.
+
+## 20. Populated navigation, app actions, and cached discovery
+
+The later 2026-11-07 request supersedes the empty-letter rail behavior. Only
+populated locale sections appear; this includes Æ, Ø and Å when applicable.
+Core search matches both displayed app names and package identifiers. Core owns
+the long-press management sheet, Android App info/uninstall handoff, persistent
+display-name overrides and hiding/restoring apps. Hidden identities are omitted
+from all Home presentations without altering the raw catalog exposed to granted
+capabilities. Automatic Most Used ranking and pins remain add-on functions.
+
+Core uses a private disposable app-index snapshot to display cached metadata
+before a background cold-start reconciliation. Normal package events update
+only affected packages; profile/locale changes and explicit refresh reconcile
+the full catalog. Detailed contracts and exclusions are in
+[HOME-V2-03/04/08](home-presentation-v2.md).
+
+Acceptance: sparse Norwegian rail before/after last-entry removal; search
+`Nvidia` for `com.nvidia.shieldtv` (including Turkish device locale); long press
+without add-ons; rename/reset/restart; hide/search/star exclusion and restore;
+Android uninstall cancellation; invalid cache and profile/locale mismatch;
+incremental update/removal; unchanged generations after identical refresh.

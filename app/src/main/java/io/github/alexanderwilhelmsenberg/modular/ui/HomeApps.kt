@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,8 +31,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
@@ -53,20 +54,35 @@ internal fun HomeAppRow(
     wallpaperMode: Boolean = false,
     pinned: Boolean = false,
     onPinApp: ((LaunchableApp, Boolean) -> Unit)? = null,
+    onAppInfo: ((LaunchableApp) -> Unit)? = null,
+    onUninstallApp: ((LaunchableApp) -> Unit)? = null,
+    onRenameApp: ((LaunchableApp) -> Unit)? = null,
+    onHideApp: ((LaunchableApp) -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     var menuOpen by remember(app.key) { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val foreground = if (wallpaperMode) Color.White else MaterialTheme.colorScheme.onSurface
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 60.dp)
             .combinedClickable(
-                enabled = enabled,
-                onClick = onClick,
-                onLongClick = if (onPinApp != null) ({ menuOpen = true }) else null,
+                onClick = { if (enabled) onClick() },
+                onLongClick = {
+                    keyboard?.hide()
+                    focusManager.clearFocus()
+                    menuOpen = true
+                },
+                onLongClickLabel = "App actions",
             )
-            .semantics { if (!enabled) stateDescription = unavailabilityReason ?: "Unavailable" }
+            .semantics {
+                if (!enabled) {
+                    disabled()
+                    stateDescription = unavailabilityReason ?: "Unavailable"
+                }
+            }
             .testTag("app-row:${app.key.stableId}"),
         contentAlignment = AbsoluteAlignment.CenterLeft,
     ) {
@@ -93,11 +109,16 @@ internal fun HomeAppRow(
                 )
             }
         }
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            if (onPinApp != null) DropdownMenuItem(
-                text = { Text(if (pinned) "Unpin from starred apps" else "Pin to starred apps") },
-                onClick = { menuOpen = false; onPinApp(app, !pinned) },
-            )
-        }
     }
+    if (menuOpen) AppActionsSheet(
+        app = app,
+        icon = icon,
+        pinned = pinned,
+        onDismiss = { menuOpen = false },
+        onPinApp = onPinApp,
+        onAppInfo = onAppInfo,
+        onUninstallApp = onUninstallApp,
+        onRenameApp = onRenameApp,
+        onHideApp = onHideApp,
+    )
 }

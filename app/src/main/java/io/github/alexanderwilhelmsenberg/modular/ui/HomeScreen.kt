@@ -64,6 +64,10 @@ fun HomeScreen(
     featuredNeedsPermission: Boolean = false,
     onOpenFeaturedManagement: (() -> Unit)? = null,
     onPinApp: ((LaunchableApp, Boolean) -> Unit)? = null,
+    onAppInfo: ((LaunchableApp) -> Unit)? = null,
+    onUninstallApp: ((LaunchableApp) -> Unit)? = null,
+    onRenameApp: ((LaunchableApp) -> Unit)? = null,
+    onHideApp: ((LaunchableApp) -> Unit)? = null,
     alphabeticalSections: Boolean = true,
     homeResetToken: Int = 0,
     iconForApp: @Composable (LaunchableApp) -> ImageBitmap? = { rememberAppIcon(it) },
@@ -113,8 +117,8 @@ fun HomeScreen(
     var anchorableEntries by remember { mutableStateOf(entries) }
     SideEffect { if (!searching) anchorableEntries = entries }
     val headerIndices = remember(entries) { entries.mapIndexedNotNull { i, entry -> (entry as? HomeListEntry.Header)?.let { it.label to i + 1 } }.toMap() }
-    val alphabet = remember(sectionBuilder, safeFeatured) {
-        if (safeFeatured != null) listOf("★") + sectionBuilder.alphabet else sectionBuilder.alphabet
+    val alphabet = remember(sections, safeFeatured) {
+        (if (safeFeatured != null) listOf("★") else emptyList()) + sections.map { it.label }
     }
     val reachability = rememberSaveable(saver = Saver(save = { it.offsetPx }, restore = { HomeReachabilityState(it) })) { HomeReachabilityState() }
     val density = LocalDensity.current
@@ -222,6 +226,10 @@ fun HomeScreen(
                     wallpaperMode = wallpaperMode,
                     pinnedKeys = pinnedAppKeys,
                     onPinApp = onPinApp.takeIf { safeFeatured != null },
+                    onAppInfo = onAppInfo,
+                    onUninstallApp = onUninstallApp,
+                    onRenameApp = onRenameApp,
+                    onHideApp = onHideApp,
                     onLaunch = { endEditing(); onLaunch(it) },
                     onRefresh = onRefresh,
                     onMakeDefault = onMakeDefault,

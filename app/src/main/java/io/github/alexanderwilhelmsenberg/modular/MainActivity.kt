@@ -41,6 +41,11 @@ import io.github.alexanderwilhelmsenberg.modular.capabilities.AppSortClient
 import io.github.alexanderwilhelmsenberg.modular.home.HomeSortController
 import io.github.alexanderwilhelmsenberg.modular.apps.AndroidAppRepository
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
+import io.github.alexanderwilhelmsenberg.modular.apps.AndroidAppActions
+import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
+import io.github.alexanderwilhelmsenberg.modular.apps.AppCustomizationStore
+import io.github.alexanderwilhelmsenberg.modular.ui.HiddenAppsControls
+import io.github.alexanderwilhelmsenberg.modular.ui.RenameAppDialog
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
 import io.github.alexanderwilhelmsenberg.modular.composition.ContextManager
@@ -71,6 +76,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var moduleRegistry: ModuleRegistry
     private lateinit var capabilityRouter: CapabilityRouter
     private lateinit var appRepository: AppRepository
+    private lateinit var appActions: AndroidAppActions
+    private lateinit var appCustomizationStore: AppCustomizationStore
     private lateinit var compositionStore:
         DataStoreCompositionStateStore
     private lateinit var instanceStore: InstanceStore
@@ -94,6 +101,10 @@ class MainActivity : ComponentActivity() {
     private var settingsVisible by mutableStateOf(false)
     private var selectedModuleComponent by mutableStateOf<String?>(null)
     private var pendingUninstallPackage: String? = null
+
+    private val appUninstallLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { appRepository.refresh() }
 
     private val uninstallLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -131,6 +142,7 @@ class MainActivity : ComponentActivity() {
         homeSearchQuery = savedInstanceState?.getString("homeSearchQuery").orEmpty()
         homeIntentGeneration = savedInstanceState?.getInt("homeIntentGeneration") ?: 0
         appearanceStore = AppearanceSettingsStore(this)
+        appCustomizationStore = AppCustomizationStore(this)
         settingsVisible = savedInstanceState?.getBoolean("settingsVisible") ?: false
         pendingUninstallPackage = savedInstanceState?.getString("pendingUninstallPackage")
         selectedModuleComponent = savedInstanceState?.getString("selectedModuleComponent")
@@ -138,6 +150,7 @@ class MainActivity : ComponentActivity() {
 
         homeRoleController = HomeRoleController(this)
         appRepository = AndroidAppRepository(this)
+        appActions = AndroidAppActions(this)
         grantStore =
             DataStoreModuleGrantStateStore(this)
         securityManager = ModuleSecurityManager(
@@ -213,12 +226,12 @@ class MainActivity : ComponentActivity() {
 
         refreshHomeRoleState()
         moduleRegistry.refresh()
-        appRepository.refresh()
 
         lifecycleScope.launch {
             // Read local appearance before the first Compose frame, without blocking Main.
             val initialTheme = appearanceStore.currentTheme()
             val initialHomeAppearance = appearanceStore.currentSettings()
+            val initialCustomizations = appCustomizationStore.currentCustomizations()
             val initialWallpaper = applyHomeWindowAppearance(
                 this@MainActivity, initialTheme,
                 initialHomeAppearance.background == HomeBackground.SYSTEM_WALLPAPER,
@@ -228,6 +241,10 @@ class MainActivity : ComponentActivity() {
                 val appearanceTheme by appearanceStore.theme.collectAsState(initial = initialTheme)
                 val appearanceError by appearanceStore.error.collectAsState()
                 val homeAppearance by appearanceStore.settings.collectAsState(initial = initialHomeAppearance)
+                val appCustomizations by appCustomizationStore.customizations.collectAsState(initial = initialCustomizations)
+                val customizationError by appCustomizationStore.error.collectAsState()
+                var renameTarget by remember { mutableStateOf<LaunchableApp?>(null) }
+                LaunchedEffect(homeIntentGeneration, settingsVisible) { renameTarget = null }
                 val featured by homeFeaturedController.featured.collectAsState()
                 var wallpaperActive by remember { mutableStateOf(initialWallpaper) }
                 val homeOrderedApps by homeSortController.orderedApps.collectAsState()
@@ -242,6 +259,12 @@ class MainActivity : ComponentActivity() {
                 ModularTheme(appearanceTheme) {
                     val modules by moduleRegistry.modules.collectAsState()
                     val appCatalog by appRepository.catalog.collectAsState()
+                    val visibleCatalog = remember(appCatalog, appCustomizations) {
+                        appCatalog.copy(apps = appCustomizations.visibleApps(appCatalog.apps))
+                    }
+                    val visibleOrderedApps = remember(homeOrderedApps, appCustomizations) {
+                        homeOrderedApps?.let(appCustomizations::visibleApps)
+                    }
                     val instances by instanceStore.instances.collectAsState()
                     val compositionState by compositionStore.state.collectAsState()
                     val availableRoutes by capabilityRouter.routes.collectAsState()
@@ -288,8 +311,8 @@ class MainActivity : ComponentActivity() {
                         key(homeIntentGeneration) {
                             val homeListState = rememberLazyListState()
                             HomeScreen(
-                                catalog = appCatalog,
-                                orderedApps = homeOrderedApps,
+                                catalog = visibleCatalog,
+                                orderedApps = visibleOrderedApps.takeIf { customHomeOrderActive },
                                 showAppIcons = homeAppearance.showAppIcons,
                                 wallpaperMode = wallpaperActive,
                                 wallpaperDimmingPercent = homeAppearance.wallpaperDimming,
@@ -340,6 +363,20 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onRefresh = appRepository::refresh,
+                                onAppInfo = { app -> handleAppAction { appActions.showInfo(app.key) } },
+                                onRenameApp = { app -> renameTarget = app },
+                                onHideApp = { app -> lifecycleScope.launch {
+                                    appCustomizationStore.setHidden(app.key, true).onFailure {
+                                        Toast.makeText(this@MainActivity, "Could not hide ${app.label}", Toast.LENGTH_LONG).show()
+                                    }.onSuccess {
+                                        Toast.makeText(this@MainActivity, "App hidden. Restore it in Settings → Appearance → Hidden apps.", Toast.LENGTH_LONG).show()
+                                    }
+                                } },
+                                onUninstallApp = { app -> handleAppAction {
+                                    if (!appActions.uninstall(app.key, appUninstallLauncher::launch)) {
+                                        Toast.makeText(this@MainActivity, "Use App info to uninstall from this profile.", Toast.LENGTH_LONG).show()
+                                    }
+                                } },
                                 onMakeDefault = ::requestHomeRole,
                                 onOpenSettings = { settingsVisible = true },
                             )
@@ -367,6 +404,16 @@ class MainActivity : ComponentActivity() {
                                     onWallpaperDimmingSelected = { value -> lifecycleScope.launch { appearanceStore.setWallpaperDimming(value) } },
                                     onShowAppIconsChanged = { value -> lifecycleScope.launch { appearanceStore.setShowAppIcons(value) } },
                                 )
+                                HiddenAppsControls(
+                                    apps = appCatalog.apps,
+                                    customizations = appCustomizations,
+                                    onUnhide = { appKey -> lifecycleScope.launch {
+                                        appCustomizationStore.setHidden(appKey, false).onFailure {
+                                            Toast.makeText(this@MainActivity, "Could not restore the app", Toast.LENGTH_LONG).show()
+                                        }
+                                    } },
+                                )
+                                customizationError?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
                             },
                             onBack = { settingsVisible = false },
                             corePackageName = packageName,
@@ -444,6 +491,22 @@ class MainActivity : ComponentActivity() {
                             onRefreshApps = appRepository::refresh,
                             onActivateContext = ::activateContext,
                             onDeactivateContext = ::deactivateContext,
+                        )
+                    }
+                    renameTarget?.let { target ->
+                        val original = appCatalog.apps.firstOrNull { it.key == target.key }
+                        if (original != null) RenameAppDialog(
+                            app = original,
+                            currentLabel = appCustomizations.labelFor(original),
+                            originalLabel = original.label,
+                            onDismiss = { renameTarget = null },
+                            onSave = { label -> lifecycleScope.launch {
+                                appCustomizationStore.setLabel(original.key, label)
+                                    .onSuccess { renameTarget = null }
+                                    .onFailure {
+                                        Toast.makeText(this@MainActivity, "Could not save the app name", Toast.LENGTH_LONG).show()
+                                    }
+                            } },
                         )
                     }
                     if (settingsVisible && selectedModuleComponent != null) {
@@ -558,10 +621,15 @@ class MainActivity : ComponentActivity() {
         if (::moduleRegistry.isInitialized) {
             moduleRegistry.refresh()
         }
-        if (::appRepository.isInitialized) {
-            appRepository.refresh()
-        }
+        // The live repository receives package/profile callbacks. Its constructor
+        // reconciles a cold-start cache; returning Home does not need a full scan.
         if (::homeFeaturedController.isInitialized) homeFeaturedController.refresh()
+    }
+
+    private fun handleAppAction(action: () -> Unit) {
+        runCatching(action).onFailure {
+            Toast.makeText(this, it.message ?: "Unable to open the app's settings.", Toast.LENGTH_LONG).show()
+        }
     }
 
     override fun onDestroy() {

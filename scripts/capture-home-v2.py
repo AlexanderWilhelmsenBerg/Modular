@@ -17,7 +17,8 @@ def adb(*args, timeout=120):
 
 try:
     adb("shell", "wm", "density", "160")
-    for width, night, font in [(320, "no", "1.0"), (375, "no", "1.0"), (411, "no", "1.0"), (414, "yes", "1.0"), (768, "yes", "1.0"), (375, "no", "1.5")]:
+    viewports = [(320, "no", "1.0"), (375, "no", "1.0"), (411, "no", "1.0"), (414, "yes", "1.0"), (768, "yes", "1.0"), (375, "no", "1.5")]
+    for width, night, font in viewports:
         adb("shell", "wm", "size", f"{width}x900")
         adb("shell", "cmd", "uimode", "night", night)
         adb("shell", "settings", "put", "system", "font_scale", font)
@@ -28,6 +29,11 @@ try:
     # Required evidence must be on the runner before the optional video starts.
     # Some emulator codecs disconnect ADB while recording; do not lose the PNGs.
     subprocess.run(["adb", "pull", "/sdcard/Pictures/ModularHomeV2/.", str(out)], check=True, timeout=60)
+    for width, night, font in viewports:
+        mode = "dark" if night == "yes" else "light"
+        actions = out / f"home-actions-{width}dp-{mode}-font{font}.png"
+        if not actions.is_file():
+            raise RuntimeError(f"Missing full app-actions screenshot: {actions}")
     # Keep a short rail-press clip so reviewers can see the curve settle, not just its still frame.
     try:
         adb("shell", "wm", "size", "411x900")

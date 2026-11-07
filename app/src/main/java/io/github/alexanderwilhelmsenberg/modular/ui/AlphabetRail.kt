@@ -77,7 +77,8 @@ internal fun AlphabetRail(
         // Use the reference's lower rail when it fits. Short viewports get the
         // full list height so every glyph has as much vertical room as possible.
         val heightFraction = if (maxHeight * 0.72f / alphabet.size < 14.dp) 1f else 0.72f
-        BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight(heightFraction).align(AbsoluteAlignment.BottomRight).testTag("alphabet-rail")) {
+        val railHeight = minOf(maxHeight * heightFraction, 24.dp * alphabet.size)
+        BoxWithConstraints(Modifier.fillMaxWidth().height(railHeight).align(AbsoluteAlignment.BottomRight).testTag("alphabet-rail")) {
             val density = LocalDensity.current
             val heightPx = with(density) { maxHeight.roundToPx() }
             Box(Modifier.fillMaxHeight().width(48.dp).align(AbsoluteAlignment.CenterRight)) {

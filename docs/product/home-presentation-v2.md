@@ -98,10 +98,12 @@ are retained. Wallpaper stays off until chosen.
 
 ## 5. Alphabet navigation and animation — HOME-V2-03
 
-- Display `#` and the locale's alphabet in a right-side rail. Keep empty letters
-  visible but subdued; tapping one goes to the next populated bucket, or the
-  previous populated bucket if none follows. The feedback shows the resolved
-  destination. Numeric/symbol apps remain directly reachable through `#`.
+- Display only populated sections in the right-side rail, in locale order.
+  Omit empty letters completely, including Æ, Ø, Å when they have no entries.
+  Include each locale-specific letter as soon as an app belongs to that bucket;
+  show `#` only when numeric/symbol apps are present. Refresh the rail when apps
+  are installed, removed, renamed, hidden, restored, or the locale changes.
+  The optional provider's `★` destination remains available for its setup state.
 - Tap a letter to bring its header into view. During press-and-slide navigation,
   target the selected header near the upper third of the usable list viewport,
   matching the selected-K reference state; allow leading/trailing navigation
@@ -123,10 +125,10 @@ are retained. Wallpaper stays off until chosen.
   bubble. The selected section stays in view. No app may launch from the rail
   pointer sequence. Optional light haptics follow the platform preference.
 - Anchor the rail above the bottom controls and below status/cutout areas. Keep
-  every locale label visible, including `★`, `#`, and locale-specific letters.
+  every populated locale label visible, including `★`, `#`, and locale-specific letters.
   Size each glyph and line height to its actual slot; use more of the list height
-  on short viewports. Preserve each letter's position in the full alphabet hit
-  map. A tap jumps directly to that letter (or its next populated bucket); it
+  on short viewports. Compact short rails to at most 24 dp per slot. Use the same
+  populated section list for rendering and hit mapping. A tap jumps directly to that letter; it
   must never open the section chooser. The chooser remains an explicit
   accessibility action. Rail labels are one composite
   drag control, not a claim that every tiny glyph has a separate 48 dp target.
@@ -150,6 +152,38 @@ are retained. Wallpaper stays off until chosen.
 - Back first dismisses editing/IME; Settings remains reachable. Preserve the
   existing HOME reset, settings return, and launch-return semantics. A new HOME
   intent clears search and transient reachability, not saved pins or preferences.
+- Match a trimmed query against the displayed label or package identifier.
+  Labels use device-locale case handling; package identifiers use locale-neutral
+  case-insensitive matching. `Nvidia` must match `com.nvidia.shieldtv` even when
+  the app label is `SHIELD TV`. Hidden apps are excluded from results.
+
+### App actions and index loading — HOME-V2-08
+
+- A long press opens an opaque themed bottom sheet with the app icon, displayed
+  name, package identifier, App info, Rename, Hide, and Uninstall. When the
+  selected featured provider supports pins, show Pin/Unpin as well. App launch
+  and long press must remain distinct, including while scrolling or searching.
+- App info opens Android's screen for the exact app/profile. Uninstall opens
+  Android confirmation; cancellation/refusal never removes an item optimistically.
+  For another profile use its profile-aware App info screen for management.
+- Rename persists by package/activity/profile identity, updates Core alphabetical
+  sorting/bucketing, and can be reset to Android's original name. Hide removes
+  that identity from Home, search and featured presentation, not the raw app
+  repository or granted capabilities. Settings > Appearance > Hidden apps lets
+  the user restore it. Hiding is a presentation preference, not a security boundary.
+- Categories, screen time, custom icon editing and third-party popup editing are
+  outside this change. Automatic usage ranking and pins remain owned by the
+  selected featured add-on; Core supplies generic menus and presentation.
+- Load a bounded, versioned app-index snapshot from private no-backup storage
+  off the UI thread. Validate locale and accessible profile state before display,
+  then reconcile with LauncherApps on every cold repository start. The snapshot
+  must not authorize a launch or grant capabilities; validate the live target.
+- While running, coalesce package callbacks and query only affected packages and
+  profiles. Full scans remain for startup reconciliation, locale/profile changes,
+  manual refresh, and recovery. Returning Home alone must not trigger a full scan.
+  Corrupt/incompatible caches fall back to live discovery; cache-write failure
+  must not make the live list unusable. Do not claim measured startup gains
+  without device timing evidence.
 
 ## 7. Pull-down reachability — HOME-V2-05
 

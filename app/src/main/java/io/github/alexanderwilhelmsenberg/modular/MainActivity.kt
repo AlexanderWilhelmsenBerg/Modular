@@ -1,6 +1,8 @@
 package io.github.alexanderwilhelmsenberg.modular
 
 import android.os.Bundle
+import android.content.ComponentName
+import android.content.pm.ServiceInfo
 import android.content.Intent
 import android.net.Uri
 import android.content.pm.PackageManager
@@ -13,6 +15,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +36,7 @@ import io.github.alexanderwilhelmsenberg.modular.capabilities.CapabilityRouter
 import io.github.alexanderwilhelmsenberg.modular.capabilities.CoreHostFactory
 import io.github.alexanderwilhelmsenberg.modular.composition.ContextManager
 import io.github.alexanderwilhelmsenberg.modular.composition.DataStoreCompositionStateStore
+import io.github.alexanderwilhelmsenberg.modular.composition.ModuleSettingsController
 import io.github.alexanderwilhelmsenberg.modular.composition.InstanceStore
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventBus
 import io.github.alexanderwilhelmsenberg.modular.events.CoreEventSources
@@ -42,6 +50,10 @@ import io.github.alexanderwilhelmsenberg.modular.security.AndroidModuleIdentityR
 import io.github.alexanderwilhelmsenberg.modular.security.DataStoreModuleGrantStateStore
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityManager
 import io.github.alexanderwilhelmsenberg.modular.security.OfficialModuleBootstrapPolicy
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
+import io.github.alexanderwilhelmsenberg.modular.modules.ModuleDescriptorDiscovery
+import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
+import io.github.alexanderwilhelmsenberg.modular.ui.ModuleSettingsDialog
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
 import kotlinx.coroutines.launch
 
@@ -54,6 +66,7 @@ class MainActivity : ComponentActivity() {
         DataStoreCompositionStateStore
     private lateinit var instanceStore: InstanceStore
     private lateinit var contextManager: ContextManager
+    private lateinit var moduleSettingsController: ModuleSettingsController
     private lateinit var eventBus: CoreEventBus
     private lateinit var eventSources: CoreEventSources
     private lateinit var grantStore:
@@ -68,6 +81,7 @@ class MainActivity : ComponentActivity() {
     private var homeIntentGeneration by mutableStateOf(0)
 
     private var settingsVisible by mutableStateOf(false)
+    private var selectedModuleComponent by mutableStateOf<String?>(null)
     private var pendingUninstallPackage: String? = null
 
     private val uninstallLauncher = registerForActivityResult(
@@ -107,6 +121,8 @@ class MainActivity : ComponentActivity() {
         appearanceStore = AppearanceSettingsStore(this)
         settingsVisible = savedInstanceState?.getBoolean("settingsVisible") ?: false
         pendingUninstallPackage = savedInstanceState?.getString("pendingUninstallPackage")
+        selectedModuleComponent = savedInstanceState?.getString("selectedModuleComponent")
+        if (savedInstanceState == null) handleModuleSettingsIntent(intent)
 
         homeRoleController = HomeRoleController(this)
         appRepository = AndroidAppRepository(this)
@@ -137,6 +153,7 @@ class MainActivity : ComponentActivity() {
         compositionStore =
             DataStoreCompositionStateStore(this)
         instanceStore = InstanceStore(compositionStore, capabilityRouter.routes)
+        moduleSettingsController = ModuleSettingsController(compositionStore, capabilityRouter.routes)
         contextManager = ContextManager(
             stateStore = compositionStore,
             routes = capabilityRouter.routes,
@@ -186,6 +203,7 @@ class MainActivity : ComponentActivity() {
                     val modules by moduleRegistry.modules.collectAsState()
                     val appCatalog by appRepository.catalog.collectAsState()
                     val instances by instanceStore.instances.collectAsState()
+                    val compositionState by compositionStore.state.collectAsState()
                     val availableRoutes by capabilityRouter.routes.collectAsState()
                     val contexts by contextManager.contexts.collectAsState()
                     val activeContext by contextManager.active.collectAsState()
@@ -260,6 +278,7 @@ class MainActivity : ComponentActivity() {
                             onSetModuleEnabled = { module, enabled -> moduleRegistry.setEnabled(module.component, enabled) },
                             onRetryModule = { module -> moduleRegistry.retry(module.component) },
                             onUninstallModule = ::uninstallModule,
+                            onOpenModuleSettings = { selectedModuleComponent = it.component.flattenToString() },
                             onClearModuleEvents = moduleRegistry.managementStore::clearEvents,
                             onSetGrant = { module, capability, granted ->
                                 val status = securityStatuses.firstOrNull { it.packageName == module.component.packageName }
@@ -274,7 +293,12 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             compositionContent = {
-                                CompositionManagement(
+                                var advanced by remember { mutableStateOf(false) }
+                                Column {
+                                    TextButton(onClick = { advanced = !advanced }) {
+                                        Text(if (advanced) "Hide advanced configuration" else "Advanced configuration")
+                                    }
+                                    if (advanced) CompositionManagement(
                                     instances = instances,
                                     contexts = contexts,
                                     modules = modules,
@@ -302,7 +326,8 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onActivateContext = ::activateContext,
                                     onDeactivateContext = ::deactivateContext,
-                                )
+                                    )
+                                }
                             },
                             homeRoleAvailable = homeRoleAvailable,
                             homeRoleHeld = homeRoleHeld,
@@ -325,6 +350,51 @@ class MainActivity : ComponentActivity() {
                             onDeactivateContext = ::deactivateContext,
                         )
                     }
+                    if (settingsVisible && selectedModuleComponent != null) {
+                        val selected = modules.firstOrNull {
+                            it.component.flattenToString() == selectedModuleComponent
+                        }
+                        if (selected == null) {
+                            AlertDialog(
+                                onDismissRequest = { selectedModuleComponent = null },
+                                title = { Text("Module settings") },
+                                text = { Text("This add-on is not available yet. Refresh modules after installation, or check that it is still installed.") },
+                                confirmButton = {
+                                    TextButton(onClick = moduleRegistry::refresh) { Text("Refresh") }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { selectedModuleComponent = null }) { Text("Close") }
+                                },
+                            )
+                        } else {
+                            val providerId = selected.moduleId ?: selected.descriptor?.moduleId
+                            val configuration = remember(providerId, compositionState) {
+                                providerId?.let(moduleSettingsController::configurationFor) ?: "{}"
+                            }
+                            val usedForAppOrder = remember(providerId, compositionState) {
+                                providerId?.let(moduleSettingsController::isUsedForAppOrder) ?: false
+                            }
+                            ModuleSettingsDialog(
+                                module = selected,
+                                configurationJson = configuration,
+                                isUsedForAppOrder = usedForAppOrder,
+                                available = selected.status == ModuleConnectionStatus.CONNECTED &&
+                                    availableRoutes.any { it.component == selected.component },
+                                onSave = { json, useForAppOrder ->
+                                    val result = if (providerId == null) {
+                                        Result.failure(IllegalStateException("Module identity is unavailable. Retry its connection."))
+                                    } else moduleSettingsController.save(providerId, selected.label, json, useForAppOrder)
+                                    recordManagementResult(selected.component.flattenToString(), "settings", result,
+                                        "Saved settings for ${selected.label}")
+                                    if (result.isSuccess) appRepository.refresh()
+                                    result
+                                },
+                                onOpenAddonSettings = if (selected.descriptor?.managementActivity != null)
+                                    ::openAddonSettings else null,
+                                onDismiss = { selectedModuleComponent = null },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -333,6 +403,7 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("homeSearchQuery", homeSearchQuery)
         outState.putBoolean("settingsVisible", settingsVisible)
+        outState.putString("selectedModuleComponent", selectedModuleComponent)
         outState.putString("pendingUninstallPackage", pendingUninstallPackage)
         super.onSaveInstanceState(outState)
     }
@@ -340,9 +411,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (handleModuleSettingsIntent(intent)) return
         if (intent.action == Intent.ACTION_MAIN &&
             (intent.hasCategory(Intent.CATEGORY_HOME) || intent.hasCategory(Intent.CATEGORY_LAUNCHER))) {
             settingsVisible = false
+            selectedModuleComponent = null
             homeSearchQuery = ""
             homeIntentGeneration++
         }
@@ -411,6 +484,29 @@ class MainActivity : ComponentActivity() {
         val message = if (error == null) success else error.message ?: error.javaClass.simpleName
         moduleRegistry.managementStore.record(component, stage, message, error != null)
         if (error != null) Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    private fun handleModuleSettingsIntent(intent: Intent?): Boolean {
+        if (intent?.action != ModuleContract.ACTION_OPEN_MODULE_SETTINGS) return false
+        val value = intent.getStringExtra(ModuleContract.EXTRA_MODULE_COMPONENT)
+            ?.takeIf { it.length <= 512 } ?: return false
+        val component = ComponentName.unflattenFromString(value) ?: return false
+        // Navigation only: the UI resolves this against discovered installed modules.
+        selectedModuleComponent = component.flattenToString()
+        settingsVisible = true
+        return true
+    }
+
+    private fun openAddonSettings(module: ModuleRecord) {
+        val declaration = module.descriptor?.managementActivity ?: return
+        try {
+            val service = ServiceInfo().apply { packageName = module.component.packageName }
+            val component = ModuleDescriptorDiscovery.validateManagementActivity(packageManager, service, declaration)
+            startActivity(Intent().setComponent(component))
+        } catch (error: RuntimeException) {
+            recordManagementResult(module.component.flattenToString(), "settings",
+                Result.failure(IllegalStateException("Add-on settings could not be opened. Refresh modules or reinstall the add-on.", error)), "")
+        }
     }
 
     private fun uninstallModule(module: ModuleRecord) {

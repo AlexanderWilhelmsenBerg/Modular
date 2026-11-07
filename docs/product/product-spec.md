@@ -288,6 +288,28 @@ physical-device acceptance. TalkBack, work-profile transitions, process recovery
 keyboard/system insets, HOME role, and Android uninstall cancellation/success still
 require the device checklist in core-completion.md.
 
-External presentation/theme loading, rich configuration forms, automation, scripts,
+External presentation/theme loading, richer configuration schemas, automation, scripts,
 MCP transport, and terminal remain later features. The theme-extension design is a
 contract proposal, not an implemented external theme loader.
+
+## 18. Module settings for ordinary use
+
+- Every discovered module has a visible **Settings** action in Core. Show an explicit
+  unavailable, connecting, incompatible, or no-settings state instead of an empty screen.
+- Core renders the validated descriptor's flat settings as ordinary controls: switches,
+  bounded number fields, text fields, and enumerated choices. Normal setup requires no
+  JSON, manual instance creation, capability identifiers, or context creation.
+- A sort helper's **Use on Home** action validates and saves its settings and selects its
+  ordering atomically. **Save settings** updates active settings without manual deactivation.
+  Failed changes preserve the previous working configuration. **Use alphabetical order**
+  restores the built-in order. Advanced instance/context tools remain optional.
+- A module's **Permissions and settings** action opens only its declared, revalidated
+  exported management Activity within the installed provider package, including when its
+  service is unavailable. Android special access must be explicitly approved by the user.
+- Both official add-on launcher screens show readable controls and a **Configure in
+  Modular** action which opens that module's Core settings. Most Used visibly exposes
+  Usage Access and distinguishes denied access, no history, and unavailable history.
+- Most Used must demonstrate real foreground activity ranking above an unused alphabetical
+  fixture in cross-APK acceptance. Zero-history alphabetical output alone is insufficient.
+
+See [Module settings](../implementation/module-settings.md) for UI and acceptance evidence.

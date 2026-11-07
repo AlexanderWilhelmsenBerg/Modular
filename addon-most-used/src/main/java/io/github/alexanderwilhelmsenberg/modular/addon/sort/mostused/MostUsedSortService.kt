@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused
 
 import android.app.usage.UsageStatsManager
+import android.os.Binder
 import android.os.IBinder
 import android.os.Process
 import android.os.UserManager
@@ -29,14 +30,17 @@ class MostUsedSortService : BaseModuleService() {
                         "Sort request exceeds maximum item count",
                     )
                 }
-                if (!UsageAccess.isGranted(this@MostUsedSortService)) {
-                    return failed(
-                        AppSortResultParcel.STATUS_FAILED,
-                        "Usage access is off. Enable it in Most Used settings.",
-                    )
-                }
-
+                // A capability Binder call arrives with Core's calling identity. After
+                // authenticating Core, use this add-on's identity for its own app-op and
+                // UsageStatsManager calls; Core's Usage Access grant is unrelated.
+                val identity = Binder.clearCallingIdentity()
                 return try {
+                    if (!UsageAccess.isGranted(this@MostUsedSortService)) {
+                        return failed(
+                            AppSortResultParcel.STATUS_FAILED,
+                            "Usage access is off for Most Used. Open Most Used settings to enable it.",
+                        )
+                    }
                     // Android returns aggregate package records whose underlying intervals
                     // overlap this rolling window. These are approximate window totals.
                     val now = System.currentTimeMillis()
@@ -64,17 +68,21 @@ class MostUsedSortService : BaseModuleService() {
                     if (!UsageAccess.isGranted(this@MostUsedSortService)) {
                         return failed(
                             AppSortResultParcel.STATUS_FAILED,
-                            "Usage access is off. Enable it in Most Used settings.",
+                            "Usage access is off for Most Used. Open Most Used settings to enable it.",
                         )
                     }
                     AppSortResultParcel(
                         status = AppSortResultParcel.STATUS_SUCCESS,
                         orderedKeys = sorted.map { it.key },
-                        message = null,
+                        message = if (weights.values.none { it > 0L }) {
+                            "Android reported no foreground time for these apps in the selected period."
+                        } else null,
                     )
                 } catch (_: RuntimeException) {
                     if (!context.isActive) throw SecurityException("Module instance is no longer active")
                     failed(AppSortResultParcel.STATUS_FAILED, "Usage statistics are unavailable.")
+                } finally {
+                    Binder.restoreCallingIdentity(identity)
                 }
             }
         }

@@ -94,6 +94,10 @@ Product clarification (2026-11-04): default Home rows contain only app-name text
 
 [Most Used](docs/addons/most-used.md) optionally puts apps with the most recorded
 foreground time at the top of Home. It has its own APK and Android Usage Access
-permission screen. Choose a time window per instance; Core keeps its alphabetical
+permission screen. Open its Settings in Core, choose a time window, and tap **Use on Home**; Core keeps its alphabetical
 fallback when the add-on is disabled or access is unavailable. Signed debug and
 release downloads are available as separate artifacts in the Signed APKs workflow.
+
+Module cards have a **Settings** button with normal controls and a **Use on Home**
+action for sort helpers. Instances, contexts, and JSON editing are under Advanced
+configuration and are not required for normal add-on setup.

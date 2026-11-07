@@ -161,6 +161,11 @@ jobs:
             adb install -r addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
             adb install -r test-launcher-app/build/outputs/apk/debug/test-launcher-app-debug.apk
             adb install -r test-community-module/build/outputs/apk/debug/test-community-module-debug.apk
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            python3 scripts/capture-module-settings.py
+            gradle :addon-most-used:connectedDebugAndroidTest :reference-sort-alphabetical:connectedDebugAndroidTest --stacktrace
+            adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
+            adb install -r addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
             gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; exit 1; }
 
             adb install -r reference-sort-alphabetical/build/outputs/apk/release/reference-sort-alphabetical-release.apk
@@ -177,6 +182,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: device-test-reports
-          path: app/build/reports/androidTests/
+          path: |
+            app/build/reports/androidTests/
+            addon-most-used/build/reports/androidTests/
+            reference-sort-alphabetical/build/reports/androidTests/
+
+      - name: Upload settings screen captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: module-settings-screenshots
+          path: build/ui-screenshots/
+          if-no-files-found: warn
 
 

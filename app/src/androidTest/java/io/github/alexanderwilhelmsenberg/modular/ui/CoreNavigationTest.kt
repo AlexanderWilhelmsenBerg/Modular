@@ -1,6 +1,9 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
 import android.content.Intent
+import android.content.ComponentName
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotFocused
@@ -102,4 +105,35 @@ class CoreNavigationTest {
             composeRule.runOnIdle { composeRule.activity.intent = originalIntent }
         }
     }
+    @Test
+    fun moduleSettingsIntentOpensTypedControlsAndSurvivesRecreation() {
+        val originalIntent = composeRule.activity.intent
+        try {
+            composeRule.runOnIdle {
+                val component = ComponentName(
+                    "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug",
+                    "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.MostUsedSortService",
+                )
+                val settingsIntent = Intent(ModuleContract.ACTION_OPEN_MODULE_SETTINGS)
+                    .putExtra(ModuleContract.EXTRA_MODULE_COMPONENT, component.flattenToString())
+                InstrumentationRegistry.getInstrumentation()
+                    .callActivityOnNewIntent(composeRule.activity, settingsIntent)
+            }
+            composeRule.waitUntil(15_000) {
+                composeRule.onAllNodesWithTag("module-setting-days").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithTag("module-setting-days").assertIsDisplayed()
+            composeRule.onNodeWithText("Use on Home").assertIsDisplayed()
+            composeRule.runOnIdle { composeRule.activity.intent = originalIntent }
+            composeRule.activityRule.scenario.recreate()
+            composeRule.waitUntil(15_000) {
+                composeRule.onAllNodesWithTag("module-setting-days").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithTag("module-setting-days").assertIsDisplayed()
+            composeRule.onNodeWithText("Close").performClick()
+        } finally {
+            composeRule.runOnIdle { composeRule.activity.intent = originalIntent }
+        }
+    }
+
 }

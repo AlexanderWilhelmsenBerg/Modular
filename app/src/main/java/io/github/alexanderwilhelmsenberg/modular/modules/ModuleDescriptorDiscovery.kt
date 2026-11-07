@@ -54,7 +54,7 @@ internal object ModuleDescriptorDiscovery {
         packageManager: PackageManager,
         service: ServiceInfo,
         declaration: String,
-    ) {
+    ): ComponentName {
         val packageName = service.packageName
         val className = if (declaration.startsWith('.')) {
             val packageInfo = try {
@@ -93,6 +93,7 @@ internal object ModuleDescriptorDiscovery {
         require(activity.exported && activity.enabled && activity.applicationInfo.enabled) {
             "Management Activity must be exported and enabled"
         }
+        return component
     }
 
     private fun sha256(raw: String): String = MessageDigest.getInstance("SHA-256")

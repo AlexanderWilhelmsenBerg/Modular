@@ -55,7 +55,7 @@ acceptance remains open; see product-spec section 17 and the device checklist.
 
 ## Phase 2 — Module UX and richer composition
 
-- richer schema-driven configuration forms.
+- richer nested schemas and configuration controls beyond the implemented flat fields.
 - bounded external surface protocol and optional alternative Home/Drawer modules.
 - optional favorites, alphabet index, and alternative layouts.
 - richer instance configuration.

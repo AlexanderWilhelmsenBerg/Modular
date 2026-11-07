@@ -53,6 +53,7 @@ internal fun ModuleManagementCard(
     onRetry: (ModuleRecord) -> Unit,
     onUninstall: (ModuleRecord) -> Unit,
     onSetGrant: (ModuleRecord, CapabilityId, Boolean) -> Unit,
+    onOpenSettings: (ModuleRecord) -> Unit = {},
 ) {
     var showUninstall by remember(module.component) { mutableStateOf(false) }
     var detailsExpanded by remember(module.component) { mutableStateOf(false) }
@@ -71,10 +72,6 @@ internal fun ModuleManagementCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(module.label, style = MaterialTheme.typography.titleMedium)
-            Text(
-                module.component.flattenToShortString(),
-                style = MaterialTheme.typography.bodySmall,
-            )
 
             Row(
                 Modifier.fillMaxWidth(),
@@ -111,6 +108,7 @@ internal fun ModuleManagementCard(
             }
             if (detailsExpanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(module.component.flattenToShortString(), style = MaterialTheme.typography.bodySmall)
                     module.moduleVersion?.let { Text("Version: $it", style = MaterialTheme.typography.bodySmall) }
                     module.protocolVersion?.let { Text("Protocol: $it", style = MaterialTheme.typography.bodySmall) }
                     Text(
@@ -144,14 +142,19 @@ internal fun ModuleManagementCard(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Actions", style = MaterialTheme.typography.labelLarge)
                 Button(
+                    onClick = { onOpenSettings(module) },
+                    modifier = Modifier.fillMaxWidth().semantics {
+                        contentDescription = "${module.label} settings"
+                    },
+                ) { Text("Settings") }
+                OutlinedButton(
                     onClick = { onRetry(module) },
                     enabled = canRetry,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Retry connection") }
-                OutlinedButton(
+                TextButton(
                     onClick = { showUninstall = true },
                     enabled = !isCore,
-                    modifier = Modifier.fillMaxWidth(),
                 ) { Text("Uninstall add-on") }
             }
 

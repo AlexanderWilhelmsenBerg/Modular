@@ -24,4 +24,4 @@ Record the commit-specific Android CI build, unit/lint, emulator IPC, and indepe
 
 ## Later work
 
-This contract provides bounded flat configuration fields and a JSON editor. Rich schema-driven forms and configuration UX, external Home/Drawer surfaces, external theme loading, filter providers, richer installation/distribution, automation, scripts, MCP transport, and terminal providers remain later roadmap phases. None is needed for a Core-only launcher or the per-instance sort proof.
+Core renders bounded flat configuration fields as normal module settings controls; advanced JSON editing remains available. Richer nested schemas and configuration UX, external Home/Drawer surfaces, external theme loading, filter providers, richer installation/distribution, automation, scripts, MCP transport, and terminal providers remain later roadmap phases. None is needed for a Core-only launcher or the per-instance sort proof.

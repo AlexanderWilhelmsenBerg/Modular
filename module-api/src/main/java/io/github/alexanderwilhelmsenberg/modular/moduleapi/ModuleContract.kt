@@ -7,6 +7,11 @@ object ModuleContract {
     const val SERVICE_ACTION =
         "io.github.alexanderwilhelmsenberg.modular.action.MODULE"
 
+    /** Opens Core's settings for one discovered module; navigation grants no authority. */
+    const val ACTION_OPEN_MODULE_SETTINGS =
+        "io.github.alexanderwilhelmsenberg.modular.action.OPEN_MODULE_SETTINGS"
+    const val EXTRA_MODULE_COMPONENT = "moduleComponent"
+
     /**
      * Protocol v1: discovery/metadata handshake only.
      * Protocol v2: adds Core-host session Binder exchange.

@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Capture and inspect real add-on/Core settings on the CI emulator."""
+from pathlib import Path
+import subprocess
+import time
+import xml.etree.ElementTree as ET
+
+out = Path("build/ui-screenshots")
+out.mkdir(parents=True, exist_ok=True)
+
+
+def adb(*args):
+    return subprocess.check_output(["adb", *args], timeout=20)
+
+
+def capture(name, start_args, expected):
+    adb("shell", "am", "start", "-W", *start_args)
+    deadline = time.monotonic() + 30
+    last_text = ""
+    while time.monotonic() < deadline:
+        adb("shell", "uiautomator", "dump", "/sdcard/modular-settings.xml")
+        xml = adb("shell", "cat", "/sdcard/modular-settings.xml")
+        root = ET.fromstring(xml)
+        last_text = " ".join(
+            node.get("text", "") + " " + node.get("content-desc", "")
+            for node in root.iter("node")
+        )
+        if all(value.casefold() in last_text.casefold() for value in expected):
+            (out / (name + ".xml")).write_bytes(xml)
+            (out / (name + ".png")).write_bytes(adb("exec-out", "screencap", "-p"))
+            print("Visible settings verified:", name)
+            return
+        time.sleep(0.5)
+    raise RuntimeError(f"Missing settings controls in {name}: {expected}; visible: {last_text}")
+
+
+capture("most-used", ["-n", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug/io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.UsageAccessActivity"], ["Open Usage Access settings", "Configure in Modular"])
+capture("alphabetical", ["-n", "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical.debug/io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical.SortSettingsActivity"], ["Configure in Modular"])
+capture("core-most-used", ["-a", "io.github.alexanderwilhelmsenberg.modular.action.OPEN_MODULE_SETTINGS", "-p", "io.github.alexanderwilhelmsenberg.modular.debug", "--es", "moduleComponent", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug/io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.MostUsedSortService"], ["Recent days", "Use on Home"])
+adb("shell", "am", "force-stop", "io.github.alexanderwilhelmsenberg.modular.debug")

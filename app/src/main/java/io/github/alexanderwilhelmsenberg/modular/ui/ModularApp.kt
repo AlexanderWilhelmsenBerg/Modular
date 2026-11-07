@@ -67,6 +67,7 @@ fun ModularApp(
     onRetryModule: (ModuleRecord) -> Unit = {},
     onUninstallModule: (ModuleRecord) -> Unit = {},
     onSetGrant: (ModuleRecord, CapabilityId, Boolean) -> Unit = { _, _, _ -> },
+    onOpenModuleSettings: (ModuleRecord) -> Unit = {},
     onClearModuleEvents: () -> Unit = {},
     compositionContent: @Composable () -> Unit = {},
     corePackageName: String = "io.github.alexanderwilhelmsenberg.modular",
@@ -134,6 +135,7 @@ fun ModularApp(
                         onRetry = onRetryModule,
                         onUninstall = onUninstallModule,
                         onSetGrant = onSetGrant,
+                        onOpenSettings = onOpenModuleSettings,
                     )
                 }
 

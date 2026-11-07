@@ -204,9 +204,9 @@ fun HomeScreen(
     fun endEditing() { editing = false; keyboard?.hide(); focusManager.clearFocus() }
     BackHandler(enabled = editing) { endEditing() }
 
-    Box(Modifier.fillMaxSize().background(if (wallpaperMode) Color.Transparent else MaterialTheme.colorScheme.background).imePadding().navigationBarsPadding().statusBarsPadding()) {
+    Box(Modifier.fillMaxSize().background(if (wallpaperMode) Color.Transparent else MaterialTheme.colorScheme.background)) {
         if (wallpaperMode) WallpaperHomeScrim(wallpaperDimmingPercent, Modifier.fillMaxSize())
-        Column(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().imePadding().navigationBarsPadding().statusBarsPadding()) {
             Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { viewportHeight = it.height; reachability.setViewport(it.height) }) {
                 HomeAppList(
                     entries = entries,

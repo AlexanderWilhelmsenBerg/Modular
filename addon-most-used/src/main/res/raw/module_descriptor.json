@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "moduleId": "modular.addon.sort.mostused",
+  "moduleVersion": "0.1.0",
+  "displayName": "Most Used",
+  "description": "Orders apps by this profile's recent foreground time when Android Usage Access is enabled.",
+  "coreProtocol": { "min": 4, "max": 4 },
+  "providedCapabilities": ["modular.apps.sort/v1"],
+  "requestedCoreCapabilities": [],
+  "instanceConfiguration": {
+    "schemaVersion": 1,
+    "fields": [
+      {
+        "key": "days",
+        "title": "Recent days",
+        "type": "integer",
+        "default": 7,
+        "min": 1,
+        "max": 30
+      }
+    ]
+  },
+  "managementActivity": ".UsageAccessActivity"
+}

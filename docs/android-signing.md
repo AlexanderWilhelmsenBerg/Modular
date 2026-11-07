@@ -54,7 +54,9 @@ The CI verifier uses OpenSSL to extract that public-key representation.
 After `.github/workflows/signed-apks.yml` is on the default branch, run **Signed
 APKs** from the Actions tab, selecting the trusted branch/tag to build. The
 `modular-signed-apks` artifact contains persistent debug and release APKs for Core
-and the reference module. The workflow fails if secrets are absent or the
+and the Alphabetical Sort reference and Most Used add-ons. Separate
+`modular-most-used-release` and `modular-most-used-debug` artifacts contain just
+the useful add-on APK for the corresponding Core variant. The workflow fails if secrets are absent or the
 certificates do not match the pinned public fingerprints. It never falls back to
 unsigned or disposable signing for distribution.
 
@@ -72,6 +74,7 @@ Set `MODULAR_KEYSTORE_PATH` to an absolute path outside the checkout and
 ```sh
 gradle :app:assembleDebug :app:assembleRelease \
   :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease \
+  :addon-most-used:assembleDebug :addon-most-used:assembleRelease \
   --no-configuration-cache
 python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json
 ```

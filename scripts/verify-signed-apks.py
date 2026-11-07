@@ -36,6 +36,7 @@ def main():
     for module, base_id in (
         ("app", "io.github.alexanderwilhelmsenberg.modular"),
         ("reference-sort-alphabetical", "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical"),
+        ("addon-most-used", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused"),
     ):
         for variant in ("debug", "release"):
             apk = Path(module) / f"build/outputs/apk/{variant}/{module}-{variant}.apk"
@@ -53,7 +54,7 @@ def main():
             if expected and digest != expected[variant]["sha256"]:
                 raise SystemExit(f"Unexpected {variant} signing certificate: {apk}")
             if variant in signers and signers[variant] != digest:
-                raise SystemExit(f"Core and reference module have different {variant} signers")
+                raise SystemExit(f"Core and official add-ons have different {variant} signers")
             signers[variant] = digest
             badging = subprocess.check_output([android_tool("aapt2"), "dump", "badging", apk], text=True)
             identity = base_id + (".debug" if variant == "debug" else "")

@@ -39,6 +39,7 @@ jobs:
           :module-sdk:testDebugUnitTest
           :app:testDebugUnitTest
           :reference-sort-alphabetical:testDebugUnitTest
+          :addon-most-used:testDebugUnitTest
           --stacktrace
 
       - name: Lint
@@ -49,6 +50,7 @@ jobs:
           :test-community-module:lintDebug
           :app:lintDebug
           :reference-sort-alphabetical:lintDebug
+          :addon-most-used:lintDebug
           --stacktrace
 
       - name: Assemble debug and test APKs
@@ -57,6 +59,7 @@ jobs:
           :app:assembleDebug
           :app:assembleDebugAndroidTest
           :reference-sort-alphabetical:assembleDebug
+          :addon-most-used:assembleDebug
           :test-community-module:assembleDebug
           --stacktrace
 
@@ -98,6 +101,7 @@ jobs:
             module-sdk/build/reports/
             test-community-module/build/reports/
             reference-sort-alphabetical/build/reports/
+            addon-most-used/build/reports/
 
   ipc-smoke:
     env:
@@ -150,10 +154,11 @@ jobs:
             -no-boot-anim
             -camera-back none
           script: |
-            gradle :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease :test-launcher-app:assembleDebug :test-community-module:assembleDebug :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --stacktrace
+            gradle :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease :addon-most-used:assembleDebug :addon-most-used:assembleRelease :test-launcher-app:assembleDebug :test-community-module:assembleDebug :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --stacktrace
             python3 scripts/verify-signed-apks.py --expected-certificates "$RUNNER_TEMP/modular-ci-certificates.json"
             adb install -r app/build/outputs/apk/release/app-release.apk
             adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
+            adb install -r addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
             adb install -r test-launcher-app/build/outputs/apk/debug/test-launcher-app-debug.apk
             adb install -r test-community-module/build/outputs/apk/debug/test-community-module-debug.apk
             gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; exit 1; }

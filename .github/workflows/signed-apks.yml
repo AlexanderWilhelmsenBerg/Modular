@@ -41,7 +41,7 @@ jobs:
           MODULAR_KEYSTORE_PASSWORD: ${{ secrets.MODULAR_KEYSTORE_PASSWORD }}
         run: |
           python3 scripts/verify-keystore.py --expected-certificates docs/signing-certificates.json
-          gradle :app:assembleDebug :app:assembleRelease :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease --no-configuration-cache
+          gradle :app:assembleDebug :app:assembleRelease :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease :addon-most-used:assembleDebug :addon-most-used:assembleRelease --no-configuration-cache
       - name: Verify signatures and variant identities
         run: python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json
       - name: Upload signed APKs
@@ -53,6 +53,20 @@ jobs:
             app/build/outputs/apk/release/app-release.apk
             reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
             reference-sort-alphabetical/build/outputs/apk/release/reference-sort-alphabetical-release.apk
+            addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
+            addon-most-used/build/outputs/apk/release/addon-most-used-release.apk
+          if-no-files-found: error
+      - name: Upload Most Used release add-on
+        uses: actions/upload-artifact@v4
+        with:
+          name: modular-most-used-release
+          path: addon-most-used/build/outputs/apk/release/addon-most-used-release.apk
+          if-no-files-found: error
+      - name: Upload Most Used debug add-on
+        uses: actions/upload-artifact@v4
+        with:
+          name: modular-most-used-debug
+          path: addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
           if-no-files-found: error
       - name: Remove private signing material
         if: always()

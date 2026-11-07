@@ -121,7 +121,7 @@ Debug package names:
 
 Suggested review description (use only for the matching reviewed build):
 
-> Modular is an open-source Android launcher. Core requests REQUEST_DELETE_PACKAGES
+> Modular is an Android launcher. Core requests REQUEST_DELETE_PACKAGES
 > for user-confirmed uninstall actions. The separate Most Used add-on requests
 > PACKAGE_USAGE_STATS to rank apps locally, following explicit user permission.
 > Neither APK declares Internet, SMS, accessibility-service, or notification-listener

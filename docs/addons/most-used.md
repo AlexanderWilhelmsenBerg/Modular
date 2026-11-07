@@ -15,6 +15,8 @@ If Android shows a grey Usage Access switch with **controlled by a restricted se
 
 The debug APK is labelled **Modular Most Used Debug** so it can be distinguished from release in Android Settings. Its App info button targets its own package. A harmful-app installation warning is a separate Play Protect issue; see [installation troubleshooting](../android-signing.md#installation-warnings-and-restricted-settings). Do not treat switching variants as a guaranteed remedy for either restriction.
 
+Confirmed on Android 17 / One UI 9: tapping the blocked permission row to display the restriction dialog, then reopening App info, made the missing three-dot menu appear. After choosing **Allow restricted settings** and authenticating, return to Usage Access to grant access separately.
+
 References: [Android restricted settings](https://support.google.com/android/answer/12623953) and [Android's restriction-acknowledgement contract](https://android.googlesource.com/platform/packages/modules/Permission/+/b27b1901d/framework-s/java/android/app/ecm/EnhancedConfirmationManager.java).
 
 When Usage Access is off or revoked, saved pins still appear and the starred section offers the permission action. When access is on but Android reports no foreground history for the selected period, the section shows a no-history message and saved pins. An empty section still offers Pin apps. Apps with zero reported foreground time are not suggested.

@@ -58,6 +58,7 @@ internal fun HomeAppList(
     listState: LazyListState,
     reachability: HomeReachabilityState,
     navigationSpacePx: Int,
+    jumpHeaderLabel: String?,
     viewportHeightPx: Int,
     pausedProfiles: Set<Long>,
     showIcons: Boolean,
@@ -79,15 +80,15 @@ internal fun HomeAppList(
 ) {
     val foreground = if (wallpaperMode) Color.White else MaterialTheme.colorScheme.onSurface
     LazyColumn(
-        modifier = modifier.fillMaxSize().nestedScroll(remember(reachability, listState) { reachability.nestedScroll(listState) }),
+        modifier = modifier.fillMaxSize().testTag("home-list").nestedScroll(remember(reachability, listState) { reachability.nestedScroll(listState) }),
         state = listState,
         contentPadding = PaddingValues(bottom = 12.dp),
     ) {
-        item(key = "reachability-space") { Spacer(Modifier.height(with(androidx.compose.ui.platform.LocalDensity.current) { (reachability.offsetPx + navigationSpacePx).toDp() })) }
+        item(key = "reachability-space") { Spacer(Modifier.height(with(androidx.compose.ui.platform.LocalDensity.current) { reachability.offsetPx.toDp() })) }
         items(entries, key = { it.id }) { entry ->
             when (entry) {
                 is HomeListEntry.Header -> {
-                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(54.dp), contentAlignment = AbsoluteAlignment.BottomLeft) {
+                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(54.dp + with(androidx.compose.ui.platform.LocalDensity.current) { (if (entry.label == jumpHeaderLabel) navigationSpacePx else 0).toDp() }), contentAlignment = AbsoluteAlignment.BottomLeft) {
                         val start = (maxWidth * 0.126f).coerceAtLeast(16.dp)
                         Text(entry.label, Modifier.absoluteOffset(x = start).padding(bottom = 6.dp).testTag("section:${entry.label}"), color = foreground, fontSize = 22.sp, fontWeight = FontWeight.Medium, style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default)
                     }

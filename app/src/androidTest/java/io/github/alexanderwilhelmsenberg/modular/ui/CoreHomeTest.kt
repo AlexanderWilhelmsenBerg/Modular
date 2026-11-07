@@ -461,6 +461,36 @@ class CoreHomeTest {
     }
 
     @Test
+    fun railJumpLeavesBlankSpaceAboveSelectedHeader() {
+        val apps = (0..25).flatMap { letter ->
+            (1..5).map { number ->
+                val prefix = ('A'.code + letter).toChar()
+                app("fixture.$letter.$number", "$prefix sample $number")
+            }
+        }
+        composeRule.setContent {
+            HomeScreen(
+                catalog = AppCatalog(apps = apps),
+                onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                showMakeDefault = false, showAppIcons = false,
+            )
+        }
+        val locale = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.locales[0]
+        val alphabet = HomeSectionBuilder(locale).alphabet
+        val kIndex = alphabet.indexOf("K")
+        assertTrue(kIndex >= 0)
+        composeRule.onNodeWithTag("alphabet-rail").performTouchInput {
+            down(Offset(width - 8f, height * (kIndex + 0.5f) / alphabet.size))
+            up()
+        }
+        val viewport = composeRule.onNodeWithTag("home-list").fetchSemanticsNode().boundsInRoot
+        val header = composeRule.onNodeWithTag("section:K").fetchSemanticsNode().boundsInRoot
+        val relativeTop = (header.top - viewport.top) / viewport.height
+        assertTrue("Selected header should sit near the upper third: $relativeTop", relativeTop in 0.25f..0.47f)
+        composeRule.onNodeWithText("J sample 5").assertDoesNotExist()
+    }
+
+    @Test
     fun clearingSearchRestoresPreviousListAnchor() {
         val state = LazyListState()
         val apps = (1..32).map { app("alpha$it.pkg", "Alpha $it") }

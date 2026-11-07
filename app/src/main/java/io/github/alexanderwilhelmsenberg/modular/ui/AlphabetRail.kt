@@ -3,7 +3,6 @@ package io.github.alexanderwilhelmsenberg.modular.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -11,6 +10,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,6 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -36,6 +38,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,8 +72,8 @@ internal fun AlphabetRail(
         lastNavigationLabel = destination
         onSelect(destination)
     }
-    BoxWithConstraints(modifier.width(112.dp).fillMaxHeight().testTag("alphabet-rail")) {
-        val condensed = maxHeight / alphabet.size < (22f * LocalDensity.current.fontScale).dp
+    BoxWithConstraints(modifier.width(204.dp).fillMaxHeight(0.72f).absoluteOffset(x = (-8).dp).testTag("alphabet-rail")) {
+        val condensed = maxHeight / alphabet.size < (18f * LocalDensity.current.fontScale).dp
         val visual = if (condensed) alphabet.filterIndexed { i, label -> i == 0 || i == alphabet.lastIndex || i % 2 == 0 || label == "★" } else alphabet
         val density = LocalDensity.current
         val heightPx = with(density) { maxHeight.roundToPx() }
@@ -78,15 +81,16 @@ internal fun AlphabetRail(
             visual.forEachIndexed { visualIndex, label ->
                 val centerY = (visualIndex + 0.5f) / visual.size
                 val distance = if (fingerFraction < 0) 9f else abs(centerY - fingerFraction) * visual.size
-                val target = if (fingerFraction < 0) 0f else -64f * exp(-0.36f * distance * distance)
+                val target = if (fingerFraction < 0) 0f else -120f * exp(-0.02f * distance * distance)
                 val shift by animateFloatAsState(targetValue = target, animationSpec = tween(180), label = "rail curve")
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text(
                         label,
-                        Modifier.offset(x = shift.dp).testTag("rail:$label"),
+                        Modifier.absoluteOffset(x = shift.dp).testTag("rail:$label"),
                         color = if (label in populated) foreground else foreground.copy(alpha = 0.38f),
                         fontSize = if (condensed) 12.sp else 18.sp,
                         fontWeight = if (label == selected) FontWeight.Bold else FontWeight.Normal,
+                        style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default,
                         maxLines = 1,
                     )
                 }

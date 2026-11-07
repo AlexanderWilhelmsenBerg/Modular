@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
@@ -116,13 +117,17 @@ fun HomeScreen(
         if (safeFeatured != null) listOf("★") + sectionBuilder.alphabet else sectionBuilder.alphabet
     }
     val reachability = rememberSaveable(saver = Saver(save = { it.offsetPx }, restore = { HomeReachabilityState(it) })) { HomeReachabilityState() }
+    val density = LocalDensity.current
     var viewportHeight by remember { mutableIntStateOf(0) }
     var navigationSpacePx by rememberSaveable { mutableIntStateOf(0) }
+    var jumpHeaderLabel by rememberSaveable { mutableStateOf<String?>(null) }
     var jump by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var jumpSerial by remember { mutableIntStateOf(0) }
     var savedAnchorIndex by rememberSaveable { mutableIntStateOf(-1) }
     var savedAnchorOffset by rememberSaveable { mutableIntStateOf(0) }
     var savedAnchorId by rememberSaveable { mutableStateOf<String?>(null) }
+    var savedJumpHeaderLabel by rememberSaveable { mutableStateOf<String?>(null) }
+    var savedNavigationSpacePx by rememberSaveable { mutableIntStateOf(0) }
     var previousQuery by remember { mutableStateOf(query) }
     var observedResetToken by rememberSaveable { mutableIntStateOf(homeResetToken) }
     LaunchedEffect(query) {
@@ -131,16 +136,23 @@ fun HomeScreen(
                 savedAnchorIndex = listState.firstVisibleItemIndex
                 savedAnchorOffset = listState.firstVisibleItemScrollOffset
                 savedAnchorId = anchorableEntries.getOrNull(savedAnchorIndex - 1)?.id
+                savedJumpHeaderLabel = jumpHeaderLabel
+                savedNavigationSpacePx = navigationSpacePx
                 reachability.reset()
                 navigationSpacePx = 0
+                jumpHeaderLabel = null
                 listState.scrollToItem(0)
             } else if (previousQuery.isNotBlank() && query.isBlank()) {
+                jumpHeaderLabel = savedJumpHeaderLabel?.takeIf { label -> entries.any { it is HomeListEntry.Header && it.label == label } }
+                navigationSpacePx = if (jumpHeaderLabel != null) savedNavigationSpacePx else 0
                 val currentIndex = entries.indexOfFirst { it.id == savedAnchorId }
                 if (currentIndex >= 0) listState.scrollToItem(currentIndex + 1, savedAnchorOffset)
                 else if (savedAnchorIndex >= 0) listState.scrollToItem(savedAnchorIndex.coerceAtMost(entries.lastIndex + 1), savedAnchorOffset)
                 else listState.scrollToItem(0)
                 savedAnchorIndex = -1
                 savedAnchorId = null
+                savedJumpHeaderLabel = null
+                savedNavigationSpacePx = 0
             } else if (query.isNotBlank()) listState.scrollToItem(0)
             previousQuery = query
         }
@@ -151,9 +163,12 @@ fun HomeScreen(
             updateQuery("")
             savedAnchorIndex = -1
             savedAnchorId = null
+            savedJumpHeaderLabel = null
+            savedNavigationSpacePx = 0
             previousQuery = ""
             reachability.reset()
             navigationSpacePx = 0
+            jumpHeaderLabel = null
             listState.scrollToItem(0)
         }
     }
@@ -161,8 +176,9 @@ fun HomeScreen(
         val target = jump ?: return@LaunchedEffect
         val index = headerIndices[target.first] ?: return@LaunchedEffect
         reachability.reset()
-        navigationSpacePx = viewportHeight / 3
-        listState.scrollToItem(index, -(viewportHeight / 3))
+        navigationSpacePx = (viewportHeight / 3 - with(density) { 28.dp.roundToPx() }).coerceAtLeast(0)
+        jumpHeaderLabel = target.first
+        listState.scrollToItem(index)
     }
     var editing by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -180,6 +196,7 @@ fun HomeScreen(
                     listState = listState,
                     reachability = reachability,
                     navigationSpacePx = navigationSpacePx,
+                    jumpHeaderLabel = jumpHeaderLabel,
                     viewportHeightPx = viewportHeight,
                     pausedProfiles = pausedProfiles,
                     showIcons = showAppIcons,
@@ -203,7 +220,7 @@ fun HomeScreen(
                     populated = headerIndices.keys,
                     onSelect = { label -> jumpSerial += 1; jump = label to jumpSerial },
                     wallpaperMode = wallpaperMode,
-                    modifier = Modifier.align(AbsoluteAlignment.CenterRight),
+                    modifier = Modifier.align(AbsoluteAlignment.BottomRight),
                 )
             }
             Box(Modifier.fillMaxWidth().background(if (wallpaperMode) Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Black.copy(alpha = 0.75f))) else Brush.verticalGradient(listOf(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.background)))) {
@@ -214,6 +231,7 @@ fun HomeScreen(
                     onEditingChange = { editing = it },
                     onSearchAction = { endEditing() },
                     onOpenSettings = { endEditing(); onOpenSettings() },
+                    wallpaperMode = wallpaperMode,
                 )
             }
         }

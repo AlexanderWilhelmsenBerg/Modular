@@ -24,6 +24,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -41,6 +42,7 @@ internal fun HomeBottomControls(
     onEditingChange: (Boolean) -> Unit,
     onSearchAction: () -> Unit,
     onOpenSettings: () -> Unit,
+    wallpaperMode: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -80,7 +82,7 @@ internal fun HomeBottomControls(
             )
         }
         IconButton(onClick = onOpenSettings, modifier = Modifier.size(48.dp).testTag("home-settings").semantics { contentDescription = "Settings" }) {
-            Icon(painterResource(R.drawable.ic_home_settings), null)
+            Icon(painterResource(R.drawable.ic_home_settings), null, tint = if (wallpaperMode) Color.White else MaterialTheme.colorScheme.onSurface)
         }
     }
 }

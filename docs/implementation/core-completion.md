@@ -33,7 +33,7 @@ Home controls and built-in themes and connects optional sort helpers to Home.
 
 Install the matching debug or release reference sort APK. In Core Settings, inspect
 and enable its service; create an instance for `modular.reference.sort.alphabetical`,
-then a context binding `apps.sort/v1` to that instance and activate it. The provider
+then a context binding `modular.apps.sort/v1` to that instance and activate it. The provider
 is optional: deactivating the context returns Home to Core alphabetical order.
 
 Create one instance with `{"reverse":false}` and another with `{"reverse":true}`.
@@ -54,6 +54,17 @@ The Core completion change is tracked in [PR #12](https://github.com/AlexanderWi
 
 ## Physical-device acceptance
 
+The owner reports the non-add-on checks in the device checklist passed: Home navigation,
+search and keyboard behavior, screen-edge reachability, built-in themes and persistence,
+reboot recovery, and installed-app updates. This is user-reported evidence on the tested
+device, not a claim about every OEM or configuration. TalkBack is deferred by the owner;
+work-profile tests are not part of this personal-device acceptance. Profile creation and
+management are outside Core; Core retains existing profile identity for correct launching.
+Add-on activation, disable/fallback, and uninstall cancellation/success remain pending
+because the reference APK was not installed. The reported malformed search glyph is
+corrected separately from the passing search behavior.
+
+
 Validate Android HOME role selection, actual app launches, long queries with the
 system keyboard, TalkBack focus, all themes in gesture/three-button navigation,
 large fonts, work-profile pause/resume, process death and OEM package updates.
@@ -73,4 +84,4 @@ terminal integrations remain later add-ons. They must preserve baseline Core rec
 configuration, validated manifest descriptors, a reusable public SDK, and independent
 add-on build/runtime acceptance. [Product specification section 17](../product/product-spec.md#17-core-framework-and-remaining-acceptance)
 tracks the resulting contract and remaining physical-device acceptance. Build/unit/lint
-and emulator results are recorded against PR #14; device-only checks above remain open.
+and emulator results are recorded against PR #14; remaining device checks are tracked above.

@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -67,30 +68,30 @@ internal fun HomeAppRow(
             )
             .semantics { if (!enabled) stateDescription = unavailabilityReason ?: "Unavailable" }
             .testTag("app-row:${app.key.stableId}"),
-        contentAlignment = Alignment.CenterStart,
+        contentAlignment = AbsoluteAlignment.CenterLeft,
     ) {
         val iconStart = (maxWidth * 0.126f).coerceAtLeast(16.dp)
         val labelStart = (maxWidth * 0.282f).coerceAtLeast(iconStart + 56.dp)
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Spacer(Modifier.width(iconStart))
-            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-                if (showIcon) {
-                    if (icon != null) Image(bitmap = icon, contentDescription = null, modifier = Modifier.size(40.dp))
-                    else Box(Modifier.size(36.dp).background(foreground.copy(alpha = 0.16f), RoundedCornerShape(9.dp)))
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.width(iconStart))
+                Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                    if (showIcon) {
+                        if (icon != null) Image(bitmap = icon, contentDescription = null, modifier = Modifier.size(40.dp))
+                        else Box(Modifier.size(36.dp).background(foreground.copy(alpha = 0.16f), RoundedCornerShape(9.dp)))
+                    }
                 }
+                Spacer(Modifier.width(labelStart - iconStart - 40.dp))
+                Text(
+                    text = app.label,
+                    modifier = Modifier.weight(1f).padding(end = 52.dp),
+                    color = if (enabled) foreground else foreground.copy(alpha = 0.55f),
+                    fontSize = 18.sp,
+                    style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            Spacer(Modifier.width(labelStart - iconStart - 40.dp))
-            Text(
-                text = app.label,
-                modifier = Modifier.weight(1f).padding(end = 52.dp),
-                color = if (enabled) foreground else foreground.copy(alpha = 0.55f),
-                fontSize = 18.sp,
-                style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             if (onPinApp != null) DropdownMenuItem(

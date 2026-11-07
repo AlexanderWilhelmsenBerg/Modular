@@ -397,6 +397,24 @@ class CoreHomeTest {
     }
 
     @Test
+    fun cancelledRailGestureRemovesBubbleWithoutLaunchingApp() {
+        var launches = 0
+        composeRule.setContent {
+            HomeScreen(
+                catalog = AppCatalog(apps = listOf(app("alpha.pkg", "Alpha"), app("zeta.pkg", "Zeta"))),
+                onLaunch = { launches++ }, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                showMakeDefault = false,
+            )
+        }
+        composeRule.onNodeWithTag("alphabet-rail").performTouchInput {
+            down(Offset(width - 8f, height * 0.5f))
+            cancel()
+        }
+        composeRule.onNodeWithTag("alphabet-bubble").assertDoesNotExist()
+        composeRule.runOnIdle { assertEquals(0, launches) }
+    }
+
+    @Test
     fun largeFontRailOffersFullSectionChooser() {
         composeRule.setContent {
             val density = LocalDensity.current
@@ -453,6 +471,7 @@ class CoreHomeTest {
                 showMakeDefault = false,
             )
         }
+        composeRule.onNodeWithTag("home-search-field").performClick()
         composeRule.runOnIdle { state.requestScrollToItem(20) }
         composeRule.waitForIdle()
         val previousIndex = state.firstVisibleItemIndex

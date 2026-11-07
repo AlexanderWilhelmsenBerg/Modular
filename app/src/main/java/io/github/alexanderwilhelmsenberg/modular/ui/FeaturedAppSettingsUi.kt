@@ -19,11 +19,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.home.HomeFeaturedState
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.FeaturedAppsResultParcel
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 /** Core's generic picker and pin manager for the currently selected featured provider. */
@@ -41,6 +43,10 @@ fun FeaturedAppSettingsUi(
     var pickerOpen by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     val byKey = remember(catalog) { catalog.associateBy { it.key } }
+    val duplicateKeys = remember(catalog) {
+        catalog.groupBy { it.label.lowercase(Locale.ROOT) }.values
+            .filter { it.size > 1 }.flatMap { group -> group.map { it.key } }.toSet()
+    }
 
     fun save(action: suspend () -> Result<Unit>) {
         if (busy) return
@@ -72,9 +78,8 @@ fun FeaturedAppSettingsUi(
                         if (unavailable) "${app?.label ?: key.packageName} (unavailable)" else app?.label ?: key.packageName,
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Text(
-                        "${key.activityName} · profile ${key.profileSerial}",
-                        style = MaterialTheme.typography.bodySmall,
+                    if (unavailable || key in duplicateKeys) Text(
+                        identityHint(key), style = MaterialTheme.typography.bodySmall,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(enabled = !busy && index > 0, onClick = {
@@ -97,7 +102,7 @@ fun FeaturedAppSettingsUi(
                     value = query,
                     onValueChange = { query = it },
                     label = { Text("Find an app") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("featured-app-picker-search"),
                     singleLine = true,
                 )
                 val choices = remember(catalog, featured.pinnedKeys, query) {
@@ -114,7 +119,7 @@ fun FeaturedAppSettingsUi(
                             enabled = !busy,
                             onClick = { save { onSetPinned(app.key, true) } },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text("${app.label} · ${app.key.packageName}/${app.key.activityName} · profile ${app.key.profileSerial}") }
+                        ) { Text(if (app.key in duplicateKeys) "${app.label} · ${identityHint(app.key)}" else app.label) }
                     }
                     if (choices.isEmpty()) item { Text("No matching apps.") }
                 }
@@ -130,3 +135,6 @@ fun FeaturedAppSettingsUi(
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }
 }
+
+private fun identityHint(key: AppKey): String =
+    "${key.packageName}/${key.activityName} · profile ${key.profileSerial}"

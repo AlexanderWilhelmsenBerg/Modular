@@ -303,9 +303,7 @@ class MainActivity : ComponentActivity() {
                                         "No usage history yet. Pin apps from add-on settings."
                                     else -> null
                                 },
-                                alphabeticalSections = activeContext.resolvedBindings.none {
-                                    it.capability == StandardCapabilities.AppsSort
-                                },
+                                alphabeticalSections = homeOrderedApps == null,
                                 onOpenFeaturedSettings = featured?.let { current -> {
                                     if (homeFeaturedController.featured.value?.binding == current.binding) {
                                         selectedModuleComponent = current.binding.route.component?.flattenToString()

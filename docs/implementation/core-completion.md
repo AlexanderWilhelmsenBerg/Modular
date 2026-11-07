@@ -31,19 +31,17 @@ Home controls and built-in themes and connects optional sort helpers to Home.
 
 ## Reference helper proof
 
-Install the matching debug or release reference sort APK. In Core Settings, inspect
-and enable its service; create an instance for `modular.reference.sort.alphabetical`,
-then a context binding `modular.apps.sort/v1` to that instance and activate it. The provider
-is optional: deactivating the context returns Home to Core alphabetical order.
+Install the matching debug or release reference sort APK. In Core Settings, enable
+its service and open **Settings** on the module card. Toggle **Reverse order**, then
+select **Use on Home**. Change the switch and **Save settings** to compare ordering.
+Select **Use alphabetical order** to restore Core ordering. No instance or context
+needs to be created for this ordinary path.
 
-Create one instance with `{"reverse":false}` and another with `{"reverse":true}`.
-Bind them in separate contexts and switch between those contexts to compare order.
-Protocol v4 delivers each instance's normalized configuration when acquiring its
-endpoint; the reference APK no longer uses a module-wide reverse preference.
-Deactivate an active context before editing its instance. Disable the module or
-deactivate the context to restore Core ordering. A hung, failed or invalid helper
-also falls back and records a bounded diagnostic event without preventing app
-launching or Settings.
+Protocol v4 still delivers each instance's normalized configuration when acquiring
+its endpoint. **Advanced configuration** exposes instances and contexts for custom
+composition, while ordinary settings manage a dedicated instance and Home binding.
+A disabled, hung, failed or invalid helper falls back and records a bounded
+diagnostic event without preventing app launching or Settings.
 
 ## Validation status
 

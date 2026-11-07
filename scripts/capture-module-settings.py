@@ -34,7 +34,20 @@ def capture(name, start_args, expected):
     raise RuntimeError(f"Missing settings controls in {name}: {expected}; visible: {last_text}")
 
 
-capture("most-used", ["-n", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug/io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.UsageAccessActivity"], ["Open Usage Access settings", "Configure in Modular"])
-capture("alphabetical", ["-n", "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical.debug/io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical.SortSettingsActivity"], ["Configure in Modular"])
-capture("core-most-used", ["-a", "io.github.alexanderwilhelmsenberg.modular.action.OPEN_MODULE_SETTINGS", "-p", "io.github.alexanderwilhelmsenberg.modular.debug", "--es", "moduleComponent", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug/io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.MostUsedSortService"], ["Recent days", "Use on Home"])
-adb("shell", "am", "force-stop", "io.github.alexanderwilhelmsenberg.modular.debug")
+try:
+    # dp widths at mdpi: narrow phone, common phones, and tablet; native light/dark.
+    adb("shell", "wm", "density", "160")
+    for width, mode, font_scale in [(320, "no", "1.0"), (375, "no", "1.0"), (414, "yes", "1.0"), (768, "yes", "1.0"), (375, "no", "1.3")]:
+        adb("shell", "wm", "size", f"{width}x900")
+        adb("shell", "cmd", "uimode", "night", mode)
+        adb("shell", "settings", "put", "system", "font_scale", font_scale)
+        suffix = f"-{width}dp-{'dark' if mode == 'yes' else 'light'}-font{font_scale}"
+        capture("most-used" + suffix, ["-n", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug/io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.UsageAccessActivity"], ["Open Usage Access settings", "Configure in Modular"])
+        capture("alphabetical" + suffix, ["-n", "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical.debug/io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical.SortSettingsActivity"], ["Configure in Modular"])
+        capture("core-most-used" + suffix, ["-a", "io.github.alexanderwilhelmsenberg.modular.action.OPEN_MODULE_SETTINGS", "-p", "io.github.alexanderwilhelmsenberg.modular.debug", "--es", "moduleComponent", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug/io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.MostUsedSortService"], ["Recent days", "Use on Home"])
+finally:
+    adb("shell", "wm", "size", "reset")
+    adb("shell", "wm", "density", "reset")
+    adb("shell", "cmd", "uimode", "night", "no")
+    adb("shell", "settings", "put", "system", "font_scale", "1.0")
+    adb("shell", "am", "force-stop", "io.github.alexanderwilhelmsenberg.modular.debug")

@@ -25,13 +25,17 @@ try:
         if "OK (" not in result:
             raise RuntimeError(f"Home v2 screenshots failed at {width}dp, font {font}:\n{result}")
         print(f"Captured Home v2 at {width}dp, font {font}")
+    # Required evidence must be on the runner before the optional video starts.
+    # Some emulator codecs disconnect ADB while recording; do not lose the PNGs.
+    subprocess.run(["adb", "pull", "/sdcard/Pictures/ModularHomeV2/.", str(out)], check=True, timeout=60)
     # Keep a short rail-press clip so reviewers can see the curve settle, not just its still frame.
     try:
         adb("shell", "wm", "size", "411x900")
         adb("shell", "cmd", "uimode", "night", "no")
         adb("shell", "settings", "put", "system", "font_scale", "1.0")
         clip = "/sdcard/modular-home-v2-rail.mp4"
-        recorder = subprocess.Popen(["adb", "shell", "screenrecord", "--time-limit", "8", clip], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        # H.264 encoders require even dimensions; the reference viewport is 411px wide.
+        recorder = subprocess.Popen(["adb", "shell", "screenrecord", "--size", "412x900", "--time-limit", "8", clip], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         time.sleep(0.5)
         result = adb("shell", "am", "instrument", "-w", "-e", "class", test_class + "#pressedRailShowsSelectedBubbleAndKeepsAppUnlaunched", runner, timeout=120)
         recorder.wait(timeout=12)
@@ -41,9 +45,16 @@ try:
             print("Rail video was unavailable; pressed-state PNG remains captured")
     except (OSError, subprocess.SubprocessError) as error:
         print(f"Rail video was unavailable: {error}")
-    subprocess.run(["adb", "pull", "/sdcard/Pictures/ModularHomeV2/.", str(out)], check=True, timeout=60)
 finally:
-    adb("shell", "wm", "size", "reset")
-    adb("shell", "wm", "density", "reset")
-    adb("shell", "cmd", "uimode", "night", "no")
-    adb("shell", "settings", "put", "system", "font_scale", "1.0")
+    # Cleanup is best effort for a disconnected disposable emulator. Required
+    # fixture/assertion/pull failures above still propagate and fail the job.
+    for command in [
+        ("wm", "size", "reset"),
+        ("wm", "density", "reset"),
+        ("cmd", "uimode", "night", "no"),
+        ("settings", "put", "system", "font_scale", "1.0"),
+    ]:
+        try:
+            adb("shell", *command, timeout=15)
+        except (OSError, subprocess.SubprocessError) as error:
+            print(f"Could not restore emulator setting ({' '.join(command)}): {error}")

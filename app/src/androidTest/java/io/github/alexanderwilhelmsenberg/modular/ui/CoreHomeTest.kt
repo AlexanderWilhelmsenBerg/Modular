@@ -349,6 +349,11 @@ class CoreHomeTest {
         assertTrue("Search is fixed beneath the list", searchTop > betaBottom)
         composeRule.onNodeWithTag("home-search-field").performTextInput("bet")
         composeRule.onNodeWithTag("alphabet-rail").assertDoesNotExist()
+        // IME inset animation can resize the list after text input has returned.
+        // Keep the visibility requirement, allowing that bounded layout transition.
+        composeRule.waitUntil(5_000) {
+            runCatching { composeRule.onNodeWithText("Beta").assertIsDisplayed(); true }.getOrDefault(false)
+        }
         composeRule.onNodeWithText("Beta").assertIsDisplayed()
     }
 

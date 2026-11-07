@@ -96,7 +96,10 @@ class CoreMostUsedIntegrationTest {
             context.startActivity(Intent(originalIntent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             rule.waitUntil(15_000) { rule.activityRule.scenario.state == Lifecycle.State.RESUMED }
             rule.onNodeWithTag("home-search-field").performTextClearance()
-            rule.waitUntil(15_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
+            rule.waitUntil(15_000) {
+                rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() &&
+                    rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty()
+            }
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("featured-permission").assertDoesNotExist()
             rule.activityRule.scenario.recreate()

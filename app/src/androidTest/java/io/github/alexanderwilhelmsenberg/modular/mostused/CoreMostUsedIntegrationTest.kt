@@ -11,11 +11,13 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
+import androidx.lifecycle.Lifecycle
 import io.github.alexanderwilhelmsenberg.modular.MainActivity
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import kotlinx.coroutines.delay
@@ -88,13 +90,15 @@ class CoreMostUsedIntegrationTest {
             withTimeout(10_000) {
                 while ((history.currentHistory().scores(7)[fixture] ?: 0.0) <= 0.0) delay(20)
             }
-            context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-                .setClass(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            // ActivityScenario filters lifecycle events by its original launch intent.
+            // Return with that intent so it observes RESUMED before recreation. HOME
+            // intent handling is exercised separately by CoreNavigationTest.
+            context.startActivity(Intent(originalIntent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            rule.waitUntil(15_000) { rule.activityRule.scenario.state == Lifecycle.State.RESUMED }
+            rule.onNodeWithTag("home-search-field").performTextClearance()
             rule.waitUntil(15_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("featured-permission").assertDoesNotExist()
-            // Restore the harness intent after checking real HOME navigation so recreation is tracked.
-            rule.runOnIdle { rule.activity.intent = originalIntent }
             rule.activityRule.scenario.recreate()
             rule.waitUntil(15_000) { rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithTag("section:★").assertIsDisplayed()

@@ -105,7 +105,7 @@ internal fun AlphabetRail(
             ) { Text(selected.orEmpty(), color = Color.White, fontSize = 30.sp, maxLines = 1) }
         }
         Box(
-            Modifier.width(48.dp).fillMaxHeight().align(AbsoluteAlignment.CenterRight)
+            Modifier.width(48.dp).fillMaxHeight().align(AbsoluteAlignment.CenterRight).testTag("alphabet-hit-lane")
                 .pointerInput(alphabet, populated, condensed) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)

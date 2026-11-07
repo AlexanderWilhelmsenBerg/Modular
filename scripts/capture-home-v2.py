@@ -41,7 +41,7 @@ try:
             print("Rail video was unavailable; pressed-state PNG remains captured")
     except (OSError, subprocess.SubprocessError) as error:
         print(f"Rail video was unavailable: {error}")
-    subprocess.run(["adb", "pull", f"/sdcard/Android/data/{package}/files/home-v2-screenshots/.", str(out)], check=True, timeout=60)
+    subprocess.run(["adb", "pull", "/sdcard/Pictures/ModularHomeV2/.", str(out)], check=True, timeout=60)
 finally:
     adb("shell", "wm", "size", "reset")
     adb("shell", "wm", "density", "reset")

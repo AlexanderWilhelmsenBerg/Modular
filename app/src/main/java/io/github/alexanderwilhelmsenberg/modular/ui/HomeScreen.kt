@@ -15,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,7 +73,6 @@ fun HomeScreen(
     val alphabeticalApps = remember(catalog.apps, locale) { homeOrderedApps(catalog.apps, null, locale) }
     var localQuery by rememberSaveable { mutableStateOf("") }
     val query = searchQuery ?: localQuery
-    val updateQuery: (String) -> Unit = { value -> if (searchQuery == null) localQuery = value else onSearchQueryChange?.invoke(value) }
     val searching = query.isNotBlank()
     val visibleApps = remember(normalApps, alphabeticalApps, query, locale) {
         if (query.isBlank()) normalApps else filterHomeApps(alphabeticalApps, query, locale)
@@ -130,14 +130,27 @@ fun HomeScreen(
     var savedNavigationSpacePx by rememberSaveable { mutableIntStateOf(0) }
     var previousQuery by remember { mutableStateOf(query) }
     var observedResetToken by rememberSaveable { mutableIntStateOf(homeResetToken) }
+    val updateQuery: (String) -> Unit = { value ->
+        // Capture before changing the list: LazyColumn can clamp its index during the same frame.
+        if (query.isBlank() && value.isNotBlank()) {
+            savedAnchorIndex = listState.firstVisibleItemIndex
+            savedAnchorOffset = listState.firstVisibleItemScrollOffset
+            savedAnchorId = anchorableEntries.getOrNull(savedAnchorIndex - 1)?.id
+            savedJumpHeaderLabel = jumpHeaderLabel
+            savedNavigationSpacePx = navigationSpacePx
+        }
+        if (searchQuery == null) localQuery = value else onSearchQueryChange?.invoke(value)
+    }
     LaunchedEffect(query) {
         if (query != previousQuery) {
             if (previousQuery.isBlank() && query.isNotBlank()) {
-                savedAnchorIndex = listState.firstVisibleItemIndex
-                savedAnchorOffset = listState.firstVisibleItemScrollOffset
-                savedAnchorId = anchorableEntries.getOrNull(savedAnchorIndex - 1)?.id
-                savedJumpHeaderLabel = jumpHeaderLabel
-                savedNavigationSpacePx = navigationSpacePx
+                if (savedAnchorIndex < 0) {
+                    savedAnchorIndex = listState.firstVisibleItemIndex
+                    savedAnchorOffset = listState.firstVisibleItemScrollOffset
+                    savedAnchorId = anchorableEntries.getOrNull(savedAnchorIndex - 1)?.id
+                    savedJumpHeaderLabel = jumpHeaderLabel
+                    savedNavigationSpacePx = navigationSpacePx
+                }
                 reachability.reset()
                 navigationSpacePx = 0
                 jumpHeaderLabel = null
@@ -145,6 +158,7 @@ fun HomeScreen(
             } else if (previousQuery.isNotBlank() && query.isBlank()) {
                 jumpHeaderLabel = savedJumpHeaderLabel?.takeIf { label -> entries.any { it is HomeListEntry.Header && it.label == label } }
                 navigationSpacePx = if (jumpHeaderLabel != null) savedNavigationSpacePx else 0
+                androidx.compose.runtime.withFrameNanos { }
                 val currentIndex = entries.indexOfFirst { it.id == savedAnchorId }
                 if (currentIndex >= 0) listState.scrollToItem(currentIndex + 1, savedAnchorOffset)
                 else if (savedAnchorIndex >= 0) listState.scrollToItem(savedAnchorIndex.coerceAtMost(entries.lastIndex + 1), savedAnchorOffset)
@@ -178,6 +192,9 @@ fun HomeScreen(
         reachability.reset()
         navigationSpacePx = (viewportHeight / 3 - with(density) { 28.dp.roundToPx() }).coerceAtLeast(0)
         jumpHeaderLabel = target.first
+        // Let the selected header and trailing space enter layout before targeting a
+        // late section; otherwise a short final section can clamp the jump early.
+        withFrameNanos { }
         listState.scrollToItem(index)
     }
     var editing by remember { mutableStateOf(false) }

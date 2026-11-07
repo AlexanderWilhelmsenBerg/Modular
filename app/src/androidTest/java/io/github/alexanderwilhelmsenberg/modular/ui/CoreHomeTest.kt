@@ -389,8 +389,10 @@ class CoreHomeTest {
         val alphabet = HomeSectionBuilder(locale).alphabet
         val bIndex = alphabet.indexOf("B")
         assertTrue(bIndex >= 0)
-        composeRule.onNodeWithTag("alphabet-rail").performTouchInput {
-            down(Offset(width - 8f, height * (bIndex + 0.5f) / alphabet.size))
+        composeRule.onNodeWithTag("alphabet-hit-lane").performTouchInput {
+            val y = height * (bIndex + 0.5f) / alphabet.size
+            down(Offset(width / 2f, (y - 14f).coerceAtLeast(0f)))
+            moveTo(Offset(width / 2f, y), 120L)
             up()
         }
         composeRule.onNodeWithTag("section:C").assertIsDisplayed()
@@ -406,10 +408,13 @@ class CoreHomeTest {
                 showMakeDefault = false,
             )
         }
-        composeRule.onNodeWithTag("alphabet-rail").performTouchInput {
-            down(Offset(width - 8f, height * 0.5f))
-            cancel()
+        val lane = composeRule.onNodeWithTag("alphabet-hit-lane")
+        lane.performTouchInput {
+            down(Offset(width / 2f, height * 0.5f - 14f))
+            moveTo(Offset(width / 2f, height * 0.5f), 120L)
         }
+        composeRule.onNodeWithTag("alphabet-bubble").assertIsDisplayed()
+        lane.performTouchInput { cancel() }
         composeRule.onNodeWithTag("alphabet-bubble").assertDoesNotExist()
         composeRule.runOnIdle { assertEquals(0, launches) }
     }
@@ -428,8 +433,8 @@ class CoreHomeTest {
                 }
             }
         }
-        composeRule.onNodeWithTag("alphabet-rail").performTouchInput {
-            down(Offset(width - 8f, height * 0.5f))
+        composeRule.onNodeWithTag("alphabet-hit-lane").performTouchInput {
+            down(Offset(width / 2f, height * 0.5f))
             up()
         }
         composeRule.onNodeWithText("Choose section").assertIsDisplayed()
@@ -453,8 +458,10 @@ class CoreHomeTest {
         val alphabet = HomeSectionBuilder(locale).alphabet
         val zIndex = alphabet.indexOf("Z")
         assertTrue(zIndex >= 0)
-        composeRule.onNodeWithTag("alphabet-rail").performTouchInput {
-            down(Offset(width - 8f, height * (zIndex + 0.5f) / alphabet.size))
+        composeRule.onNodeWithTag("alphabet-hit-lane").performTouchInput {
+            val y = height * (zIndex + 0.5f) / alphabet.size
+            down(Offset(width / 2f, y - 14f))
+            moveTo(Offset(width / 2f, y), 120L)
             up()
         }
         composeRule.onNodeWithTag("section:Z").assertIsDisplayed()
@@ -479,8 +486,10 @@ class CoreHomeTest {
         val alphabet = HomeSectionBuilder(locale).alphabet
         val kIndex = alphabet.indexOf("K")
         assertTrue(kIndex >= 0)
-        composeRule.onNodeWithTag("alphabet-rail").performTouchInput {
-            down(Offset(width - 8f, height * (kIndex + 0.5f) / alphabet.size))
+        composeRule.onNodeWithTag("alphabet-hit-lane").performTouchInput {
+            val y = height * (kIndex + 0.5f) / alphabet.size
+            down(Offset(width / 2f, y - 14f))
+            moveTo(Offset(width / 2f, y), 120L)
             up()
         }
         val viewport = composeRule.onNodeWithTag("home-list").fetchSemanticsNode().boundsInRoot

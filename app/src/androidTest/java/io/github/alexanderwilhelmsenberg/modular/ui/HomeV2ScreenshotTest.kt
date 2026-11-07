@@ -77,12 +77,14 @@ class HomeV2ScreenshotTest {
                 HomeScreen(AppCatalog(apps = apps), { launches++ }, {}, {}, {}, showMakeDefault = false, iconForApp = { icon })
             }
         }
-        val rail = composeRule.onNodeWithTag("alphabet-rail")
+        val rail = composeRule.onNodeWithTag("alphabet-hit-lane")
         val alphabet = HomeSectionBuilder(Locale.getDefault()).alphabet
         val position = alphabet.indexOf("K")
         assertTrue("K must be in the rail", position >= 0)
         rail.performTouchInput {
-            down(Offset(width - 8f, height * (position + 0.5f) / alphabet.size))
+            val y = height * (position + 0.5f) / alphabet.size
+            down(Offset(width / 2f, y - 14f))
+            moveTo(Offset(width / 2f, y), 120L)
         }
         composeRule.onNodeWithTag("alphabet-bubble").assertIsDisplayed()
         capture("rail-k")
@@ -102,8 +104,9 @@ class HomeV2ScreenshotTest {
         val row = composeRule.onNodeWithTag("app-row:${first.key.stableId}")
         val initialTop = row.fetchSemanticsNode().boundsInRoot.top
         row.performTouchInput {
-            down(center)
-            moveTo(center + Offset(0f, 650f))
+            val start = center
+            down(start)
+            for (step in 1..20) moveTo(start + Offset(0f, 650f * step / 20f), 25L)
             up()
         }
         composeRule.waitForIdle()
@@ -159,5 +162,13 @@ class HomeV2ScreenshotTest {
         FileOutputStream(file).use { out ->
             check(composeRule.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, out))
         }
+        // UTP uninstalls the target APK after connected tests; preserve fixture
+        // captures outside its private directory before that cleanup occurs.
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val preserved = "/sdcard/Pictures/ModularHomeV2"
+        val copied = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+            automation.executeShellCommand("mkdir -p '$preserved' && cp '${file.absolutePath}' '$preserved/${file.name}' && echo copied")
+        ).bufferedReader().use { it.readText().trim() }
+        check(copied == "copied") { "Could not preserve Home fixture screenshot" }
     }
 }

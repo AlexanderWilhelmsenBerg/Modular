@@ -33,7 +33,9 @@ internal class HomeReachabilityState(initialOffsetPx: Float = 0f) {
         }
 
         override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-            if (source != NestedScrollSource.UserInput || available.y <= 0f || listState.canScrollBackward) return Offset.Zero
+            // A positive unconsumed delta means the list has reached its top even when
+            // the zero-height leading item makes firstVisibleItemIndex nonzero.
+            if (source != NestedScrollSource.UserInput || available.y <= 0f) return Offset.Zero
             val taken = min(maxOffsetPx - offsetPx, available.y * 0.7f)
             offsetPx += taken
             return Offset(0f, taken)

@@ -5,6 +5,13 @@
     <string name="settings_explanation">Most Used adds a starred section to Modular Home. Pin apps in Modular to keep them at the top in your chosen order. With Usage Access, recent foreground time also supplies suggestions. Set Recent days and Suggested apps in Modular settings, then select Use on Home.</string>
     <string name="settings_access_on">Usage access is on. Android has foreground history from the past 7 days.</string>
     <string name="settings_access_off">Usage access is off for Most Used. Saved pins still appear in the starred section; enable access for suggestions.</string>
+    <string name="settings_restricted_guidance">If Android says Usage Access is controlled by a restricted setting, open App info for Modular Most Used, tap the three-dot menu, and choose Allow restricted settings. Then return here and open Usage Access settings. This choice is available only if Android offers it for this app.</string>
+    <string name="settings_app_info_button">Open Most Used app info</string>
+    <string name="settings_app_info_unavailable">Most Used app info could not be opened. Open Android Settings, find Apps, then Modular Most Used.</string>
+    <string name="settings_suggestion_prompt_title">Add usage suggestions?</string>
+    <string name="settings_suggestion_prompt_body">Most Used can suggest apps from foreground time reported by Android. This needs Usage Access for the Most Used app. Saved pins work without it. You can choose later in this screen.</string>
+    <string name="settings_suggestion_prompt_open">Open Usage Access</string>
+    <string name="settings_suggestion_prompt_later">Not now</string>
     <string name="settings_access_checking">Checking Usage Access and recent history…</string>
     <string name="settings_access_no_history">Usage access is on, but Android reported no foreground history in the past 7 days. Saved pins still appear.</string>
     <string name="settings_access_history_unavailable">Usage access is on, but Android usage history could not be read right now.</string>

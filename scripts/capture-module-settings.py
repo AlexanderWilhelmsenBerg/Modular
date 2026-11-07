@@ -2,6 +2,7 @@
 """Capture and inspect real add-on/Core settings on the CI emulator."""
 from pathlib import Path
 import subprocess
+import re
 import time
 import xml.etree.ElementTree as ET
 
@@ -25,6 +26,20 @@ def capture(name, start_args, expected):
             node.get("text", "") + " " + node.get("content-desc", "")
             for node in root.iter("node")
         )
+        if name.startswith("most-used"):
+            later = next((node for node in root.iter("node") if node.get("text") == "Not now"
+                          and node.get("resource-id") == "android:id/button2"), None)
+            if later is not None:
+                # Review the genuine first-open prompt before choosing its explicit
+                # decline action, then capture the ordinary settings underneath.
+                (out / (name + "-setup.xml")).write_bytes(xml)
+                (out / (name + "-setup.png")).write_bytes(adb("exec-out", "screencap", "-p"))
+                bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", later.get("bounds", ""))
+                if bounds is None:
+                    raise RuntimeError("Missing first-open prompt button bounds")
+                left, top, right, bottom = map(int, bounds.groups())
+                adb("shell", "input", "tap", str((left + right) // 2), str((top + bottom) // 2))
+                continue
         if all(value.casefold() in last_text.casefold() for value in expected):
             (out / (name + ".xml")).write_bytes(xml)
             (out / (name + ".png")).write_bytes(adb("exec-out", "screencap", "-p"))

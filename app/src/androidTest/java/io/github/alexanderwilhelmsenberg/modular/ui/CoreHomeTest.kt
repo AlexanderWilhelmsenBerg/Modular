@@ -385,17 +385,9 @@ class CoreHomeTest {
                 showMakeDefault = false,
             )
         }
-        val locale = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.locales[0]
-        val alphabet = HomeSectionBuilder(locale).alphabet
-        val bIndex = alphabet.indexOf("B")
-        assertTrue(bIndex >= 0)
-        composeRule.onNodeWithTag("alphabet-hit-lane").performTouchInput {
-            val y = height * (bIndex + 0.5f) / alphabet.size
-            down(Offset(width / 2f, (y - 14f).coerceAtLeast(0f)))
-            moveTo(Offset(width / 2f, y), 120L)
-            up()
-        }
+        tapVisibleRailLetter("B")
         composeRule.onNodeWithTag("section:C").assertIsDisplayed()
+        composeRule.onNodeWithText("Choose section").assertDoesNotExist()
     }
 
     @Test
@@ -420,24 +412,75 @@ class CoreHomeTest {
     }
 
     @Test
-    fun largeFontRailOffersFullSectionChooser() {
+    fun largeFontRailTapsVisibleLettersDirectlyWithoutOpeningChooser() {
+        var launches = 0
+        val apps = ('A'..'Z').flatMap { letter ->
+            (1..3).map { app("fixture.$letter.$it", "$letter app $it") }
+        }
         composeRule.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, 2.2f)) {
                 Box(Modifier.width(320.dp).height(500.dp)) {
                     HomeScreen(
-                        catalog = AppCatalog(apps = listOf(app("alpha.pkg", "Alpha"), app("zeta.pkg", "Zeta"))),
-                        onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                        catalog = AppCatalog(apps = apps),
+                        onLaunch = { launches++ }, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
                         showMakeDefault = false,
                     )
                 }
             }
         }
-        composeRule.onNodeWithTag("alphabet-hit-lane").performTouchInput {
-            down(Offset(width / 2f, height * 0.5f))
+        listOf("Z", "B", "Z").forEach { letter ->
+            tapVisibleRailLetter(letter)
+            composeRule.onNodeWithTag("section:$letter").assertIsDisplayed()
+            composeRule.onNodeWithText("Choose section").assertDoesNotExist()
+        }
+        composeRule.runOnIdle { assertEquals(0, launches) }
+    }
+
+    @Test
+    fun compactRailTapMapMatchesDisplayedStarNumbersAndLocaleLetters() {
+        val alphabet = listOf("★", "#") + ('A'..'Z').map(Char::toString) + listOf("Æ", "Ø", "Å")
+        val selected = mutableListOf<String>()
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 1.5f)) {
+                Box(Modifier.width(320.dp).height(500.dp)) {
+                    AlphabetRail(alphabet, alphabet.toSet(), { selected.add(it) }, false)
+                }
+            }
+        }
+        // All coordinates come from rendered labels, not the implementation's hit formula.
+        listOf("★", "#", "A", "K", "Y", "Æ", "Å", "★").forEach { letter ->
+            tapVisibleRailLetter(letter)
+            composeRule.runOnIdle { assertEquals(letter, selected.last()) }
+            composeRule.onNodeWithText("Choose section").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun fullRailTapsNavigateDirectly() {
+        val alphabet = listOf("★", "#", "A", "B", "C", "D")
+        val selected = mutableListOf<String>()
+        composeRule.setContent {
+            Box(Modifier.width(320.dp).height(500.dp)) {
+                AlphabetRail(alphabet, alphabet.toSet(), { selected.add(it) }, false)
+            }
+        }
+        alphabet.forEach { letter ->
+            tapVisibleRailLetter(letter)
+            composeRule.runOnIdle { assertEquals(letter, selected.last()) }
+            composeRule.onNodeWithText("Choose section").assertDoesNotExist()
+        }
+    }
+
+    private fun tapVisibleRailLetter(letter: String) {
+        val label = composeRule.onNodeWithTag("rail:$letter").fetchSemanticsNode().boundsInRoot
+        val lane = composeRule.onNodeWithTag("alphabet-hit-lane")
+        val laneBounds = lane.fetchSemanticsNode().boundsInRoot
+        lane.performTouchInput {
+            down(Offset(width / 2f, label.center.y - laneBounds.top))
             up()
         }
-        composeRule.onNodeWithText("Choose section").assertIsDisplayed()
     }
 
     @Test

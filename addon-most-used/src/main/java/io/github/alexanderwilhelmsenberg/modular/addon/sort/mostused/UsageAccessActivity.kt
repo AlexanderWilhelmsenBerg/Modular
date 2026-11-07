@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.usage.UsageStatsManager
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
@@ -15,13 +16,19 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.view.View
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
 
 /** User-facing status and explicit route to Android's special access screen. */
 class UsageAccessActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var feedback: TextView
+    private lateinit var restrictedGuidance: TextView
+    private lateinit var appInfoButton: Button
+    internal var onboardingDialog: AlertDialog? = null
+        private set
     private var statusGeneration = 0
+    private var promptHandled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,6 +64,21 @@ class UsageAccessActivity : Activity() {
             text = getString(R.string.settings_core_button)
             setOnClickListener { openCoreSettings() }
         })
+        restrictedGuidance = TextView(this).apply {
+            id = R.id.restricted_settings_guidance
+            textSize = 14f
+            text = getString(R.string.settings_restricted_guidance)
+            setPadding(0, spacing, 0, spacing)
+            visibility = View.GONE
+        }
+        content.addView(restrictedGuidance)
+        appInfoButton = Button(this).apply {
+            id = R.id.app_info_button
+            text = getString(R.string.settings_app_info_button)
+            visibility = View.GONE
+            setOnClickListener { openAppInfo() }
+        }
+        content.addView(appInfoButton)
         feedback = TextView(this).apply {
             id = R.id.settings_feedback
             textSize = 16f
@@ -95,6 +117,16 @@ class UsageAccessActivity : Activity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ))
         })
+        promptHandled = savedInstanceState?.getBoolean(STATE_PROMPT_HANDLED) ?: false
+        if (!promptHandled && !preferences().getBoolean(PREF_PROMPT_SEEN, false)) {
+            if (UsageAccess.isGranted(this)) markPromptSeen()
+            else showSuggestionPrompt()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_PROMPT_HANDLED, promptHandled)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
@@ -102,8 +134,12 @@ class UsageAccessActivity : Activity() {
         val generation = ++statusGeneration
         if (!UsageAccess.isGranted(this)) {
             status.text = getString(R.string.settings_access_off)
+            restrictedGuidance.visibility = View.VISIBLE
+            appInfoButton.visibility = View.VISIBLE
             return
         }
+        restrictedGuidance.visibility = View.GONE
+        appInfoButton.visibility = View.GONE
         status.text = getString(R.string.settings_access_checking)
         // The platform query can block, so keep the permission button responsive.
         Thread {
@@ -133,6 +169,47 @@ class UsageAccessActivity : Activity() {
     override fun onPause() {
         statusGeneration++
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        onboardingDialog?.dismiss()
+        onboardingDialog = null
+        super.onDestroy()
+    }
+
+    private fun showSuggestionPrompt() {
+        onboardingDialog = AlertDialog.Builder(this)
+            .setTitle(R.string.settings_suggestion_prompt_title)
+            .setMessage(R.string.settings_suggestion_prompt_body)
+            .setPositiveButton(R.string.settings_suggestion_prompt_open) { _, _ ->
+                markPromptSeen()
+                openUsageAccessSettings()
+            }
+            .setNegativeButton(R.string.settings_suggestion_prompt_later) { _, _ -> markPromptSeen() }
+            .setOnCancelListener { markPromptSeen() }
+            .create().also { it.show() }
+    }
+
+    private fun markPromptSeen() {
+        promptHandled = true
+        preferences().edit().putBoolean(PREF_PROMPT_SEEN, true).apply()
+        onboardingDialog = null
+    }
+
+    private fun preferences() = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+
+    private fun openAppInfo() {
+        feedback.text = ""
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", packageName, null)
+        }
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            feedback.text = getString(R.string.settings_app_info_unavailable)
+        } catch (_: SecurityException) {
+            feedback.text = getString(R.string.settings_app_info_unavailable)
+        }
     }
 
     private fun openUsageAccessSettings() {
@@ -180,4 +257,10 @@ class UsageAccessActivity : Activity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private companion object {
+        const val PREFS_NAME = "usage_access_onboarding"
+        const val PREF_PROMPT_SEEN = "suggestion_prompt_seen"
+        const val STATE_PROMPT_HANDLED = "prompt_handled"
+    }
 }

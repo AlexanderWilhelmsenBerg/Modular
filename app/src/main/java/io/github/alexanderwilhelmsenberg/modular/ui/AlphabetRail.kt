@@ -74,17 +74,19 @@ internal fun AlphabetRail(
     }
     BoxWithConstraints(modifier.width(204.dp).fillMaxHeight(0.72f).absoluteOffset(x = (-8).dp).testTag("alphabet-rail")) {
         val condensed = maxHeight / alphabet.size < (18f * LocalDensity.current.fontScale).dp
-        val visual = if (condensed) alphabet.filterIndexed { i, label -> i == 0 || i == alphabet.lastIndex || i % 2 == 0 || label == "★" } else alphabet
         val density = LocalDensity.current
         val heightPx = with(density) { maxHeight.roundToPx() }
         Column(Modifier.fillMaxHeight().width(48.dp).align(AbsoluteAlignment.CenterRight)) {
-            visual.forEachIndexed { visualIndex, label ->
-                val centerY = (visualIndex + 0.5f) / visual.size
-                val distance = if (fingerFraction < 0) 9f else abs(centerY - fingerFraction) * visual.size
+            alphabet.forEachIndexed { index, label ->
+                // Omitted labels keep their slots, so a visible letter's position
+                // agrees with the same fixed hit map used while dragging.
+                val visible = !condensed || index == 0 || index == alphabet.lastIndex || index % 2 == 0 || label == "★" || label == "#"
+                val centerY = (index + 0.5f) / alphabet.size
+                val distance = if (fingerFraction < 0) 9f else abs(centerY - fingerFraction) * alphabet.size
                 val target = if (fingerFraction < 0) 0f else -120f * exp(-0.02f * distance * distance)
                 val shift by animateFloatAsState(targetValue = target, animationSpec = tween(180), label = "rail curve")
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(
+                    if (visible) Text(
                         label,
                         Modifier.absoluteOffset(x = shift.dp).testTag("rail:$label"),
                         color = if (label in populated) foreground else foreground.copy(alpha = 0.38f),
@@ -109,23 +111,22 @@ internal fun AlphabetRail(
         }
         Box(
             Modifier.width(48.dp).fillMaxHeight().align(AbsoluteAlignment.CenterRight).testTag("alphabet-hit-lane")
-                .pointerInput(alphabet, populated, condensed) {
+                .pointerInput(alphabet, populated) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         try {
-                            var moved = false
                             fun selectedIndex(y: Float) = ((y / size.height.coerceAtLeast(1)) * alphabet.size).toInt().coerceIn(alphabet.indices)
+                            selected = null
                             fingerFraction = (down.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
-                            if (!condensed) chooseIndex(selectedIndex(down.position.y))
+                            chooseIndex(selectedIndex(down.position.y))
+                            down.consume()
                             while (true) {
                                 val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
                                 if (!change.pressed) break
-                                if (abs(change.position.y - down.position.y) > 8f || abs(change.position.x - down.position.x) > 8f) moved = true
                                 fingerFraction = (change.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
-                                if (!condensed || moved) chooseIndex(selectedIndex(change.position.y))
+                                chooseIndex(selectedIndex(change.position.y))
                                 change.consume()
                             }
-                            if (condensed && !moved) chooser = true
                         } finally {
                             fingerFraction = -1f
                             selected = null

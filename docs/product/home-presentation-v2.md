@@ -124,7 +124,10 @@ are retained. Wallpaper stays off until chosen.
   pointer sequence. Optional light haptics follow the platform preference.
 - Anchor the rail above the bottom controls and below status/cutout areas. Fit
   locale alphabets and larger fonts using adaptive spacing. When all labels cannot
-  fit legibly, use a condensed visual rail with a full section chooser on tap;
+  fit legibly, use a condensed visual rail while preserving each letter's position
+  in the full alphabet hit map. A tap jumps directly to that letter (or its next
+  populated bucket); it must never open the section chooser. Dragging can reach
+  omitted letters. The chooser remains an explicit accessibility action;
   every populated section must remain reachable. Rail labels are one composite
   drag control, not a claim that every tiny glyph has a separate 48 dp target.
 - Provide discrete next/previous section actions and a section chooser for users
@@ -178,7 +181,7 @@ are retained. Wallpaper stays off until chosen.
 - The complete alphabetical catalog follows. A featured app also appears once
   in its alphabetical section so letter navigation always finds it. Deduplicate
   within the starred section, across pins/suggestions, and in search results.
-- Long-press an app offers **Pin in Most Used** or **Unpin from Most Used** when
+- Long-press an app offers **Pin to starred apps** or **Unpin from starred apps** when
   the compatible provider is selected. Its module Settings also exposes an app
   picker and a **Pinned apps** list with reorder/remove controls. Provide button
   alternatives to drag reordering. No JSON or manual instances/contexts are needed.
@@ -189,6 +192,12 @@ are retained. Wallpaper stays off until chosen.
 - Pinning works without Usage Access. With access denied/revoked, show pins only
   and a permission action in the starred section; never invent usage rankings.
   With permission but no history, show pins and a clear no-history state.
+- Usage Access is a special Android setting, not an installation-time runtime
+  permission. On the first opening without access, Most Used offers an explicit
+  **Open Usage Access** / **Not now** choice and remembers the user's choice.
+  Its settings retain a manual access button and package-targeted App info shortcut,
+  with instructions for **Allow restricted settings** when Android blocks the
+  toggle. The add-on must not redirect automatically or bypass platform restrictions.
   An enabled, connected provider with no entries still has a star destination
   containing a useful Pin apps / permission action, not an empty dead-end screen.
 - Uninstalled/unavailable pins are excluded from actionable Home rows and shown

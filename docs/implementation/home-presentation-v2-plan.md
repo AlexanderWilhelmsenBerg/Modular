@@ -79,7 +79,8 @@ regression tests. This stage works without any add-on or new IPC contract.
 Owner: Core gesture implementer. Dependency: P1 section model and row geometry.
 
 - Introduce an isolated AlphabetRail with a stable absolute-position hit map,
-  locale buckets, star-slot support, empty-letter resolution, and a section chooser.
+  locale buckets, star-slot support, empty-letter resolution, direct letter taps
+  even on compact rails, and an explicitly invoked accessibility section chooser.
 - Animate rail transforms and the selected-letter bubble from pointer position.
   Bound displacement; cancel stale scroll work. Use immediate tracking while
   scrubbing and a short settle on release; honor animation scale/reduced motion.

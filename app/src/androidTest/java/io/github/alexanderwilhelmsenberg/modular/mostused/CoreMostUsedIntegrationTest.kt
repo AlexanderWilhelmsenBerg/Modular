@@ -18,7 +18,7 @@ import org.junit.Test
 class CoreMostUsedIntegrationTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
 
-    @Test fun coreTogglePersistsAndOwnsStarWithoutUsageAccess() = runBlocking {
+    @Test fun coreTogglePersistsAndOwnsStarWithoutUsageAccess(): Unit = runBlocking {
         val store = MostUsedSettingsStore(rule.activity)
         val original = store.currentSettings()
         try {

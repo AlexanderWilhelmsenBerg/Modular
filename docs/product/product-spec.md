@@ -1,6 +1,6 @@
 # Modular — Product Specification
 
-Status: **Core requirements including search, themes, and helper recovery (2026-11-06)**
+Status: **Delivered Core baseline plus specified Home v2 requirements (2026-11-07)**
 
 This document captures the product intent established before implementation. Items marked **Open** are deliberately unresolved rather than guessed.
 
@@ -15,7 +15,7 @@ Core usability never depends on installing or configuring an add-on. See [ADR-00
 Core shall provide:
 
 - Android HOME/default-launcher integration.
-- a production Home screen with a vertical alphabetical text-only app list and tap-to-launch.
+- a production Home screen with an alphabetical app list, icons, letter dividers, side navigation, and tap-to-launch (v2 target; section 19).
 - built-in locale-aware alphabetical ordering.
 - a secondary settings surface and reliable Home/Back navigation.
 - module discovery, registration, enable/disable, compatibility validation, and removal from the active configuration.
@@ -175,14 +175,14 @@ Python is the preferred first optional scripting runtime, consistent with ADR-00
 - Installing only the Core APK shall provide Home without a network connection, account, extra APK, optional permission, or setup wizard.
 - Cold launch and explicit app-icon or Android HOME intents shall show Home. A non-blocking Make default action may request the Android HOME role.
 - Home is a vertically scrolling list of launchable activities, sorted by displayed label using the device locale. Equal labels have deterministic component/profile tie-breakers.
-- Each default row displays only the app name and launches the exact component in its profile. Icons, profile subtitles, badges, and grouping are opt-in add-on presentation; Core must not show them by default. Profile identity remains internal for correct launching and availability checks. Duplicate labels must not collapse distinct activities.
+- Each default row displays an app icon and name and launches the exact component in its profile. Core provides an optional text-only setting and alphabetical letter dividers (section 19). Profile subtitles and add-on badges remain opt-in external presentation. Profile identity remains internal for correct launching and availability checks. Duplicate labels must not collapse distinct activities.
 - Disabled or unavailable activities must not appear actionable. Paused profiles and launch failures receive clear feedback without crashing Home or bypassing Android restrictions.
 - Package and profile changes refresh the list. Loading, empty catalog, and discovery failure are distinct states; failures offer retry.
 - Settings is explicitly reachable from Home. Back from Settings returns to Home. Back on baseline Home leaves Home visible. A HOME intent while Settings is open returns to Home, including reuse of the existing activity.
 - Ordinary return from a launched app preserves Home scroll position where possible. Rotation/process recreation restores appropriate UI state; a newly delivered HOME or app-icon intent takes precedence and shows Home.
 - TalkBack semantics, large text, adequate touch targets, contrast, and system insets are baseline requirements.
 - Optional add-on failure shall retain or restore built-in Home and alphabetical ordering. Settings and add-on disable controls remain reachable.
-- No separate drawer is required. Built-in search and theme selection are Core requirements (section 15); favorites, an alphabet index, widgets, and alternative layouts remain optional enhancements.
+- No separate drawer is required. Search, built-in themes, alphabet navigation, optional wallpaper, and pull-down reachability are Core requirements (sections 15 and 19). Most Used ranking and pins remain add-on-owned; widgets and alternative layouts remain optional enhancements.
 
 ## 12. Non-goals for the first implementation slice
 
@@ -226,7 +226,7 @@ These requirements complete the management surface around the existing module ru
 - Retry explicitly tears down a failed attempt and starts a fresh connection. Deadlines cover binding and handshake. Late callbacks/results cannot revive a disabled, superseded, or removed module. A blocked Binder call must not cause an unbounded sequence of retries or freeze Home.
 - A bounded, persistent local event history records timestamp, affected service/package, lifecycle stage, outcome, and actionable error details. Show newest entries first, support an errors filter, copying, and explicit clearing. Retain the latest 200 entries; exclude app catalogs, configuration payloads, and credentials. This diagnostic history is distinct from the transient launcher event bus.
 - Instance management supports creation, renaming, configuration editing, and deletion. Provider identity is immutable for an existing instance. Invalid JSON or an instance referenced by a context must produce an error without losing the saved configuration.
-- Context management supports creation, editing bindings, deletion, activation, and deactivation. Active bindings require deactivation before editing. Failed activation preserves the previous selection. Missing/disabled providers produce a visible degraded state without breaking Home.
+- Context management supports creation, editing bindings, deletion, activation, and deactivation. Advanced binding edits require deactivation; ordinary module settings actions use the atomic update path in section 18. Failed activation preserves the previous selection. Missing/disabled providers produce a visible degraded state without breaking Home.
 - Permission controls display requested, supported Core capabilities and allow explicit grants/revocations using the installed signing identity. Authority is checked live; permissions apply to the package identity, not independently to each service in the same APK.
 - “Uninstall” invokes Android's package removal confirmation and explains that every module in the APK is removed. Core cannot uninstall itself through this screen. Cancellation or platform refusal leaves the installed package and saved state intact. Refresh after returning from Android; report actual installed state rather than assuming success.
 - Disabling a module, deleting an instance/context, and uninstalling its APK are distinct operations. Uninstall does not silently erase saved instances or contexts; unresolved references remain visible and can be repaired or explicitly deleted.
@@ -238,15 +238,15 @@ Acceptance: disable/re-enable and restart Core; retry a failed/blocked handshake
 These requirements extend the baseline Core and Settings implementation:
 
 - Remove the “Apps” title from Home.
-- Keep a persistent, single-line search bar filling the available width beside the settings gear, both with a 48 dp baseline height and adequate touch targets. Tapping or typing must not expand the bar horizontally or vertically; long text scrolls within it to keep the caret visible, and Settings stays accessible. Larger system font settings may increase the minimum content height for accessibility. Keyboard Back dismisses editing before Home navigation. Clearing search restores the full alphabetical list; show an explicit no-results state.
+- Keep a persistent, single-line search bar at the bottom of Home, above the system navigation inset, filling the available width beside the settings gear, both with a 48 dp baseline height and adequate touch targets. Tapping or typing must not expand the bar horizontally or vertically; long text scrolls within it to keep the caret visible, and Settings stays accessible. Larger system font settings may increase the minimum content height for accessibility. Keyboard Back dismisses editing before Home navigation. Clearing search restores the full alphabetical list; show an explicit no-results state.
 - Use a gear icon with the accessible label “Settings” in place of the text button.
 - Provide persisted Light, Dark, and AMOLED themes in Settings and apply them consistently to Home, Settings, dialogs, and system bars. AMOLED uses a true-black background with readable controls and text.
 - Define a bounded theme extension contract before adding themes from external add-ons. Losing an add-on theme falls back to a built-in theme without blocking Home.
-- Verify compact widths, font scaling, TalkBack, keyboard/insets, and contrast in all built-in themes. Do not add app icons or profile subtitles to the default list.
+- Verify compact widths, font scaling, TalkBack, keyboard/insets, and contrast in all built-in themes. Core icons and letter sections follow section 19; profile subtitles remain off by default.
 
 ## 16. Delivery and acceptance evidence
 
-The current Core delivery implements baseline Home and Settings behavior in sections 11, 14, and 15 and connects the
+The delivered baseline at `3e5559f552d9218c23b67b3b45e73d1f3113839d` implements the earlier text-only Home, top search/gear controls, and Settings behavior and connects the
 selected `apps.sort/v1` helper to Home. Core applies search after ordering and
 validates helper output against the current catalog. Timeout, failure, disabled
 or removed providers, and invalid or stale results retain built-in ordering.
@@ -313,3 +313,28 @@ contract proposal, not an implemented external theme loader.
   fixture in cross-APK acceptance. Zero-history alphabetical output alone is insufficient.
 
 See [Module settings](../implementation/module-settings.md) for UI and acceptance evidence.
+
+## 19. Reference-led Home presentation and featured apps (specified, not implemented)
+
+The 2026-11-07 product request supersedes the text-only/add-on-only icons and
+alphabet-index rules. The normative detail is in [Home presentation v2](home-presentation-v2.md),
+with [implementation sequencing](../implementation/home-presentation-v2-plan.md)
+and [ADR-0005](../decisions/ADR-0005-indexed-home-and-featured-addons.md).
+
+- Core: app icons enabled by default, optional text-only setting, letter dividers,
+  locale-aware right-side alphabet navigation with curved drag feedback and a
+  selected-letter bubble, reference-aligned typography/spacing, optional system
+  wallpaper/dimming, bottom persistent search/gear controls, and retained
+  pull-down reachability that brings the first app to mid-screen.
+- Most Used: an optional starred section and star rail destination, ordered pins
+  before usage-ranked suggestions, ordinary pin/unpin/reorder controls, and
+  persistent exact-identity pins that also work without Usage Access.
+- Core always retains the complete alphabetical catalog. Featured entries may
+  also appear there; search deduplicates. A new bounded featured-app capability
+  carries data/actions without changing the existing sort ABI or injecting UI.
+- Existing module management, diagnostics, grants, per-instance settings, failure
+  recovery, and offline Core guarantees remain in force.
+
+These are new acceptance requirements, not additions to the previous delivery's
+passed-test claims. V2-A1 through V2-A10 in the detailed specification must be
+verified as implementation proceeds.

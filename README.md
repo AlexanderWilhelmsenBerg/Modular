@@ -2,7 +2,7 @@
 
 **Modular** is a complete, minimal Android launcher with optional add-ons for helper functions and enhancements.
 
-## Product idea
+## Current delivered behavior
 
 Installing the Core APK provides:
 
@@ -65,6 +65,9 @@ The script contains the logic. Android-facing File, Schedule, HTTP, Bluetooth, L
 ## Specifications
 
 - [Product specification](docs/product/product-spec.md)
+- [Next Home presentation specification](docs/product/home-presentation-v2.md)
+- [Home presentation implementation plan](docs/implementation/home-presentation-v2-plan.md)
+- [Indexed Home and featured add-ons ADR](docs/decisions/ADR-0005-indexed-home-and-featured-addons.md)
 - [System architecture](docs/architecture/system-architecture.md)
 - [Module model and contract](docs/architecture/module-model.md)
 - [Add-on SDK and developer guide](docs/addon-development.md)
@@ -87,7 +90,15 @@ First complete Core Home, alphabetical ordering, launching, settings navigation,
 
 Automation, Python, MCP, and terminal capabilities follow later. See the [roadmap](docs/roadmap.md). Core includes text-only Home, search/gear controls, built-in themes, Settings module management, and selected optional sort-helper output with alphabetical fallback. External presentation and external theme loading remain future work. See [Core completion](docs/implementation/core-completion.md) for baseline test evidence and physical-device acceptance. The [Core framework](docs/implementation/core-framework.md) adds validated discovery descriptors, per-instance configuration, and a separately consumable SDK with an independent example.
 
-Product clarification (2026-11-04): default Home rows contain only app-name text. Icons and profile labels require an explicitly enabled presentation add-on. Core retains profile identity internally for correct launching.
+## Next planned Home presentation
+
+The [2026-11-07 specification](docs/product/home-presentation-v2.md) revises the
+previous text-only presentation direction: Core will add icons, letter dividers,
+animated side alphabet navigation, optional system wallpaper/dimming, bottom
+search/settings, and pull-down reachability. Most Used will provide a starred
+section with saved pins before usage-ranked suggestions, while the full
+alphabetical catalog stays available. These features are **specified, not yet
+implemented**; the behavior described above is the delivered baseline.
 
 
 ## Most Used add-on

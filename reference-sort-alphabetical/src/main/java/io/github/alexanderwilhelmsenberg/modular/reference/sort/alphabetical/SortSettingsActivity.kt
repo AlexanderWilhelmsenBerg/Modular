@@ -48,7 +48,7 @@ class SortSettingsActivity : Activity() {
         content.addView(feedback)
         setContentView(ScrollView(this).apply {
             clipToPadding = false
-            fillViewport = true
+            isFillViewport = true
             setOnApplyWindowInsetsListener { view, insets ->
                 if (Build.VERSION.SDK_INT >= 30) {
                     val safe = insets.getInsets(

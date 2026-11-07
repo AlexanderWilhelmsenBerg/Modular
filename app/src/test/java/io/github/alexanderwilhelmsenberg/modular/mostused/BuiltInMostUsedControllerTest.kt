@@ -33,6 +33,7 @@ class BuiltInMostUsedControllerTest {
 
     @Test fun disabledNeverQueriesHistoryAndPinsSurviveRevocation() = runTest {
         val store = MostUsedSettingsStore(MemoryPreferences())
+        store.setSource(MostUsedSource.ANDROID)
         val repository = FakeRepository(listOf(app(first), app(second)))
         val usage = FakeUsage()
         val controller = BuiltInMostUsedController(repository, store, usage, controllerScope(),
@@ -52,8 +53,9 @@ class BuiltInMostUsedControllerTest {
         advanceUntilIdle()
         assertEquals(1, usage.queries)
         assertEquals(listOf(first), controller.state.value.featuredApps.map { it.key })
-        assertEquals(FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED, controller.state.value.featureState)
+        assertEquals(FeaturedAppsResultParcel.STATE_NO_HISTORY, controller.state.value.featureState)
         assertFalse(controller.state.value.hasUsageAccess)
+        assertTrue(controller.state.value.usingLocalFallback)
     }
 
     @Test fun suggestionsUseOwnProfileAndExcludeCoreAndZeroTime() = runTest {
@@ -61,6 +63,7 @@ class BuiltInMostUsedControllerTest {
         val zero = AppKey("zero.app", "Main", 1)
         val store = MostUsedSettingsStore(MemoryPreferences())
         store.setEnabled(true)
+        store.setSource(MostUsedSource.ANDROID)
         val repository = FakeRepository(listOf(app(first), app(second), app(work), app(core), app(zero)))
         val usage = FakeUsage(weights = mapOf(
             first.packageName to 10L, second.packageName to 100L,
@@ -79,6 +82,7 @@ class BuiltInMostUsedControllerTest {
         val store = MostUsedSettingsStore(MemoryPreferences())
         store.setEnabled(true)
         store.setSuggestedCount(2)
+        store.setSource(MostUsedSource.ANDROID)
         val customizations = MutableStateFlow(AppCustomizations(
             labels = mapOf(first.stableId to "Zed", second.stableId to "Aaa"),
             hidden = setOf(third.stableId),
@@ -113,25 +117,29 @@ class BuiltInMostUsedControllerTest {
     @Test fun revocationDuringQueryDiscardsSuggestions() = runTest {
         val store = MostUsedSettingsStore(MemoryPreferences())
         store.setEnabled(true)
+        store.setSource(MostUsedSource.ANDROID)
         val usage = FakeUsage(revokeOnQuery = true)
         val controller = BuiltInMostUsedController(FakeRepository(listOf(app(first))), store, usage,
             controllerScope(), StandardTestDispatcher(testScheduler))
         advanceUntilIdle()
         assertEquals(1, usage.queries)
         assertTrue(controller.state.value.featuredApps.isEmpty())
-        assertEquals(FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED, controller.state.value.featureState)
+        assertEquals(FeaturedAppsResultParcel.STATE_NO_HISTORY, controller.state.value.featureState)
+        assertTrue(controller.state.value.usingLocalFallback)
     }
 
     @Test fun zeroSuggestionsSkipsUsageQueryWithoutAccess() = runTest {
         val store = MostUsedSettingsStore(MemoryPreferences())
         store.setEnabled(true)
         store.setSuggestedCount(0)
+        store.setSource(MostUsedSource.ANDROID)
         val usage = FakeUsage()
         val controller = BuiltInMostUsedController(FakeRepository(listOf(app(first))), store, usage,
             controllerScope(), StandardTestDispatcher(testScheduler))
         advanceUntilIdle()
         assertEquals(0, usage.queries)
         assertEquals(FeaturedAppsResultParcel.STATE_READY, controller.state.value.featureState)
+        assertTrue(controller.state.value.hasUsageAccess)
         assertEquals(null, controller.state.value.message)
         usage.allowed = false
         controller.refresh()
@@ -152,6 +160,7 @@ class BuiltInMostUsedControllerTest {
     @Test fun storeRejectsInvalidMutationsAndMigratesAtomically() = runTest {
         val store = MostUsedSettingsStore(MemoryPreferences())
         assertEquals(MostUsedSettings(), store.currentSettings())
+        assertEquals(MostUsedSource.LOCAL, store.currentSettings().source)
         assertTrue(store.setDays(31).isFailure)
         assertTrue(store.setSuggestedCount(-1).isFailure)
         assertTrue(store.setPinned(first, true, emptySet()).isFailure)
@@ -184,14 +193,108 @@ class BuiltInMostUsedControllerTest {
         assertEquals("{broken", memory.data.value[key])
     }
 
+    @Test fun olderSettingsKeepPinsAndTogglesButDefaultToLocal() = runTest {
+        val key = stringPreferencesKey("settings_json_v1")
+        val old = """{"enabled":true,"days":14,"suggestedCount":3,"pins":[{"packageName":"one.app","activityName":"Main","profileSerial":1}],"enabledTouched":true,"daysTouched":true,"countTouched":true,"pinsTouched":true}"""
+        val memory = MemoryPreferences(emptyPreferences().toMutablePreferences().apply { this[key] = old })
+        val settings = MostUsedSettingsStore(memory).currentSettings()
+        assertTrue(settings.enabled)
+        assertEquals(14, settings.days)
+        assertEquals(3, settings.suggestedCount)
+        assertEquals(listOf(first), settings.pinnedKeys)
+        assertEquals(MostUsedSource.LOCAL, settings.source)
+    }
+
+    @Test fun localDefaultLearnsOnlySuccessfulEnabledHomeLaunchesWithoutUsageAccessChecks() = runTest {
+        val store = MostUsedSettingsStore(MemoryPreferences())
+        val history = LocalMostUsedHistoryStore(MemoryPreferences(), { 0L })
+        val repository = FakeRepository(listOf(app(first), app(second)))
+        val usage = FakeUsage(allowed = false).apply { throwOnAccess = true }
+        val controller = BuiltInMostUsedController(repository, store, usage, controllerScope(),
+            StandardTestDispatcher(testScheduler), localHistory = history)
+        advanceUntilIdle()
+        assertTrue(controller.launchFromHome(first).isSuccess)
+        assertTrue(history.currentHistory().scores(7).isEmpty())
+        store.setEnabled(true).getOrThrow()
+        repository.failedKeys += second
+        assertTrue(controller.launchFromHome(second).isFailure)
+        assertTrue(history.currentHistory().scores(7).isEmpty())
+        assertTrue(controller.launchFromHome(first).isSuccess)
+        advanceUntilIdle()
+        assertEquals(listOf(first), controller.state.value.featuredApps.map { it.key })
+        assertEquals(MostUsedSource.LOCAL, controller.state.value.effectiveSource)
+        assertEquals(0, usage.queries)
+        assertEquals(0, usage.accessChecks)
+    }
+
+    @Test fun deniedAndroidHistoryUsesLocalSuggestionsAndResetKeepsPins() = runTest {
+        val store = MostUsedSettingsStore(MemoryPreferences())
+        store.setEnabled(true).getOrThrow()
+        store.setSource(MostUsedSource.ANDROID).getOrThrow()
+        store.setPinned(second, true, setOf(first, second)).getOrThrow()
+        val history = LocalMostUsedHistoryStore(MemoryPreferences(), { 0L })
+        history.recordLaunch(first).getOrThrow()
+        val usage = FakeUsage(allowed = false)
+        val controller = BuiltInMostUsedController(FakeRepository(listOf(app(first), app(second))),
+            store, usage, controllerScope(), StandardTestDispatcher(testScheduler), localHistory = history)
+        advanceUntilIdle()
+        assertEquals(listOf(second, first), controller.state.value.featuredApps.map { it.key })
+        assertEquals(MostUsedSource.ANDROID, controller.state.value.settings.source)
+        assertEquals(MostUsedSource.LOCAL, controller.state.value.effectiveSource)
+        assertTrue(controller.state.value.usingLocalFallback)
+        assertTrue(controller.state.value.message!!.contains("Usage Access"))
+        assertEquals(0, usage.queries)
+        controller.resetLearnedUsage().getOrThrow()
+        advanceUntilIdle()
+        assertEquals(listOf(second), controller.state.value.featuredApps.map { it.key })
+        assertEquals(listOf(second), store.currentSettings().pinnedKeys)
+    }
+
+    @Test fun localHistoryFiltersHiddenAppsBeforeLimitAndUsesLabelsForTies() = runTest {
+        val third = AppKey("three.app", "Main", 1)
+        val store = MostUsedSettingsStore(MemoryPreferences())
+        store.setEnabled(true).getOrThrow()
+        store.setSuggestedCount(2).getOrThrow()
+        val history = LocalMostUsedHistoryStore(MemoryPreferences(), { 0L })
+        history.recordLaunch(first).getOrThrow()
+        history.recordLaunch(second).getOrThrow()
+        repeat(10) { history.recordLaunch(third).getOrThrow() }
+        val customizations = MutableStateFlow(AppCustomizations(
+            labels = mapOf(first.stableId to "Zed", second.stableId to "Aaa"),
+            hidden = setOf(third.stableId),
+        ))
+        val controller = BuiltInMostUsedController(
+            FakeRepository(listOf(app(first), app(second), app(third))), store,
+            FakeUsage(allowed = false), controllerScope(), StandardTestDispatcher(testScheduler),
+            customizations, history,
+        )
+        advanceUntilIdle()
+        assertEquals(listOf(second, first), controller.state.value.featuredApps.map { it.key })
+    }
+
+    @Test fun successfulLaunchRemainsSuccessfulWhenHistoryWriteFails() = runTest {
+        val store = MostUsedSettingsStore(MemoryPreferences())
+        store.setEnabled(true).getOrThrow()
+        val data = MemoryPreferences().apply { failWrites = true }
+        val controller = BuiltInMostUsedController(FakeRepository(listOf(app(first))), store,
+            FakeUsage(), controllerScope(), StandardTestDispatcher(testScheduler),
+            localHistory = LocalMostUsedHistoryStore(data, { 0L }))
+        advanceUntilIdle()
+        assertTrue(controller.launchFromHome(first).isSuccess)
+        advanceUntilIdle()
+        assertEquals("Could not save learned app usage.", controller.state.value.historyError)
+    }
+
     private fun app(key: AppKey) = LaunchableApp(key, key.packageName, 0L, true, null)
 
     private fun TestScope.controllerScope() = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
 
     private class FakeRepository(apps: List<LaunchableApp>) : AppRepository {
+        val failedKeys = HashSet<AppKey>()
         override val catalog: StateFlow<AppCatalog> = MutableStateFlow(AppCatalog(apps = apps))
         override fun refresh() = Unit
-        override suspend fun launch(key: AppKey): Result<Unit> = Result.success(Unit)
+        override suspend fun launch(key: AppKey): Result<Unit> =
+            if (key in failedKeys) Result.failure(IllegalStateException("Launch failed")) else Result.success(Unit)
         override fun close() = Unit
     }
 
@@ -202,8 +305,10 @@ class BuiltInMostUsedControllerTest {
     ) : MostUsedUsageSource {
         override val corePackageName = "core.pkg"
         var queries = 0
+        var accessChecks = 0
         var throwOnAccess = false
         override fun hasUsageAccess(): Boolean {
+            accessChecks++
             if (throwOnAccess) error("AppOps unavailable")
             return allowed
         }
@@ -215,9 +320,11 @@ class BuiltInMostUsedControllerTest {
     }
 
     private class MemoryPreferences(initial: Preferences = emptyPreferences()) : DataStore<Preferences> {
+        var failWrites = false
         private val mutable = MutableStateFlow(initial)
         override val data: StateFlow<Preferences> = mutable
         override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+            if (failWrites) error("DataStore write failed")
             val next = transform(mutable.value.toMutablePreferences())
             mutable.value = next
             return next

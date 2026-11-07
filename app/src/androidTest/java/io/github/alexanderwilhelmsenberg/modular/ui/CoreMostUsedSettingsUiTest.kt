@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
+import io.github.alexanderwilhelmsenberg.modular.mostused.MostUsedSource
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -29,17 +31,15 @@ class CoreMostUsedSettingsUiTest {
     private val sameTwo = app("Same", "example.same.two", "SameActivity", 2)
     private val catalog = listOf(first, second, sameOne, sameTwo)
 
-    @Test fun enablingExplainsOptionalAccessAndOnlyExplicitActionOpensSettings() {
+    @Test fun localSourceEnablesWithoutAccessPromptOrAccessControls() {
         var enabled by mutableStateOf(false)
         var accessOpens = 0
-        var infoOpens = 0
         rule.setContent { Themed {
             Settings(
                 enabled = enabled,
                 hasUsageAccess = false,
                 onSetEnabled = { enabled = it; Result.success(Unit) },
                 onOpenUsageAccess = { accessOpens++ },
-                onOpenAppInfo = { infoOpens++ },
             )
         } }
 
@@ -47,18 +47,90 @@ class CoreMostUsedSettingsUiTest {
         rule.waitForIdle()
         assertEquals(true, enabled)
         assertEquals(0, accessOpens)
-        rule.onNodeWithText("Your pinned apps work now.", substring = true).assertIsDisplayed()
-        rule.onNodeWithText("Later").performClick()
+        rule.onNodeWithText("Suggestions need Usage Access").assertDoesNotExist()
+        rule.onNodeWithText("no permission needed", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Configure Most Used").performClick()
+        rule.onNodeWithTag("core-most-used-source-local").performScrollTo().assertIsSelected()
+        rule.onNodeWithText("Open Usage Access").assertDoesNotExist()
+        rule.onNodeWithText("Usage Access blocked?").assertDoesNotExist()
+    }
+
+    @Test fun androidSourceIsExplicitAndAccessSettingsOpenOnlyOnRequest() {
+        var source by mutableStateOf(MostUsedSource.LOCAL)
+        var accessOpens = 0
+        var infoOpens = 0
+        rule.setContent { Themed {
+            Settings(
+                source = source,
+                hasUsageAccess = false,
+                onSetSource = { source = it; Result.success(Unit) },
+                onOpenUsageAccess = { accessOpens++ },
+                onOpenAppInfo = { infoOpens++ },
+            )
+        } }
 
         rule.onNodeWithText("Configure Most Used").performClick()
-        rule.onNodeWithText("Usage Access is off. Saved pins still appear on Home; suggestions need Usage Access.")
-            .performScrollTo().assertIsDisplayed()
+        rule.onNodeWithTag("core-most-used-source-android").performScrollTo().performClick()
+        rule.waitForIdle()
+        assertEquals(MostUsedSource.ANDROID, source)
+        assertEquals(0, accessOpens)
+        rule.onNodeWithTag("core-most-used-source-android").assertIsSelected()
+        rule.onNodeWithText("Android history is unavailable.", substring = true).performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Open Usage Access").performScrollTo().performClick()
+        assertEquals(1, accessOpens)
         rule.onNodeWithText("Usage Access blocked?").performScrollTo().performClick()
         rule.onNodeWithText("first tap Modular's disabled row", substring = true).assertIsDisplayed()
         rule.onNodeWithText("Allow restricted settings", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Modular cannot bypass it", substring = true).assertIsDisplayed()
         assertEquals(0, infoOpens)
         rule.onNodeWithText("Open App info").performClick()
         assertEquals(1, infoOpens)
+        rule.onNodeWithText("Configure Most Used").performClick()
+        rule.onNodeWithTag("core-most-used-source-android").performScrollTo().assertIsSelected()
+        rule.onNodeWithTag("core-most-used-source-local").performScrollTo().performClick()
+        rule.waitForIdle()
+        assertEquals(MostUsedSource.LOCAL, source)
+        rule.onNodeWithText("Open Usage Access").assertDoesNotExist()
+    }
+
+    @Test fun androidHistoryFailureShowsLocalFallbackEvenWhenAccessAppearsOn() {
+        rule.setContent { Themed {
+            Settings(source = MostUsedSource.ANDROID, hasUsageAccess = true, usingLocalFallback = true)
+        } }
+
+        rule.onNodeWithText("Android history unavailable", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Configure Most Used").performClick()
+        rule.onNodeWithText("Suggestions use Modular launches", substring = true)
+            .performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun resetLearnedUsageConfirmsAndKeepsDialogOpenAfterFailure() {
+        var resets = 0
+        var shouldFail by mutableStateOf(true)
+        rule.setContent { Themed {
+            Settings(onResetLearnedUsage = {
+                resets++
+                if (shouldFail) Result.failure(IllegalStateException("Could not clear learned usage"))
+                else Result.success(Unit)
+            })
+        } }
+
+        rule.onNodeWithText("Configure Most Used").performClick()
+        rule.onNodeWithText("Reset learned usage…").performScrollTo().performClick()
+        rule.onNodeWithText("Your pins, Most Used settings, and Android usage history stay as they are.", substring = true)
+            .assertIsDisplayed()
+        rule.onNodeWithText("Cancel").performClick()
+        assertEquals(0, resets)
+        rule.onNodeWithText("Reset learned usage…").performScrollTo().performClick()
+        rule.onNodeWithText("Reset learned usage", substring = false).performClick()
+        rule.waitForIdle()
+        assertEquals(1, resets)
+        rule.onNodeWithText("Could not clear learned usage").assertIsDisplayed()
+        shouldFail = false
+        rule.onNodeWithText("Reset learned usage", substring = false).performClick()
+        rule.waitForIdle()
+        assertEquals(2, resets)
+        rule.onNodeWithText("Modular's learned usage was reset.").performScrollTo().assertIsDisplayed()
     }
 
     @Test fun pickerUsesExactKeyAndFailedRemovalPreservesSavedPins() {
@@ -109,16 +181,16 @@ class CoreMostUsedSettingsUiTest {
         } }
 
         rule.onNodeWithText("Configure Most Used").performClick()
-        rule.onNodeWithTag("core-most-used-history-decrease").assertIsNotEnabled()
-        rule.onNodeWithTag("core-most-used-suggestions-increase").assertIsNotEnabled()
-        rule.onNodeWithTag("core-most-used-history-increase").performClick()
+        rule.onNodeWithTag("core-most-used-history-decrease").performScrollTo().assertIsNotEnabled()
+        rule.onNodeWithTag("core-most-used-suggestions-increase").performScrollTo().assertIsNotEnabled()
+        rule.onNodeWithTag("core-most-used-history-increase").performScrollTo().performClick()
         rule.waitForIdle()
-        rule.onNodeWithTag("core-most-used-suggestions-decrease").performClick()
+        rule.onNodeWithTag("core-most-used-suggestions-decrease").performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals(2, days)
         assertEquals(19, count)
-        rule.onNodeWithText("History: 2 days").assertIsDisplayed()
-        rule.onNodeWithText("Suggestions: 19 apps").assertIsDisplayed()
+        rule.onNodeWithText("History: 2 days").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Suggestions: 19 apps").performScrollTo().assertIsDisplayed()
     }
 
     @Test fun loadingDoesNotBlockToggleAndPinsOnlyNeedsNoAccessPrompt() {
@@ -150,6 +222,8 @@ class CoreMostUsedSettingsUiTest {
         pinnedKeys: List<AppKey> = emptyList(),
         hasUsageAccess: Boolean = true,
         loading: Boolean = false,
+        source: MostUsedSource = MostUsedSource.LOCAL,
+        usingLocalFallback: Boolean = false,
         onSetEnabled: suspend (Boolean) -> Result<Unit> = { Result.success(Unit) },
         onSetDays: suspend (Int) -> Result<Unit> = { Result.success(Unit) },
         onSetSuggestedCount: suspend (Int) -> Result<Unit> = { Result.success(Unit) },
@@ -157,11 +231,15 @@ class CoreMostUsedSettingsUiTest {
         onReorderPins: suspend (List<AppKey>) -> Result<Unit> = { Result.success(Unit) },
         onOpenUsageAccess: () -> Unit = {},
         onOpenAppInfo: () -> Unit = {},
+        onSetSource: suspend (MostUsedSource) -> Result<Unit> = { Result.success(Unit) },
+        onResetLearnedUsage: suspend () -> Result<Unit> = { Result.success(Unit) },
     ) {
         CoreMostUsedSettingsUi(
             enabled, days, suggestedCount, pinnedKeys, emptySet(), hasUsageAccess, catalog,
             onSetEnabled, onSetDays, onSetSuggestedCount, onSetPinned, onReorderPins,
             onOpenUsageAccess, onOpenAppInfo, onRefresh = {}, loading = loading,
+            source = source, usingLocalFallback = usingLocalFallback,
+            onSetSource = onSetSource, onResetLearnedUsage = onResetLearnedUsage,
         )
     }
 

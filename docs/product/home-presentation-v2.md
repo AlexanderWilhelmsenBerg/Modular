@@ -9,9 +9,10 @@ add-on-only icons/alphabet-index requirements. Source implementation is present,
 but the acceptance matrix below is not yet complete. See the [implementation plan](../implementation/home-presentation-v2-plan.md)
 and [the original presentation decision](../decisions/ADR-0005-indexed-home-and-featured-addons.md).
 [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md) supersedes
-the Most Used add-on ownership and migration portions below; the generic
-featured-app contract remains. Basic categories are specified later, after
-Core Most Used implementation.
+the Most Used add-on ownership and migration portions below;
+[ADR-0007](../decisions/ADR-0007-local-most-used-learning.md) sets local launch
+learning as the default suggestion source. The generic featured-app contract
+remains. Basic categories are specified later, after Core Most Used implementation.
 
 ## 1. Reference and design intent
 
@@ -46,7 +47,7 @@ or committed. Wallpaper comes from the user's device.
 | Background | Core | Existing theme's solid surface; system wallpaper is opt-in |
 | Bottom search and settings gear | Core | Persistent, reachable without an add-on |
 | Pull-down reachability | Core | On |
-| Built-in Most Used star, usage ranking, saved pins | Core | Off until enabled; pins work without Usage Access |
+| Built-in Most Used star, usage ranking, saved pins | Core | Off until enabled; local launches and pins work without Usage Access |
 | Rendering and navigation of a valid add-on-contributed starred section | Core | Generic contract remains for compatible providers |
 | Profile subtitles, icon packs, widgets, replacement Home surfaces | Optional add-ons/future work | Not enabled by this change |
 
@@ -213,19 +214,35 @@ are retained. Wallpaper stays off until chosen.
   enabled, a `★` section appears before `#`/letters, with a star at the top of
   the rail. The complete alphabetical catalog follows.
 - Core stores up to 50 pins in manual order by exact package/activity/profile
-  identity. Pins precede unpinned suggestions ranked by Android-reported
-  foreground time, with deterministic alphabetical ties. Suggested count is
-  0–20 (default 8); the usage window is 1–30 days (default 7).
+  identity. Pins precede unpinned suggestions. Suggested count is 0–20 (default
+  8); the history window is 1–30 days (default 7). The default source, including
+  upgrades with no stored source, is **Learn from Modular**. While Most Used is
+  enabled, Core records successful explicit launches from Home rows, search
+  results, and star rows in private daily counts keyed by exact app identity,
+  capped at 1,200 daily app buckets. Counts older than 30 days are ineligible
+  for ranking and are pruned on the next recorded launch or reset; older counts
+  can remain on disk while no new launch is recorded. Exclude this history file
+  from Android cloud backup and device transfer. Failed launches and passive
+  catalog display do not count. Within the chosen window, local suggestions
+  rank by recency-weighted launch frequency (seven-day half-life), with deterministic
+  alphabetical ties.
 - Pin, unpin, reorder, and remove controls work without Usage Access. Missing
   pins remain in management but are not actionable Home rows. The star section
   offers pinning even when it has no entries.
-- Core requests optional Android `PACKAGE_USAGE_STATS` special access only for
-  usage suggestions. The user explicitly opens Android's Core Usage Access
-  settings. Denied/revoked access leaves pins available; granted access with
-  no history shows a no-history state. Zero-foreground-time apps are not
-  suggested. Core cannot bypass Android restricted-setting controls.
+- The optional **Android usage history** source uses system-reported
+  foreground time and requires Android `PACKAGE_USAGE_STATS` special access.
+  Only after choosing this source does Core offer the Android Usage Access
+  settings route. Denied, unavailable, or revoked access falls back to local
+  suggestions, retaining the Android source choice. Local learning continues
+  while enabled. No eligible source history shows a no-history state;
+  zero-foreground-time apps are not Android-source suggestions. Core cannot
+  bypass Android restricted-setting controls.
+- **Reset learned usage** requires confirmation and clears only the local
+  launch aggregate, preserving pins, settings, source choice, and system usage
+  history.
 - Disabling the toggle removes the star destination while retaining saved pins
-  and the complete alphabetical catalog. Search deduplicates by exact app key.
+  and the complete alphabetical catalog, and stops new local learning. Search
+  deduplicates by exact app key.
   An app may appear in both the star and alphabetical sections.
 
 ## 9. Framework and compatibility — HOME-V2-07
@@ -269,8 +286,8 @@ ordering uses a flat list with alphabet rail/letter dividers suppressed.
 | V2-A4 | Tap/slide rail through #, A, K, Z and locale-specific buckets; handle missing buckets, duplicates, rapid changes, interruptions, rotation, RTL labels, reduced motion, and short viewports. |
 | V2-A5 | Pull first row to mid-screen, release, launch it; test upward restoration, HOME/search reset, app/settings return, no accidental launches, and notification/back gesture coexistence. |
 | V2-A6 | Bottom controls stay usable with IME/navigation modes; search yields unique complete matches, clearing restores sections, last row is not obscured. |
-| V2-A7 | Core-only toggle creates star; a foreground-used app ranks above an unused one after Core Usage Access is granted; pins outrank usage and retain custom order after restarts. |
-| V2-A8 | Pin/unpin/reorder through ordinary UI; duplicate labels/profiles, uninstall/reinstall, denied/revoked Usage Access, zero history, failed writes, and empty star all behave as specified. |
+| V2-A7 | Core-only toggle creates star; successful Home/search/star launches teach local suggestions without Usage Access; recency and window affect rank; pins outrank suggestions and retain custom order after restarts. Optional Android foreground time ranks a used app above an unused one after Core Usage Access is granted. |
+| V2-A8 | Pin/unpin/reorder and confirmed local usage reset through ordinary UI; duplicate labels/profiles, uninstall/reinstall, denied/revoked Android Usage Access with local fallback, zero history, failed writes, and empty star all behave as specified. |
 | V2-A9 | One-time selected legacy migration validates IPC state, persists before detaching, retries after failure, preserves explicit Core choices and pins; provider death/removal and old/new versions preserve the complete catalog. |
 | V2-A10 | No main-thread icon decode/IPC, no unbounded caches, no accumulating animation jobs; exercise 1,000 apps and rapid rail scrubbing on emulator and a representative physical phone. |
 

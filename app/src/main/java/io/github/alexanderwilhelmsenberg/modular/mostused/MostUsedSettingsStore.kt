@@ -29,7 +29,11 @@ data class MostUsedSettings(
     val pinnedKeys: List<AppKey> = emptyList(),
     val importedLegacySources: Set<String> = emptySet(),
     val userConfigured: Boolean = false,
+    val source: MostUsedSource = MostUsedSource.LOCAL,
 )
+
+/** Android-wide history is an explicit opt-in; existing saved settings remain local. */
+enum class MostUsedSource { LOCAL, ANDROID }
 
 @Serializable
 private data class SavedAppKey(val packageName: String, val activityName: String, val profileSerial: Long) {
@@ -50,10 +54,13 @@ private data class SavedSettings(
     val countTouched: Boolean = false,
     val pinsTouched: Boolean = false,
     val importedSources: Set<String> = emptySet(),
+    val source: MostUsedSource = MostUsedSource.LOCAL,
+    val sourceTouched: Boolean = false,
 ) {
     fun public() = MostUsedSettings(
         enabled, days, suggestedCount, pins.map { it.toAppKey() }, importedSources,
-        enabledTouched || daysTouched || countTouched || pinsTouched,
+        enabledTouched || daysTouched || countTouched || pinsTouched || sourceTouched,
+        source,
     )
 }
 
@@ -82,6 +89,10 @@ class MostUsedSettingsStore internal constructor(private val dataStore: DataStor
 
     suspend fun setEnabled(enabled: Boolean): Result<Unit> = write {
         it.copy(enabled = enabled, enabledTouched = true)
+    }
+
+    suspend fun setSource(source: MostUsedSource): Result<Unit> = write {
+        it.copy(source = source, sourceTouched = true)
     }
 
     suspend fun setDays(days: Int): Result<Unit> = write {

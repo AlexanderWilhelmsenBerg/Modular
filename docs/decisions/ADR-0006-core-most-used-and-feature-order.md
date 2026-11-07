@@ -3,6 +3,10 @@
 Status: **Accepted product direction; implementation and acceptance tracked separately**  
 Date: 2026-11-07
 
+[ADR-0007](ADR-0007-local-most-used-learning.md) refines this decision: local
+launch learning is the default suggestion source, and Android Usage Access is
+required only when the Android foreground-time source is explicitly selected.
+
 ## Context
 
 Most Used's starred section is an everyday launcher function. Requiring a second

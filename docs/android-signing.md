@@ -125,8 +125,10 @@ Debug package names:
 Suggested review description (use only for the matching reviewed build):
 
 > Modular is an Android launcher. Core requests REQUEST_DELETE_PACKAGES
-> for user-confirmed uninstall actions and PACKAGE_USAGE_STATS for optional,
-> locally ranked Most Used suggestions following explicit user permission.
+> for user-confirmed uninstall actions and declares PACKAGE_USAGE_STATS for the
+> optional Android foreground-time Most Used source following explicit user permission.
+> The default Most Used source learns successful launches within Core and does not
+> need Usage Access.
 > The reviewed Core APK declares no Internet, SMS, accessibility-service, or notification-listener
 > access. Please review the submitted APK's harmful-app classification. The warning
 > was observed on Android 17 / One UI 9. Source: https://github.com/AlexanderWilhelmsenBerg/Modular
@@ -139,9 +141,18 @@ contents at that revision, not the current Core manifest, Google's private
 detection rules, or a complete malware assessment. This does not claim Play or
 F-Droid publication.
 
-For a grey Usage Access switch or missing App info menu, follow the
-[Most Used setup guide](addons/most-used.md). Core now owns this optional access;
-the old add-on's grant cannot transfer. Usage Access is special access, so
-Android's ordinary Permissions page can correctly say no permissions are required.
+The default local Most Used source does not need Usage Access. For a grey Usage
+Access switch or missing App info menu when choosing Android foreground time,
+follow the [Most Used setup guide](addons/most-used.md) and
+[Google's restricted settings help](https://support.google.com/android/answer/12623953).
+Core owns this optional access; the old add-on's grant cannot transfer. Usage
+Access is special access, so Android's ordinary Permissions page can correctly
+say no permissions are required. The
+[Android 17 compatibility definition, section 2.2.5](https://source.android.com/docs/compatibility/17/android-17-cdd)
+requires a confirmation through App info for covered apps installed from a
+download or local file and names Usage Access among the restricted capabilities.
+An app cannot silently unlock that restriction. Store distribution may change
+which restrictions apply on a device, but neither Play nor F-Droid distribution
+guarantees freedom from every warning or permission prompt.
 
 Reference: [Google's developer guidance for Play Protect warnings](https://developers.google.com/android/play-protect/warning-dev-guidance).

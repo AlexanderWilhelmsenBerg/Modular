@@ -8,7 +8,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
@@ -103,7 +102,8 @@ class ModuleSettingsUiTest {
                 Result.success(Unit)
             }, {})
         } }
-        rule.onNodeWithTag("module-setting-days").performTextClearance().performTextInput("31")
+        rule.onNodeWithTag("module-setting-days").performTextClearance()
+        rule.onNodeWithTag("module-setting-days").performTextInput("31")
         rule.onNodeWithText("Use on Home").performClick()
         rule.onNodeWithText("Enter 1–30.").assertIsDisplayed()
         rule.runOnIdle { assertNull(saved) }

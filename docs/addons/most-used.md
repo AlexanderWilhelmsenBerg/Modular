@@ -1,33 +1,46 @@
-# Most Used add-on
+# Built-in Most Used
 
-Most Used adds a **★ starred section** above Modular's complete alphabetical app list. Saved pins appear first in the order you choose. Then up to eight unpinned apps appear by Android-reported foreground time. Each app remains in its usual alphabetical section as well.
+Most Used is an optional **Core** Home feature, enabled with its built-in toggle.
+It adds a `★` section before the complete alphabetical app list. Saved pins
+appear in manual order before usage-ranked suggestions. An app remains in its
+alphabetical section as well. See [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md)
+for the ownership decision and implementation status.
 
-## Set up Most Used
+In Core Settings, enable **Most Used**, open **Configure Most Used**, set
+**History** (1–30 days, default 7) and **Suggestions** (0–20 apps, default 8),
+and manage up to 50 pins. The feature
+is off by default. Pinning and reordering work without Usage Access. Suggestions
+use locally reported foreground time only after the user explicitly grants
+Android Usage Access to **Modular Core**. If access is denied or revoked, pins
+remain available. If access is granted but there is no foreground history, the
+section shows pins and a no-history state. Apps with zero reported foreground
+time are not suggested.
 
-Install the Most Used APK alongside Modular Core. Use matching variants: **Most Used Debug** with **Modular Debug**, or **Most Used Release** with **Modular Release**. Installing the add-on alone does not change Home.
+Usage Access is an Android special access setting, separate from ordinary
+runtime permissions. Core offers an explicit action to open that setting; it
+cannot grant access for itself. A grant previously made to the Most Used add-on
+does not transfer to Core. Android and device policy control any restricted
+setting prompts; the app cannot bypass them. Disabling the Core toggle removes
+the star destination while preserving the alphabetical catalog and saved pins.
 
-1. Open **Modular Core > Settings > Add-on modules**. Enable Most Used if needed, then tap **Settings** on its card.
-2. Set **Recent days** (1–30, default 7) and **Suggested apps** (0–20, default 8), then tap **Use on Home**. The star appears on Home, even before granting Usage Access.
-3. Long-press an app on Home and choose **Pin to starred apps**. The module Settings app picker and **Pinned apps** list also let you add, reorder, or remove pins. Pinned apps stay in the order you set and do not count toward the suggestion limit.
-4. To add usage suggestions, open **Permissions and settings** on the Most Used card. The first time you open the add-on screen without Usage Access, choose **Open Usage Access** or **Not now**. The choice is yours; the add-on does not open Android settings automatically. You can return later and tap **Open Usage Access settings**, select Most Used in Android settings, and allow usage access. Return to the add-on screen to check its state. Android grants this access to the Most Used APK; Modular Core does not request it.
+## Legacy/reference add-on
 
-If Android shows a grey Usage Access switch with **controlled by a restricted setting**, tap the blocked permission row itself and acknowledge a **Restricted setting** dialog if one appears. Then reopen App info using **Open Most Used app info**, and choose **Allow restricted settings** from the three-dot menu if Android offers it. Return to **Open Usage Access settings** and enable access there. Android's reference implementation makes the menu conditional on acknowledging the restriction; Samsung's screens and device policies can differ. If the menu remains absent on Android 17 / One UI 9, the add-on cannot create it or grant itself access. Check device restrictions with Samsung support; saved pins remain usable without Usage Access.
+The separate `addon-most-used` APK remains in source for compatibility and SDK
+testing. It uses its own package ID and Android Usage Access grant. An already
+selected compatible instance may be imported through validated, authenticated
+IPC into Core's store, once and idempotently. Import preserves Core's toggle;
+enable Most Used in Core Settings to show the imported pins. Keep the old add-on
+installed until the import completes. Core cannot read an uninstalled
+APK or its private files. Installing the reference APK is not required for
+ordinary Most Used use. The Signed APKs workflow builds it only when
+`include_reference_addons` is selected.
 
-The debug APK is labelled **Modular Most Used Debug** so it can be distinguished from release in Android Settings. Its App info button targets its own package. A harmful-app installation warning is a separate Play Protect issue; see [installation troubleshooting](../android-signing.md#installation-warnings-and-restricted-settings). Do not treat switching variants as a guaranteed remedy for either restriction.
-
-Confirmed on Android 17 / One UI 9: tapping the blocked permission row to display the restriction dialog, then reopening App info, made the missing three-dot menu appear. After choosing **Allow restricted settings** and authenticating, return to Usage Access to grant access separately.
-
-References: [Android restricted settings](https://support.google.com/android/answer/12623953) and [Android's restriction-acknowledgement contract](https://android.googlesource.com/platform/packages/modules/Permission/+/b27b1901d/framework-s/java/android/app/ecm/EnhancedConfirmationManager.java).
-
-When Usage Access is off or revoked, saved pins still appear and the starred section offers the permission action. When access is on but Android reports no foreground history for the selected period, the section shows a no-history message and saved pins. An empty section still offers Pin apps. Apps with zero reported foreground time are not suggested.
-
-The add-on stores ordered pins privately per configured module instance, using the exact package, activity, and profile identity. A pin for an uninstalled app is retained and shown as unavailable in module Settings so it can be removed or restored by reinstalling the same app. Paused or unavailable apps do not become launchable Home rows. Usage history is queried locally, not stored or uploaded.
-
-Use **Use alphabetical order** or select another module to remove the star from Home. The add-on still offers its original whole-list sort capability to older Core versions. A current Core selects the starred capability when available; the legacy mode requires Usage Access and otherwise falls back to alphabetical order.
-
-Core's long-press sheet also offers App info, Rename, Hide, and Android uninstall
-confirmation without an add-on. Pin/Unpin appears when a featured provider is
-selected. Core display-name overrides apply to starred rows too. Hidden apps
-are omitted from Home and search, including starred rows; saved pins are retained
-and reappear when the app is restored under Settings > Appearance > Hidden apps.
-Automatic usage ranking remains optional and continues to belong to this add-on.
+For an older Core that still uses the separate add-on, install a matching debug
+or release variant, open **Settings > Add-on modules > Most Used > Settings**,
+set the day/count values, and choose **Use on Home**. Its Usage Access must be
+granted to the add-on package. Android 17 / One UI 9 restricted-settings behavior
+has varied by device; the previous observed path was to acknowledge the blocked
+permission row, reopen App info, and use **Allow restricted settings** if the
+menu appears. This is historical troubleshooting, not a guaranteed remedy.
+Installation warnings remain a separate issue; see
+[Android signing](../android-signing.md#installation-warnings-and-restricted-settings).

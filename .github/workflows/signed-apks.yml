@@ -2,6 +2,12 @@ name: Signed APKs
 
 on:
   workflow_dispatch:
+    inputs:
+      include_reference_addons:
+        description: Build legacy/reference add-on APKs for SDK testing
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -35,38 +41,43 @@ jobs:
           path.touch(mode=0o600, exist_ok=False)
           path.write_bytes(data)
           PY
-      - name: Build persistent debug and release APKs
+      - name: Build persistent Core debug and release APKs
         env:
           MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-signing.p12
           MODULAR_KEYSTORE_PASSWORD: ${{ secrets.MODULAR_KEYSTORE_PASSWORD }}
         run: |
           python3 scripts/verify-keystore.py --expected-certificates docs/signing-certificates.json
-          gradle :app:assembleDebug :app:assembleRelease :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease :addon-most-used:assembleDebug :addon-most-used:assembleRelease --no-configuration-cache
-      - name: Verify signatures and variant identities
+          gradle :app:assembleDebug :app:assembleRelease --no-configuration-cache
+      - name: Build legacy/reference add-on APKs for SDK testing
+        if: ${{ inputs.include_reference_addons }}
+        env:
+          MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-signing.p12
+          MODULAR_KEYSTORE_PASSWORD: ${{ secrets.MODULAR_KEYSTORE_PASSWORD }}
+        run: gradle :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease :addon-most-used:assembleDebug :addon-most-used:assembleRelease --no-configuration-cache
+      - name: Verify Core signatures and variant identities
+        if: ${{ !inputs.include_reference_addons }}
+        run: python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --core-only
+      - name: Verify Core and reference add-on signatures and variant identities
+        if: ${{ inputs.include_reference_addons }}
         run: python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json
-      - name: Upload signed APKs
+      - name: Upload signed Core APKs
         uses: actions/upload-artifact@v4
         with:
           name: modular-signed-apks
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+      - name: Upload legacy/reference add-on APKs
+        if: ${{ inputs.include_reference_addons }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: modular-reference-addons
+          path: |
             reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
             reference-sort-alphabetical/build/outputs/apk/release/reference-sort-alphabetical-release.apk
             addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
             addon-most-used/build/outputs/apk/release/addon-most-used-release.apk
-          if-no-files-found: error
-      - name: Upload Most Used release add-on
-        uses: actions/upload-artifact@v4
-        with:
-          name: modular-most-used-release
-          path: addon-most-used/build/outputs/apk/release/addon-most-used-release.apk
-          if-no-files-found: error
-      - name: Upload Most Used debug add-on
-        uses: actions/upload-artifact@v4
-        with:
-          name: modular-most-used-debug
-          path: addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
           if-no-files-found: error
       - name: Remove private signing material
         if: always()

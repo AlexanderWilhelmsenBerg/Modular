@@ -1,5 +1,8 @@
 # Module settings and Home sort activation
 
+This records the legacy/reference add-on UI. [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md)
+supersedes it for ordinary built-in Most Used setup, which now belongs to Core.
+
 The ordinary path is **Core Settings > Add-on modules > [module] > Settings**. The module dialog renders the provider's declared configuration fields as native controls. Most Used declares **Recent days** (1–30, default 7) and **Suggested apps** (0–20, default 8). Users change these values and tap **Use on Home** to save and select its starred section. The save validates the live descriptor, stores the normalized configuration, and updates Home's selected featured binding together. Re-saving a changed value updates the active binding without asking the user to deactivate a context. **Use alphabetical order** removes its Home selection. The existing instance and context editors remain available for advanced composition; ordinary setup requires neither JSON nor manual instance or context creation.
 
 The dialog links to a module's management screen when it declares one through **Permissions and settings**. Most Used's management screen reports whether Android Usage Access is on and offers **Open Usage Access settings**. The system permission is granted to the add-on package. Pins stay visible without it; suggestions require access. Core's generic **Pinned apps** controls provide picker, reorder and remove actions.

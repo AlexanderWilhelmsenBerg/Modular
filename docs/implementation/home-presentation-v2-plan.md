@@ -4,6 +4,11 @@ Status: **Source implemented; acceptance tracked in PR #19 and the acceptance ma
 `3e5559f552d9218c23b67b3b45e73d1f3113839d` (PR #17).
 Requirements: [Home presentation v2](../product/home-presentation-v2.md).
 
+Historical implementation plan: its Most Used add-on ownership and migration
+steps are superseded by [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md).
+The generic featured contract remains available for SDK providers. Basic
+categories specifications follow the Core Most Used implementation.
+
 ## 1. Source and design review
 
 GitHub main, jCodemunch's Modular index, and Repowise Modular all identify the

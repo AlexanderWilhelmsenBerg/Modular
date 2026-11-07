@@ -1,5 +1,9 @@
 # Featured apps capability v1
 
+This remains a generic, versioned add-on contract. Core's built-in Most Used
+now owns the ordinary starred feature; see [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md).
+Reference and third-party providers can still use this contract.
+
 `modular.apps.featured/v1` contributes a small, ordered section before Core's
 alphabetical catalog. It is separate from `modular.apps.sort/v1`; neither that
 capability's parcel layout nor the protocol-v4 root service changes. A provider

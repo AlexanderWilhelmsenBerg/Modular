@@ -1,0 +1,265 @@
+package io.github.alexanderwilhelmsenberg.modular.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
+import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
+import java.util.Locale
+import kotlinx.coroutines.launch
+
+/** Settings for Core's built-in Most Used feature. Callers provide the persisted state. */
+@Composable
+fun CoreMostUsedSettingsUi(
+    enabled: Boolean,
+    days: Int,
+    suggestedCount: Int,
+    pinnedKeys: List<AppKey>,
+    unavailablePinnedKeys: Collection<AppKey>,
+    hasUsageAccess: Boolean,
+    catalog: List<LaunchableApp>,
+    onSetEnabled: suspend (Boolean) -> Result<Unit>,
+    onSetDays: suspend (Int) -> Result<Unit>,
+    onSetSuggestedCount: suspend (Int) -> Result<Unit>,
+    onSetPinned: suspend (AppKey, Boolean) -> Result<Unit>,
+    onReorderPins: suspend (List<AppKey>) -> Result<Unit>,
+    onOpenUsageAccess: () -> Unit,
+    onOpenAppInfo: () -> Unit,
+    onRefresh: () -> Unit,
+    loading: Boolean = false,
+    loadError: String? = null,
+    statusMessage: String? = null,
+    configureRequest: Int = 0,
+    hasImportedSettings: Boolean = false,
+) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var detailsOpen by remember { mutableStateOf(false) }
+    var permissionTipOpen by remember { mutableStateOf(false) }
+    var restrictedTipOpen by remember { mutableStateOf(false) }
+    var pickerOpen by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    val byKey = remember(catalog) { catalog.associateBy { it.key } }
+    val duplicateKeys = remember(catalog) {
+        catalog.groupBy { it.label.lowercase(Locale.ROOT) }.values
+            .filter { it.size > 1 }.flatMap { group -> group.map { it.key } }.toSet()
+    }
+    LaunchedEffect(configureRequest) {
+        if (configureRequest > 0) detailsOpen = true
+    }
+
+    fun save(afterSuccess: () -> Unit = {}, action: suspend () -> Result<Unit>) {
+        if (busy) return
+        busy = true
+        error = null
+        scope.launch {
+            val result = runCatching { action() }.getOrElse { Result.failure(it) }
+            busy = false
+            result.onSuccess { afterSuccess() }.onFailure {
+                error = it.message ?: "Could not save Most Used settings. Try again."
+            }
+        }
+    }
+
+    Card(Modifier.fillMaxWidth().testTag("core-most-used-card")) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(Modifier.weight(1f)) {
+                    Text("Most Used", style = MaterialTheme.typography.titleMedium)
+                    Text("Show pinned and frequently used apps on Home", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(
+                    checked = enabled,
+                    enabled = !busy,
+                    onCheckedChange = { checked ->
+                        save(afterSuccess = {
+                            if (checked && suggestedCount > 0 && !hasUsageAccess) permissionTipOpen = true
+                        }) { onSetEnabled(checked) }
+                    },
+                    modifier = Modifier.semantics { contentDescription = "Most Used" }
+                        .testTag("core-most-used-toggle"),
+                )
+            }
+            Text(
+                if (hasUsageAccess) "Usage Access is on"
+                else "Usage Access is off · saved pins work without it",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(onClick = { detailsOpen = true }, modifier = Modifier.testTag("core-most-used-configure")) {
+                Text("Configure Most Used")
+            }
+            if (!enabled && hasImportedSettings) Text(
+                "Previous Most Used settings are saved. Turn on Most Used to show your pins on Home.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (!detailsOpen) {
+                loadError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+    }
+
+    if (permissionTipOpen) AlertDialog(
+        onDismissRequest = { permissionTipOpen = false },
+        title = { Text("Suggestions need Usage Access") },
+        text = { Text("Most Used is enabled. Your pinned apps work now. To add suggestions based on recent activity, allow Usage Access for Modular in Android Settings. You can do this later.") },
+        confirmButton = { Button(onClick = { permissionTipOpen = false; onOpenUsageAccess() }) { Text("Open Usage Access") } },
+        dismissButton = { TextButton(onClick = { permissionTipOpen = false }) { Text("Later") } },
+    )
+
+    if (restrictedTipOpen) AlertDialog(
+        onDismissRequest = { restrictedTipOpen = false },
+        title = { Text("If Usage Access is blocked") },
+        text = { Text("On Samsung, first tap Modular's disabled row in Usage Access and dismiss the “Restricted setting” dialog. Then reopen Modular's App info, open the top-right menu, and tap “Allow restricted settings”. Return to Usage Access and enable Modular. This menu option appears only after Android has restricted the app.") },
+        confirmButton = { Button(onClick = { restrictedTipOpen = false; onOpenAppInfo() }) { Text("Open App info") } },
+        dismissButton = { TextButton(onClick = { restrictedTipOpen = false }) { Text("Close") } },
+    )
+
+    if (detailsOpen) AlertDialog(
+        onDismissRequest = { if (!busy) detailsOpen = false },
+        title = { Text("Most Used") },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Pinned apps always come first. Suggestions use activity from the past $days days.", style = MaterialTheme.typography.bodyMedium)
+                if (loading) Text("Loading saved settings…")
+                loadError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                statusMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                NumberSetting("History", "days", days, 1, 30, busy) {
+                    save { onSetDays(it) }
+                }
+                NumberSetting("Suggestions", "apps", suggestedCount, 0, 20, busy) {
+                    save { onSetSuggestedCount(it) }
+                }
+                Text("Pinned apps", style = MaterialTheme.typography.titleMedium)
+                if (pinnedKeys.isEmpty()) Text("No apps pinned yet. Pins work without Usage Access.")
+                pinnedKeys.forEachIndexed { index, key ->
+                    val app = byKey[key]
+                    val unavailable = key in unavailablePinnedKeys || app == null
+                    Column {
+                        Text(
+                            if (unavailable) "${app?.label ?: key.packageName} (unavailable)" else app?.label ?: key.packageName,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        if (unavailable || key in duplicateKeys) Text(
+                            coreIdentityHint(key), style = MaterialTheme.typography.bodySmall,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(enabled = !busy && index > 0, onClick = {
+                                save { onReorderPins(pinnedKeys.toMutableList().apply { add(index - 1, removeAt(index)) }) }
+                            }) { Text("Up") }
+                            TextButton(enabled = !busy && index < pinnedKeys.lastIndex, onClick = {
+                                save { onReorderPins(pinnedKeys.toMutableList().apply { add(index + 1, removeAt(index)) }) }
+                            }) { Text("Down") }
+                            TextButton(enabled = !busy, onClick = { save { onSetPinned(key, false) } }) {
+                                Text("Remove")
+                            }
+                        }
+                    }
+                }
+                OutlinedButton(
+                    enabled = !busy && pinnedKeys.size < 50,
+                    onClick = { pickerOpen = !pickerOpen },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (pickerOpen) "Close app picker" else "Pin apps") }
+                if (pickerOpen) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("Find an app") },
+                        modifier = Modifier.fillMaxWidth().testTag("core-most-used-picker-search"),
+                        singleLine = true,
+                    )
+                    val choices = remember(catalog, pinnedKeys, query) {
+                        catalog.asSequence()
+                            .filter { it.enabled && it.key !in pinnedKeys &&
+                                (query.isBlank() || it.label.contains(query, ignoreCase = true) ||
+                                    it.key.packageName.contains(query, ignoreCase = true)) }
+                            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.label })
+                            .toList()
+                    }
+                    LazyColumn(Modifier.fillMaxWidth().height(220.dp)) {
+                        items(choices, key = { it.key.stableId }) { app ->
+                            TextButton(
+                                enabled = !busy,
+                                onClick = { save { onSetPinned(app.key, true) } },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(if (app.key in duplicateKeys) "${app.label} · ${coreIdentityHint(app.key)}" else app.label)
+                            }
+                        }
+                        if (choices.isEmpty()) item { Text("No matching apps.") }
+                    }
+                }
+                Text(
+                    if (hasUsageAccess) "Usage Access is on for Modular."
+                    else "Usage Access is off. Saved pins still appear on Home; suggestions need Usage Access.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedButton(onClick = onOpenUsageAccess, modifier = Modifier.fillMaxWidth()) {
+                    Text("Open Usage Access")
+                }
+                TextButton(onClick = { detailsOpen = false; restrictedTipOpen = true }) {
+                    Text("Usage Access blocked?")
+                }
+                TextButton(onClick = { error = null; onRefresh() }) { Text("Refresh") }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = { TextButton(enabled = !busy, onClick = { detailsOpen = false }) { Text("Done") } },
+    )
+}
+
+@Composable
+private fun NumberSetting(
+    title: String,
+    unit: String,
+    value: Int,
+    min: Int,
+    max: Int,
+    busy: Boolean,
+    onChange: (Int) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("$title: $value $unit", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        TextButton(enabled = !busy && value > min, onClick = { onChange(value - 1) },
+            modifier = Modifier.testTag("core-most-used-${title.lowercase(Locale.ROOT)}-decrease")) { Text("−") }
+        TextButton(enabled = !busy && value < max, onClick = { onChange(value + 1) },
+            modifier = Modifier.testTag("core-most-used-${title.lowercase(Locale.ROOT)}-increase")) { Text("+") }
+    }
+}
+
+private fun coreIdentityHint(key: AppKey): String =
+    "${key.packageName}/${key.activityName} · profile ${key.profileSerial}"

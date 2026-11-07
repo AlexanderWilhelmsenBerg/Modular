@@ -173,6 +173,7 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             python3 scripts/check-search-transitions.py
+            python3 scripts/capture-core-most-used.py
             adb shell cmd package set-home-activity io.github.alexanderwilhelmsenberg.modular.debug/io.github.alexanderwilhelmsenberg.modular.MainActivity
             adb shell am force-stop com.google.android.apps.nexuslauncher
             python3 scripts/capture-home-v2.py

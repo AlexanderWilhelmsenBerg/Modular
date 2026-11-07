@@ -38,5 +38,6 @@ Product clarification (2026-11-04): default Home rows contain only app-name text
 Presentation revision (2026-11-07): [ADR-0005](ADR-0005-indexed-home-and-featured-addons.md)
 supersedes the text-only/add-on-only icons and alphabet-index boundary above.
 Core now targets optional wallpaper, icons, letter sections/navigation, bottom
-controls, and pull-down reachability. Most Used owns starred contents and pins.
-This is specified future work; the complete offline Core decision remains intact.
+controls, and pull-down reachability. [ADR-0006](ADR-0006-core-most-used-and-feature-order.md)
+subsequently moves Most Used's starred contents, pins, and ranking into Core.
+The complete offline Core decision remains intact.

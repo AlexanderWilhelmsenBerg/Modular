@@ -251,6 +251,57 @@ class ModuleSettingsControllerTest {
         assertEquals(original, store.state.value.activeContext())
     }
 
+    @Test
+    fun detachSelectedFeaturedCopiesAdvancedContextIncludingUnresolvedBindings() = runBlocking {
+        val store = FakeStore()
+        val selected = ModuleInstance("legacy-instance", "Most Used", PROVIDER_A, "{\"days\":21}")
+        val unrelated = ContextCapabilityBinding(CapabilityId("modular.example.missing", 1), "missing-instance")
+        val original = LauncherContext("advanced", "Advanced", listOf(
+            ContextCapabilityBinding(StandardCapabilities.AppsFeatured, selected.id), unrelated,
+        ))
+        store.state.value = CompositionState(listOf(selected), listOf(original), original.id)
+        val route = featuredRoute(PROVIDER_A)
+        val controller = ModuleSettingsController(store, MutableStateFlow(listOf(route)))
+        val binding = ResolvedContextBinding(StandardCapabilities.AppsFeatured, selected, route)
+        val snapshot = controller.selectedHomeContextFor(binding)!!
+
+        assertTrue(controller.detachSelectedHomeBinding(binding, snapshot).getOrThrow())
+
+        val state = store.state.value
+        assertEquals(original, state.contexts.first { it.id == original.id })
+        assertEquals(listOf(selected), state.instances)
+        assertEquals(listOf(unrelated), state.activeContext()!!.bindings)
+        assertEquals("module-settings:home:v1", state.activeContextId)
+        assertFalse(controller.detachSelectedHomeBinding(binding, snapshot).getOrThrow())
+    }
+
+    @Test
+    fun detachSelectedFeaturedRefusesStaleSelectionOrChangedContext() = runBlocking {
+        val store = FakeStore()
+        val selected = ModuleInstance("legacy-instance", "Most Used", PROVIDER_A, "{\"days\":21}")
+        val original = LauncherContext("advanced", "Advanced", listOf(
+            ContextCapabilityBinding(StandardCapabilities.AppsFeatured, selected.id),
+        ))
+        val route = featuredRoute(PROVIDER_A)
+        store.state.value = CompositionState(listOf(selected), listOf(original), original.id)
+        val controller = ModuleSettingsController(store, MutableStateFlow(listOf(route)))
+        val binding = ResolvedContextBinding(StandardCapabilities.AppsFeatured, selected, route)
+        val snapshot = controller.selectedHomeContextFor(binding)!!
+
+        val changed = original.copy(bindings = original.bindings +
+            ContextCapabilityBinding(CapabilityId("modular.example.new", 1), "some-instance"))
+        store.state.value = store.state.value.copy(contexts = listOf(changed))
+        val before = store.state.value
+        assertFalse(controller.detachSelectedHomeBinding(binding, snapshot).getOrThrow())
+        assertEquals(before, store.state.value)
+
+        val replacement = LauncherContext("replacement", "Replacement")
+        store.state.value = before.copy(contexts = listOf(changed, replacement), activeContextId = replacement.id)
+        val switched = store.state.value
+        assertFalse(controller.detachSelectedHomeBinding(binding, snapshot).getOrThrow())
+        assertEquals(switched, store.state.value)
+    }
+
     private fun controller(store: FakeStore) = ModuleSettingsController(
         store, MutableStateFlow(listOf(route(PROVIDER_A), route(PROVIDER_B))),
     )

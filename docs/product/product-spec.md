@@ -2,6 +2,10 @@
 
 Status: **Delivered Core baseline plus specified Home v2 requirements (2026-11-07)**
 
+Most Used ownership follows [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md).
+Earlier add-on-owned language in the Home v2 history is superseded. Basic
+categories will be specified after Core Most Used is implemented.
+
 This document captures the product intent established before implementation. Items marked **Open** are deliberately unresolved rather than guessed.
 
 ## 1. Product vision
@@ -29,7 +33,7 @@ Core shall provide:
 - a policy boundary for optional, later-phase MCP brokering.
 - shared Android launcher abstractions where one authoritative system view is preferable, including application discovery/launching.
 
-Core owns the complete baseline launcher, including Home, app discovery, alphabetical ordering, launching, settings, accessibility, and recovery. Terminal, script runtimes, automation, weather, integrations, and richer presentation are optional add-ons. A separate app drawer is not required: the default Home is the app list.
+Core owns the complete everyday launcher, including Home, app discovery, alphabetical ordering, built-in Most Used pins and optional usage suggestions, launching, settings, accessibility, and recovery. Terminal, script runtimes, automation, weather, complex integrations, and alternative presentation are optional add-ons. A separate app drawer is not required: the default Home is the app list.
 
 ## 3. Modules established so far
 
@@ -182,7 +186,7 @@ Python is the preferred first optional scripting runtime, consistent with ADR-00
 - Ordinary return from a launched app preserves Home scroll position where possible. Rotation/process recreation restores appropriate UI state; a newly delivered HOME or app-icon intent takes precedence and shows Home.
 - TalkBack semantics, large text, adequate touch targets, contrast, and system insets are baseline requirements.
 - Optional add-on failure shall retain or restore built-in Home and alphabetical ordering. Settings and add-on disable controls remain reachable.
-- No separate drawer is required. Search, built-in themes, alphabet navigation, optional wallpaper, and pull-down reachability are Core requirements (sections 15 and 19). Most Used ranking and pins remain add-on-owned; widgets and alternative layouts remain optional enhancements.
+- No separate drawer is required. Search, built-in themes, alphabet navigation, optional wallpaper, pull-down reachability, and default-off Most Used are Core requirements (sections 15 and 19). Widgets and alternative layouts remain optional enhancements.
 
 ## 12. Non-goals for the first implementation slice
 
@@ -294,6 +298,11 @@ contract proposal, not an implemented external theme loader.
 
 ## 18. Module settings for ordinary use
 
+The Most Used add-on statements in this section record the earlier reference
+implementation. Current built-in Most Used setup is in
+[ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md); its
+Usage Access grant targets Core.
+
 - Every discovered module has a visible **Settings** action in Core. Show an explicit
   unavailable, connecting, incompatible, or no-settings state instead of an empty screen.
 - Core renders the validated descriptor's flat settings as ordinary controls: switches,
@@ -316,6 +325,9 @@ See [Module settings](../implementation/module-settings.md) for UI and acceptanc
 
 ## 19. Reference-led Home presentation and featured apps (source implementation; acceptance pending)
 
+The Most Used ownership portion below is superseded by [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md): Core owns the built-in toggle, pins,
+usage suggestions, and optional Usage Access; the generic featured contract remains.
+
 The 2026-11-07 product request supersedes the text-only/add-on-only icons and
 alphabet-index rules. The normative detail is in [Home presentation v2](home-presentation-v2.md),
 with [implementation sequencing](../implementation/home-presentation-v2-plan.md)
@@ -326,7 +338,7 @@ and [ADR-0005](../decisions/ADR-0005-indexed-home-and-featured-addons.md).
   selected-letter bubble, reference-aligned typography/spacing, optional system
   wallpaper/dimming, bottom persistent search/gear controls, and retained
   pull-down reachability that brings the first app to mid-screen.
-- Most Used: an optional starred section and star rail destination, ordered pins
+- Built-in Core Most Used: an optional starred section and star rail destination, ordered pins
   before usage-ranked suggestions, ordinary pin/unpin/reorder controls, and
   persistent exact-identity pins that also work without Usage Access.
 - Core always retains the complete alphabetical catalog. Featured entries may
@@ -347,7 +359,7 @@ Core search matches both displayed app names and package identifiers. Core owns
 the long-press management sheet, Android App info/uninstall handoff, persistent
 display-name overrides and hiding/restoring apps. Hidden identities are omitted
 from all Home presentations without altering the raw catalog exposed to granted
-capabilities. Automatic Most Used ranking and pins remain add-on functions.
+capabilities. Built-in Most Used ranking and pins are Core functions.
 
 Core uses a private disposable app-index snapshot to display cached metadata
 before a background cold-start reconciliation. Normal package events update

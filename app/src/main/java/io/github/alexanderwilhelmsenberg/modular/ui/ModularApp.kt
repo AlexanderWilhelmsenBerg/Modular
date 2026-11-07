@@ -71,6 +71,7 @@ fun ModularApp(
     onClearModuleEvents: () -> Unit = {},
     compositionContent: @Composable () -> Unit = {},
     appearanceContent: @Composable () -> Unit = {},
+    coreFeaturesContent: @Composable () -> Unit = {},
     corePackageName: String = "io.github.alexanderwilhelmsenberg.modular",
 ) {
         Scaffold(
@@ -93,6 +94,7 @@ fun ModularApp(
                 verticalArrangement =
                     Arrangement.spacedBy(12.dp),
             ) {
+                item(key = "core-features") { coreFeaturesContent() }
                 item(key = "appearance") {
                     AppearanceSelector(
                         selected = appearanceTheme,

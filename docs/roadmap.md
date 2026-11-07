@@ -2,6 +2,10 @@
 
 This is sequencing, not a release-date commitment. Target requirements are defined in the product specification and ADR-0004; listing a feature here does not mean it is implemented.
 
+[ADR-0006](decisions/ADR-0006-core-most-used-and-feature-order.md) changes the
+Most Used ownership and order below: finish built-in Core Most Used first, then
+write basic categories specifications. No categories design is included here.
+
 ## Phase 0 — Align the product boundary
 
 - Complete Core launcher; optional helper add-ons.
@@ -61,13 +65,21 @@ Implementation packages: [v2 plan](implementation/home-presentation-v2-plan.md).
 1. P1: Core icons, optional wallpaper/dimming, locale letter sections, bottom search/gear.
 2. P2: animated side alphabet and retained pull-down reachability.
 3. P3: bounded featured-app capability/SDK and generic Core section/pin controls.
-4. P4: Most Used star destination, persistent manual pins, usage suggestions, safe migration.
+4. P4: Built-in Core Most Used toggle, star destination, persistent manual pins,
+   optional usage suggestions, and safe one-time legacy migration.
 5. P5: integrated visual, gesture, cross-APK, failure and physical-device acceptance.
 
 P3 contract work can run alongside P1; P2 uses P1's geometry and section model;
 P4 depends on P3. All ordinary setup remains in module Settings. This phase
 supersedes the baseline text-only/icon and alphabet-index boundary without
-claiming these features already exist. Pinning/ranking remain in the add-on.
+claiming these features already exist. Core owns built-in pinning/ranking under
+ADR-0006; the separate add-on remains a reference/compatibility package.
+
+## Next specification after Core Most Used
+
+Write the specifications for basic categories after the Core Most Used
+implementation is finished. Category design and implementation are not part of
+Phase 1e's Most Used change.
 
 ## Phase 2 — Module UX and richer composition
 

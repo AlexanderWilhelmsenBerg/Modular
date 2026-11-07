@@ -118,8 +118,10 @@ These checks are device-dependent and are not claimed complete by unit tests.
 External Home/Drawer rendering, external theme loading, richer configuration schemas,
 profile labels, filtering providers, automation, scripts, MCP and
 terminal integrations remain later add-ons. They must preserve baseline Core recovery.
-Icons are now Core presentation; pins and usage suggestions belong to the Most Used
-add-on through the generic featured-app capability.
+Icons are now Core presentation. The later [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md)
+moves ordinary pins and usage suggestions into Core; the generic featured-app
+capability remains for reference and compatible providers. Earlier acceptance
+evidence in this document belongs to its recorded revision.
 
 ## Core framework contract
 

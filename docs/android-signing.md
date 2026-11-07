@@ -13,8 +13,8 @@ One private RSA-3072 key is reused under two aliases in one PKCS12 keystore.
 Each alias has a different self-signed certificate; their SHA-256 certificate
 fingerprints differ, while their public-key fingerprints match. This is the
 requested shared-key setup: possession of the private key enables signing both
-variants. The reference sort
-module also has a `.debug` ID suffix and uses the matching variant's signing key,
+variants. Optional legacy/reference add-ons retain their existing package IDs,
+including `.debug` suffixes, and use the matching variant's signing key,
 so Core's same-signer trust policy continues to work. With both reference variants
 installed, the module registry can discover both; enable the intended variant and
 disable the other to avoid ambiguous provider selection.
@@ -53,10 +53,11 @@ The CI verifier uses OpenSSL to extract that public-key representation.
 
 After `.github/workflows/signed-apks.yml` is on the default branch, run **Signed
 APKs** from the Actions tab, selecting the trusted branch/tag to build. The
-`modular-signed-apks` artifact contains persistent debug and release APKs for Core
-and the Alphabetical Sort reference and Most Used add-ons. Separate
-`modular-most-used-release` and `modular-most-used-debug` artifacts contain just
-the useful add-on APK for the corresponding Core variant. The workflow fails if secrets are absent or the
+`modular-signed-apks` artifact contains persistent Core debug and release APKs.
+Select `include_reference_addons` only for SDK/compatibility testing; that run
+also uploads `modular-reference-addons` with Alphabetical Sort and legacy Most
+Used debug/release APKs. Ordinary Most Used is built into Core and needs no
+separate APK. The workflow fails if secrets are absent or the
 certificates do not match the pinned public fingerprints. It never falls back to
 unsigned or disposable signing for distribution.
 
@@ -72,12 +73,13 @@ Set `MODULAR_KEYSTORE_PATH` to an absolute path outside the checkout and
 `MODULAR_KEYSTORE_PASSWORD` to the keystore password, then build:
 
 ```sh
-gradle :app:assembleDebug :app:assembleRelease \
-  :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease \
-  :addon-most-used:assembleDebug :addon-most-used:assembleRelease \
-  --no-configuration-cache
-python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json
+gradle :app:assembleDebug :app:assembleRelease --no-configuration-cache
+python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --core-only
 ```
+
+For optional reference add-on builds, assemble both variants of
+`reference-sort-alphabetical` and `addon-most-used`, then run the verifier without
+`--core-only`. Its default still checks all six APKs, as Android CI does.
 
 Without those variables local debug uses Android's default debug key, while local
 release is unsigned. Do not distribute that unsigned release output.
@@ -97,8 +99,9 @@ same-signer module trust before mixing distribution channels.
 
 ## Installation warnings and restricted settings
 
-For normal use choose matching signed **release** APKs for Core and add-ons;
-debug builds are intended for development. Neither variant guarantees acceptance
+For normal use choose the signed **release** Core APK; debug builds are intended
+for development. Reference add-ons require a matching variant when tested.
+Neither variant guarantees acceptance
 by Play Protect or exemption from Android's restricted settings. Keep existing
 keys and package identities: rotating them is not a fix for a classification.
 
@@ -111,31 +114,34 @@ uploaded to VirusTotal. Sharing/submitting the APK is a separate owner action.
 Use the APK file hash, not its signing certificate fingerprint or the ZIP hash:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 '.\addon-most-used-debug.apk'
+Get-FileHash -Algorithm SHA256 '.\app-debug.apk'
 ```
 
 Debug package names:
 
 - Core: `io.github.alexanderwilhelmsenberg.modular.debug`
-- Most Used: `io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug`
+- Legacy Most Used reference add-on: `io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug`
 
 Suggested review description (use only for the matching reviewed build):
 
 > Modular is an Android launcher. Core requests REQUEST_DELETE_PACKAGES
-> for user-confirmed uninstall actions. The separate Most Used add-on requests
-> PACKAGE_USAGE_STATS to rank apps locally, following explicit user permission.
-> Neither APK declares Internet, SMS, accessibility-service, or notification-listener
+> for user-confirmed uninstall actions and PACKAGE_USAGE_STATS for optional,
+> locally ranked Most Used suggestions following explicit user permission.
+> The reviewed Core APK declares no Internet, SMS, accessibility-service, or notification-listener
 > access. Please review the submitted APK's harmful-app classification. The warning
 > was observed on Android 17 / One UI 9. Source: https://github.com/AlexanderWilhelmsenBerg/Modular
 
-The published APKs from signed run `42395463536` were inspected: signatures match
+The earlier APKs from signed run `42395463536` were inspected: signatures match
 the pinned certificates, the release APKs are not debuggable, and their declared
-permissions match the descriptions above (Core also has AndroidX's internal
+permissions matched the old add-on-based design (Core also had AndroidX's internal
 signature-protected receiver permission). This verifies identity and manifest
-contents, not Google's private detection rules or a complete malware assessment.
+contents at that revision, not the current Core manifest, Google's private
+detection rules, or a complete malware assessment. This does not claim Play or
+F-Droid publication.
 
-For the separate grey Usage Access switch and missing App info menu, follow the
-[Most Used setup guide](addons/most-used.md). Usage Access is special access, so
+For a grey Usage Access switch or missing App info menu, follow the
+[Most Used setup guide](addons/most-used.md). Core now owns this optional access;
+the old add-on's grant cannot transfer. Usage Access is special access, so
 Android's ordinary Permissions page can correctly say no permissions are required.
 
 Reference: [Google's developer guidance for Play Protect warnings](https://developers.google.com/android/play-protect/warning-dev-guidance).

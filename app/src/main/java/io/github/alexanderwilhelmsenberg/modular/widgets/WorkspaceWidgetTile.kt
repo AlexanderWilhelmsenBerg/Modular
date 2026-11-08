@@ -110,7 +110,7 @@ internal fun WidgetProviderPicker(controller: WorkspaceWidgetController) {
         title = { Text("Add widget") },
         text = {
             if (providers.isEmpty()) Text("No installed widgets are available.")
-            else LazyColumn(Modifier.height(420.dp)) {
+            else LazyColumn(Modifier.height(420.dp).testTag("widget-provider-list")) {
                 groups.forEach { (app, appProviders) ->
                   item(key = "app:$app") {
                     Text(app, style = MaterialTheme.typography.titleMedium,
@@ -136,7 +136,10 @@ internal fun WidgetProviderPicker(controller: WorkspaceWidgetController) {
                             Text(widgetLabel, style = MaterialTheme.typography.titleSmall)
                             Text("At least ${controller.pxToDp(info.minWidth)} × ${controller.pxToDp(info.minHeight)} dp",
                                 style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = { controller.chooseProvider(info) }) { Text("Add $widgetLabel") }
+                            TextButton(onClick = { controller.chooseProvider(info) },
+                                modifier = Modifier.testTag("widget-provider:${info.provider.flattenToString()}")) {
+                                Text("Add $widgetLabel")
+                            }
                         }
                     }
                   }

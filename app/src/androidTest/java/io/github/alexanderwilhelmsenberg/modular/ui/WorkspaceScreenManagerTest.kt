@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import io.github.alexanderwilhelmsenberg.modular.MainActivity
@@ -33,7 +34,7 @@ class WorkspaceScreenManagerTest {
             rule.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("settings-home-screens"))
             rule.onNodeWithTag("settings-home-screens").performClick()
             rule.onNodeWithTag("workspace-tile:home").assertIsDisplayed()
-            rule.onNodeWithTag("workspace-add-page").performClick()
+            rule.onNodeWithTag("workspace-add-page").performScrollTo().assertIsDisplayed().performClick()
             rule.onNodeWithTag("workspace-page-name").performTextInput(name)
             rule.onNodeWithText("Left").performClick()
             rule.onNodeWithText("Save").performClick()

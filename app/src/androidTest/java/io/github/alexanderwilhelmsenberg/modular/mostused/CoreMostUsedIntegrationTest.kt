@@ -113,7 +113,7 @@ class CoreMostUsedIntegrationTest {
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("home-settings").performClick()
             rule.onNodeWithTag("settings-open-productivity").performClick()
-            rule.onNodeWithText("Configure Most Used").performClick()
+            rule.onNodeWithText("Configure Most Used").performScrollTo().assertIsDisplayed().performClick()
             rule.onNodeWithText("Reset learned usage…").performScrollTo().performClick()
             rule.onNodeWithText("Reset learned usage").performClick()
             withTimeout(10_000) {

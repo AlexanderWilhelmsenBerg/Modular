@@ -92,7 +92,11 @@ class WorkspaceConfiguredWidgetTest {
     private fun addConfiguredFixture() {
         rule.onNodeWithTag("workspace-home").performScrollToNode(hasTestTag("workspace-add-widget"))
         rule.onNodeWithTag("workspace-add-widget").performClick()
-        rule.onNodeWithText("Add Configured workspace fixture").performClick()
+        val provider = ComponentName(InstrumentationRegistry.getInstrumentation().context,
+            ConfiguredWorkspaceFixtureProvider::class.java).flattenToString()
+        val tag = "widget-provider:$provider"
+        rule.onNodeWithTag("widget-provider-list").performScrollToNode(hasTestTag(tag))
+        rule.onNodeWithTag(tag).performClick()
     }
 
     private fun fixtureState(context: Context): Bundle = requireNotNull(

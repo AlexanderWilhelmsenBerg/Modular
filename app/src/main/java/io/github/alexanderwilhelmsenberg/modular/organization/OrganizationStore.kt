@@ -354,12 +354,13 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
 @Serializable private data class SavedFolder(val id: String, val name: String,
     val members: List<SavedKey>, val placement: FolderPlacement,
     val visibilityMode: FolderVisibilityMode, val matchMode: FolderMatchMode,
-    val unknownFallback: UnknownFallback, val conditionIds: List<String>) {
+    val unknownFallback: UnknownFallback, val conditionIds: List<String>,
+    val iconId: String = "folder") {
     fun public() = FolderDefinition(id, name, members.map { it.public() }, placement,
-        visibilityMode, matchMode, unknownFallback, conditionIds)
+        visibilityMode, matchMode, unknownFallback, conditionIds, iconId)
     companion object { fun from(folder: FolderDefinition) = SavedFolder(folder.id, folder.name,
         folder.members.map(SavedKey::from), folder.placement, folder.visibilityMode,
-        folder.matchMode, folder.unknownFallback, folder.conditionIds) }
+        folder.matchMode, folder.unknownFallback, folder.conditionIds, folder.iconId) }
 }
 @Serializable private data class SavedMembership(val categoryId: String, val app: SavedKey,
     val override: MembershipOverride, val token: Long) {

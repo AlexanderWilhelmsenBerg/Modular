@@ -1,7 +1,6 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -12,7 +11,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,13 +48,7 @@ internal fun FolderShortcut(
         val labelStart = (maxWidth * 0.282f).coerceAtLeast(start + 56.dp)
         Row(Modifier.fillMaxWidth().heightIn(min = 60.dp), verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.width(start))
-            Canvas(Modifier.size(40.dp).padding(4.dp)) {
-                drawPath(Path().apply {
-                    moveTo(0f, size.height * .18f); lineTo(size.width * .4f, size.height * .18f)
-                    lineTo(size.width * .52f, size.height * .32f); lineTo(size.width, size.height * .32f)
-                    lineTo(size.width, size.height * .86f); lineTo(0f, size.height * .86f); close()
-                }, foreground)
-            }
+            FolderIconImage(folder.iconId, Modifier.size(40.dp).padding(4.dp), foreground)
             Spacer(Modifier.width(labelStart - start - 40.dp))
             Text(folder.name, Modifier.weight(1f).padding(end = 52.dp), color = foreground,
                 fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

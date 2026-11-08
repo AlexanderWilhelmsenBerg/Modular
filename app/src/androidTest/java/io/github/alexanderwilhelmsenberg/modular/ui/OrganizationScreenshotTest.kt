@@ -27,6 +27,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
@@ -36,6 +38,7 @@ import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceTheme
 import io.github.alexanderwilhelmsenberg.modular.appearance.ModularTheme
 import io.github.alexanderwilhelmsenberg.modular.organization.FolderCondition
 import io.github.alexanderwilhelmsenberg.modular.organization.FolderDefinition
+import io.github.alexanderwilhelmsenberg.modular.organization.HomePinRef
 import io.github.alexanderwilhelmsenberg.modular.organization.FolderMatchMode
 import io.github.alexanderwilhelmsenberg.modular.organization.FolderVisibilityMode
 import io.github.alexanderwilhelmsenberg.modular.organization.MegaSorterState
@@ -59,6 +62,26 @@ class OrganizationScreenshotTest {
         LaunchableApp(AppKey("fixture.work", "Mail", 0), "Work Mail", 1, true, null),
         LaunchableApp(AppKey("fixture.maps", "Maps", 0), "Maps", 1, true, null),
     )
+
+    @Test fun folderSectionsFollowEachAppList() {
+        val featuredFolder = FolderDefinition("featured", "Media", iconId = "music")
+        val appListFolder = FolderDefinition("library", "Library", iconId = "books")
+        rule.setContent {
+            ModularTheme(if (isSystemInDarkTheme()) AppearanceTheme.DARK else AppearanceTheme.LIGHT) {
+                HomeScreen(catalog = AppCatalog(apps = apps), onLaunch = {}, onRefresh = {},
+                    onMakeDefault = {}, onOpenSettings = {}, showMakeDefault = false,
+                    featuredApps = apps.take(2), featuredFolders = listOf(featuredFolder),
+                    featuredPinOrder = listOf(HomePinRef.Folder("featured"), HomePinRef.App(apps[0].key)),
+                    folders = listOf(appListFolder), iconForApp = { null })
+            }
+        }
+        rule.onNodeWithTag("section:featured-folders").assertIsDisplayed()
+        rule.onNodeWithTag("folder-row:featured").assertIsDisplayed()
+        capture("folders-most-used")
+        rule.onNodeWithTag("home-list").performScrollToNode(hasTestTag("folder-row:library"))
+        rule.onNodeWithTag("folder-row:library").assertIsDisplayed()
+        capture("folders-app-list")
+    }
 
     @Test fun categorySettings() {
         rule.setContent {

@@ -47,6 +47,8 @@ data class FolderDefinition(
     val unknownFallback: UnknownFallback = UnknownFallback.SHOW,
     /** Opaque references to sensitive, no-backup rule records. */
     val conditionIds: List<String> = emptyList(),
+    /** Stable bundled icon ID. Unknown future IDs are retained in storage. */
+    val iconId: String = "folder",
 )
 
 sealed interface HomePageId {

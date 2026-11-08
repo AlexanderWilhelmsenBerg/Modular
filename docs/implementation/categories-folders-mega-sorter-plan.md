@@ -161,8 +161,12 @@ Owner: folder/action UI agent; can run alongside C2 once C1 APIs are stable.
 Suggested `ui/FolderPopup.kt`, `ui/FolderEditor.kt`,
 `ui/AppOrganizationPicker.kt` and typed HomeListEntry additions.
 
-- Render the app-list Folders section/rail destination and typed starred folder
-  shortcuts. Folder content remains independently accessible in the catalog.
+- Render a distinct Folders section at the bottom of the app list and after all
+  Most Used apps/suggestions. Keep separate header identities for both sections.
+  Preserve stored typed pins, but reorder folders only within their own group.
+  Folder content remains independently accessible in the catalog.
+- Add a populated offline vector-icon picker to folder settings, with persisted
+  stable icon IDs, draft Save/Cancel semantics and safe fallback for older data.
 - Implement anchored, bounded popup, member ordering, dismissal/focus, empty and
   unavailable states, and a single active popup/sheet stack.
 - Extend existing app action sheet with Add to category and the category/folder

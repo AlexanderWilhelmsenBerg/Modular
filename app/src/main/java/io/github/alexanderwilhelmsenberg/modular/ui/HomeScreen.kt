@@ -120,23 +120,8 @@ fun HomeScreen(
             if (catalog.isRefreshing && normalApps.isEmpty() && catalog.lastError == null) add(HomeListEntry.Loading)
             else if (!searching && normalApps.isEmpty() && catalog.lastError == null) add(HomeListEntry.Empty)
             else if (visibleApps.isEmpty() && searching && catalog.lastError == null) add(HomeListEntry.NoResults)
-            if (!searching && (safeFeatured != null || featuredFolders.isNotEmpty())) {
-                add(HomeListEntry.Header("★"))
-                if (safeFeatured.isNullOrEmpty() && featuredFolders.isEmpty()) add(HomeListEntry.FeaturedEmpty)
-                else {
-                    val appPins = safeFeatured.orEmpty().associateBy { it.key }
-                    val folderPins = featuredFolders.associateBy { it.id }
-                    val emittedApps = mutableSetOf<AppKey>()
-                    val emittedFolders = mutableSetOf<String>()
-                    featuredPinOrder.forEach { pin -> when (pin) {
-                        is HomePinRef.App -> appPins[pin.key]?.let { if (emittedApps.add(it.key)) add(HomeListEntry.App(it, featured = true)) }
-                        is HomePinRef.Folder -> folderPins[pin.id]?.let { if (emittedFolders.add(it.id)) add(HomeListEntry.Folder(it)) }
-                    } }
-                    featuredFolders.filter { it.id !in emittedFolders }.forEach { add(HomeListEntry.Folder(it)) }
-                    safeFeatured.orEmpty().filter { it.key !in emittedApps }.forEach { add(HomeListEntry.App(it, featured = true)) }
-                    if (!featuredMessage.isNullOrBlank() || featuredNeedsPermission) add(HomeListEntry.FeaturedStatus)
-                }
-            }
+            if (!searching) addAll(featuredHomeEntries(safeFeatured, featuredFolders, featuredPinOrder,
+                showStatus = !featuredMessage.isNullOrBlank() || featuredNeedsPermission))
             if (useSections) sections.forEach { section ->
                 add(HomeListEntry.Header(section.label))
                 section.apps.forEach { add(HomeListEntry.App(it)) }
@@ -150,7 +135,7 @@ fun HomeScreen(
     }
     var anchorableEntries by remember { mutableStateOf(entries) }
     SideEffect { if (!searching) anchorableEntries = entries }
-    val headerIndices = remember(entries) { entries.mapIndexedNotNull { i, entry -> (entry as? HomeListEntry.Header)?.let { it.label to i + 1 } }.toMap() }
+    val headerIndices = remember(entries) { entries.mapIndexedNotNull { i, entry -> (entry as? HomeListEntry.Header)?.let { it.navigationKey to i + 1 } }.toMap() }
     val alphabet = remember(sections, safeFeatured, featuredFolders, folders) {
         (if (safeFeatured != null || featuredFolders.isNotEmpty()) listOf("★") else emptyList()) + sections.map { it.label } +
             (if (folders.isNotEmpty()) listOf("◇") else emptyList())
@@ -198,7 +183,7 @@ fun HomeScreen(
                 jumpHeaderLabel = null
                 listState.requestScrollToItem(0)
             } else if (oldQuery.isNotBlank() && query.isBlank()) {
-                jumpHeaderLabel = savedJumpHeaderLabel?.takeIf { label -> entries.any { it is HomeListEntry.Header && it.label == label } }
+                jumpHeaderLabel = savedJumpHeaderLabel?.takeIf { label -> entries.any { it is HomeListEntry.Header && it.navigationKey == label } }
                 navigationSpacePx = if (jumpHeaderLabel != null) savedNavigationSpacePx else 0
                 androidx.compose.runtime.withFrameNanos { }
                 val currentIndex = entries.indexOfFirst { it.id == savedAnchorId }

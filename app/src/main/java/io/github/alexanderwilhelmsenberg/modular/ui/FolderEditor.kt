@@ -75,11 +75,16 @@ fun ManageFoldersUi(
     }
     fun movePin(folder: FolderDefinition, delta: Int) {
         if (pinBusy) return
-        val position = snapshot.pins.indexOf(HomePinRef.Folder(folder.id))
+        val folderIndices = snapshot.pins.indices.filter { snapshot.pins[it] is HomePinRef.Folder }
+        val position = folderIndices.indexOf(snapshot.pins.indexOf(HomePinRef.Folder(folder.id)))
         val target = position + delta
-        if (position < 0 || target !in snapshot.pins.indices) return
+        if (position < 0 || target !in folderIndices.indices) return
         val reordered = snapshot.pins.toMutableList().apply {
-            add(target, removeAt(position))
+            val from = folderIndices[position]
+            val to = folderIndices[target]
+            val other = this[to]
+            this[to] = this[from]
+            this[from] = other
         }
         pinBusy = true
         pinError = null
@@ -111,12 +116,13 @@ fun ManageFoldersUi(
                 if (onOpenFolderPreview != null) onOpenFolderPreview(folder) else previewId = folder.id
             }, modifier = Modifier.testTag("preview-folder:${folder.id}")) { Text("Preview ${folder.name}") }
             if (folder.placement == FolderPlacement.MOST_USED) {
-                val position = snapshot.pins.indexOf(HomePinRef.Folder(folder.id))
+                val folderPins = snapshot.pins.filterIsInstance<HomePinRef.Folder>()
+                val position = folderPins.indexOf(HomePinRef.Folder(folder.id))
                 Row {
                     TextButton(enabled = !pinBusy && position > 0,
                         onClick = { movePin(folder, -1) },
                         modifier = Modifier.testTag("folder-pin-up:${folder.id}")) { Text("Move up") }
-                    TextButton(enabled = !pinBusy && position >= 0 && position < snapshot.pins.lastIndex,
+                    TextButton(enabled = !pinBusy && position >= 0 && position < folderPins.lastIndex,
                         onClick = { movePin(folder, 1) },
                         modifier = Modifier.testTag("folder-pin-down:${folder.id}")) { Text("Move down") }
                 }
@@ -230,6 +236,7 @@ fun FolderEditor(
                     modifier = Modifier.fillMaxWidth().testTag("folder-name"))
                 if (draft.name.isNotBlank() && invalidName) Text("Use a unique folder name (up to ${OrganizationLimits.MAX_NAME_CODE_POINTS} characters).",
                     color = MaterialTheme.colorScheme.error)
+                FolderIconPicker(draft.iconId) { iconId -> draft = draft.copy(iconId = iconId) }
                 Text("Shortcut placement", style = MaterialTheme.typography.titleSmall)
                 OrganizationChoiceRow("App list", draft.placement == FolderPlacement.APP_LIST,
                     tag = "folder-editor-placement:list") {

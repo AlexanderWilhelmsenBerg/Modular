@@ -297,12 +297,23 @@ Placement choices:
 - **App list:** a Folders section follows alphabetical apps, as in the supplied
   reference. Shortcuts sort by folder display name with stable-ID tie-breaking.
   A labeled folder rail destination appears only when this section is nonempty.
-- **Most Used:** a manually placed folder shortcut participates in the ordered
-  pinned section before app suggestions. Folders are not usage-ranked. Existing
+- **Most Used:** a named **Folders** section follows all pinned apps, suggestions,
+  and Most Used status content. Folder shortcuts never interleave with apps.
+  Saved folder order is retained; Move up/down reorders only folder shortcuts.
+  Folders are not usage-ranked. Existing
   app pins retain their order on migration; the existing 50-pin limit counts app
   and folder shortcuts together. This placement requires Most Used to be on;
   explain that requirement instead of silently enabling it. Turning Most Used
   off retains these folders, editable in Manage folders.
+
+Each folder has a selectable icon. Folder settings include a populated, labeled
+grid of bundled vector icons with a selection indicator and live preview. Choosing
+an icon changes the editor draft; Save persists it and Cancel leaves the saved icon
+unchanged. The picker works offline without an icon-pack APK. Missing or unknown
+saved icon IDs display the default folder icon without discarding organization data.
+The chosen icon appears on the folder shortcut in either placement and follows the
+current light/dark/wallpaper presentation. This revises the earlier mixed starred
+shortcut ordering: both placements now end with a distinct Folders section.
 
 A folder has one shortcut placement in v1. Moving it changes the placement, not
 its identity or membership. Its contents remain directly available elsewhere

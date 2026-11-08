@@ -89,8 +89,10 @@ class AppOrganizationPickerTest {
     @Test fun movingFolderPinKeepsAppPinOrder() {
         val otherKey = AppKey("other.app", "Main", 0)
         val folder = FolderDefinition("folder", "Tools", placement = FolderPlacement.MOST_USED)
-        val snapshot = OrganizationSnapshot(folders = listOf(folder), pins = listOf(
-            HomePinRef.App(app.key), HomePinRef.Folder(folder.id), HomePinRef.App(otherKey)))
+        val secondFolder = FolderDefinition("second-folder", "Work", placement = FolderPlacement.MOST_USED)
+        val snapshot = OrganizationSnapshot(folders = listOf(folder, secondFolder), pins = listOf(
+            HomePinRef.App(app.key), HomePinRef.Folder(folder.id), HomePinRef.App(otherKey),
+            HomePinRef.Folder(secondFolder.id)))
         var batch: OrganizationBatch? = null
         rule.setContent {
             MaterialTheme {
@@ -98,10 +100,10 @@ class AppOrganizationPickerTest {
                     onUpdate = { request -> batch = request; Result.success(snapshot) })
             }
         }
-        rule.onNodeWithTag("folder-pin-up:folder").performClick()
+        rule.onNodeWithTag("folder-pin-down:folder").performClick()
         rule.runOnIdle {
-            assertEquals(listOf(HomePinRef.Folder("folder"), HomePinRef.App(app.key),
-                HomePinRef.App(otherKey)),
+            assertEquals(listOf(HomePinRef.App(app.key), HomePinRef.Folder("second-folder"),
+                HomePinRef.App(otherKey), HomePinRef.Folder("folder")),
                 (batch!!.edits.single() as OrganizationEdit.SetPins).order)
         }
     }

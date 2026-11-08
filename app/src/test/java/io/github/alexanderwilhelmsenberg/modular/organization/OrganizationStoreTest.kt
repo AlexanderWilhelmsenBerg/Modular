@@ -129,6 +129,48 @@ class OrganizationStoreTest {
         assertFalse(first.currentSnapshot().categories.any { it.id == "c" })
     }
 
+    @Test fun folderIconRoundTripsAcrossStoreInstances() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        store.update(OrganizationBatch(listOf(
+            OrganizationEdit.CreateFolder(FolderDefinition("f1", "Music", listOf(a), iconId = "music")),
+        ))).getOrThrow()
+
+        assertEquals("music", OrganizationStore(memory).currentSnapshot().folders.single().iconId)
+        assertTrue(memory.raw("organization_json_v1")!!.contains("\"iconId\":\"music\""))
+    }
+
+    @Test fun oldFolderWithoutIconLoadsAndUnknownFutureIconSurvivesEdits() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        store.update(OrganizationBatch(listOf(
+            OrganizationEdit.CreateCategory(CategoryDefinition("custom", "Custom", builtIn = false)),
+            OrganizationEdit.CreateFolder(FolderDefinition("f1", "Music", listOf(a), iconId = "music")),
+        ))).getOrThrow()
+        val key = "organization_json_v1"
+        val saved = requireNotNull(memory.raw(key))
+        val iconField = ",\"iconId\":\"music\""
+        assertTrue(saved.contains(iconField))
+
+        memory.setRaw(key, saved.replace(iconField, ""))
+        val old = OrganizationStore(memory).currentSnapshot()
+        assertEquals("folder", old.folders.single().iconId)
+        assertEquals(listOf(a), old.folders.single().members)
+        assertTrue(old.categories.any { it.id == "custom" })
+
+        memory.setRaw(key, saved.replace("\"iconId\":\"music\"", "\"iconId\":\"future-icon\""))
+        val newer = OrganizationStore(memory)
+        assertEquals("future-icon", newer.currentSnapshot().folders.single().iconId)
+        newer.update(OrganizationBatch(listOf(
+            OrganizationEdit.UpdateCategory(newer.currentSnapshot().categories.first { it.id == "custom" }
+                .copy(name = "Renamed")),
+        ))).getOrThrow()
+        val after = OrganizationStore(memory).currentSnapshot()
+        assertEquals("future-icon", after.folders.single().iconId)
+        assertEquals(listOf(a), after.folders.single().members)
+        assertTrue(after.categories.any { it.id == "custom" && it.name == "Renamed" })
+    }
+
     private class MemoryPreferences : DataStore<Preferences> {
         private val mutable = MutableStateFlow<Preferences>(emptyPreferences())
         var failNextWrite = false
@@ -147,5 +189,6 @@ class OrganizationStoreTest {
                 this[stringPreferencesKey(key)] = value
             }
         }
+        fun raw(key: String): String? = mutable.value[stringPreferencesKey(key)]
     }
 }

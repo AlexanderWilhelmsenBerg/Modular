@@ -39,7 +39,9 @@ import io.github.alexanderwilhelmsenberg.modular.organization.FolderDefinition
 
 internal sealed interface HomeListEntry {
     val id: String
-    data class Header(val label: String) : HomeListEntry { override val id = "header:$label" }
+    data class Header(val label: String, val navigationKey: String = label) : HomeListEntry {
+        override val id = "header:$navigationKey"
+    }
     data class App(val app: LaunchableApp, val featured: Boolean = false) : HomeListEntry {
         override val id = (if (featured) "featured:" else "app:") + app.key.stableId
     }
@@ -103,9 +105,9 @@ internal fun HomeAppList(
         items(entries, key = { it.id }) { entry ->
             when (entry) {
                 is HomeListEntry.Header -> {
-                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(54.dp + with(androidx.compose.ui.platform.LocalDensity.current) { (if (entry.label == jumpHeaderLabel) navigationSpacePx else 0).toDp() }), contentAlignment = AbsoluteAlignment.BottomLeft) {
+                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(54.dp + with(androidx.compose.ui.platform.LocalDensity.current) { (if (entry.navigationKey == jumpHeaderLabel) navigationSpacePx else 0).toDp() }), contentAlignment = AbsoluteAlignment.BottomLeft) {
                         val start = (maxWidth * 0.126f).coerceAtLeast(16.dp)
-                        Text(entry.label, Modifier.absoluteOffset(x = start).padding(bottom = 6.dp).testTag("section:${entry.label}"), color = foreground, fontSize = 22.sp, fontWeight = FontWeight.Medium, style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default)
+                        Text(entry.label, Modifier.absoluteOffset(x = start).padding(bottom = 6.dp).testTag("section:${entry.navigationKey}"), color = foreground, fontSize = 22.sp, fontWeight = FontWeight.Medium, style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default)
                     }
                 }
                 is HomeListEntry.App -> {

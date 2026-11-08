@@ -89,7 +89,9 @@ class WorkspaceNavigationTest {
         }
         try {
             runBlocking {
-                store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(existing + placeholders)))).getOrThrow()
+                val snapshot = store.currentSnapshot()
+                store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(existing + placeholders)),
+                    snapshot.revision)).getOrThrow()
             }
             rule.waitUntil(15_000) {
                 rule.onAllNodesWithTag("workspace-widget:1000001").fetchSemanticsNodes().isNotEmpty()
@@ -116,7 +118,9 @@ class WorkspaceNavigationTest {
             waitForAllApps()
         } finally {
             runBlocking {
-                store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(existing)))).getOrThrow()
+                val snapshot = store.currentSnapshot()
+                store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(existing)),
+                    snapshot.revision)).getOrThrow()
             }
         }
     }

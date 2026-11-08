@@ -40,7 +40,7 @@ class WorkspaceConfiguredWidgetTest {
         val originalChoice = preferences.getBoolean("accept_next", true)
         val startingLaunches = preferences.getInt("launches", 0)
         try {
-            val shell = instrumentation.uiAutomation.executeShellCommand("appwidget grantbind ${target.packageName}")
+            val shell = instrumentation.uiAutomation.executeShellCommand("appwidget grantbind --package ${target.packageName}")
             ParcelFileDescriptor.AutoCloseInputStream(shell).close()
             preferences.edit().putBoolean("accept_next", true).commit()
             waitForHome()
@@ -73,7 +73,11 @@ class WorkspaceConfiguredWidgetTest {
             assertTrue(runBlocking { store.currentSnapshot().widgets.any { it.appWidgetId == added.appWidgetId } })
         } finally {
             preferences.edit().putBoolean("accept_next", originalChoice).commit()
-            runBlocking { store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(beforeWidgets)))).getOrThrow() }
+            runBlocking {
+                val snapshot = store.currentSnapshot()
+                store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(beforeWidgets)),
+                    snapshot.revision)).getOrThrow()
+            }
             (host.appWidgetIds.toSet() - beforeIds).forEach(host::deleteAppWidgetId)
         }
     }

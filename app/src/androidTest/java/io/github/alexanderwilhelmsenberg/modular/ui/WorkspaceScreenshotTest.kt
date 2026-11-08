@@ -59,16 +59,20 @@ class WorkspaceScreenshotTest {
             val provider = ComponentName(fixtureContext, WorkspaceFixtureProvider::class.java)
             val id = host.allocateAppWidgetId()
             try {
+                ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(
+                    "appwidget grantbind --package ${context.packageName}",
+                )).close()
                 instrumentation.uiAutomation.adoptShellPermissionIdentity("android.permission.BIND_APPWIDGET")
                 val bound = try { manager.bindAppWidgetIdIfAllowed(id, provider) }
                     finally { instrumentation.uiAutomation.dropShellPermissionIdentity() }
                 assertTrue("Fixture provider could not be bound by Android", bound)
                 WorkspaceFixtureProvider().onUpdate(fixtureContext, manager, intArrayOf(id))
                 runBlocking {
+                    val snapshot = store.currentSnapshot()
                     store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(
                         original + WorkspaceWidget(id, "home", provider.flattenToString(), 120,
                             workspaceHostToken(context)),
-                    )))).getOrThrow()
+                    )), snapshot.revision)).getOrThrow()
                 }
                 rule.waitUntil(15_000) {
                     rule.onAllNodesWithTag("workspace-widget:$id").fetchSemanticsNodes().isNotEmpty()
@@ -79,7 +83,9 @@ class WorkspaceScreenshotTest {
                 rule.onNodeWithTag("workspace-widget:$id").assertIsDisplayed()
             } finally {
                 runBlocking {
-                    store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(original)))).getOrThrow()
+                    val snapshot = store.currentSnapshot()
+                    store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(original)),
+                        snapshot.revision)).getOrThrow()
                 }
                 host.deleteAppWidgetId(id)
             }

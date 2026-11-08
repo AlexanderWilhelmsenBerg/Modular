@@ -4,11 +4,13 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -35,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -119,7 +122,8 @@ fun WorkspaceSettingsUi(
         title = { Text("Home screens") },
         text = {
             Column(
-                Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(dialogScroll),
+                Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(dialogScroll)
+                    .testTag("workspace-dialog-scroll"),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -198,7 +202,7 @@ fun WorkspaceSettingsUi(
                     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Text(widgetLabel(widget).ifBlank { "Unavailable widget" },
                             style = MaterialTheme.typography.bodyMedium)
-                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             TextButton(enabled = !busy && index > 0, onClick = {
                                 if (onMoveWidgetBy != null) onMoveWidgetBy(widget.appWidgetId, -1)
                                 else save(OrganizationEdit.SetWidgets(snapshot.widgets.swapped(
@@ -215,7 +219,8 @@ fun WorkspaceSettingsUi(
                                     else save(OrganizationEdit.SetWidgets(snapshot.widgets.map {
                                         if (it.appWidgetId == widget.appWidgetId) it.copy(pageId = id) else it
                                     }))
-                                }) { Text("Move to $name") }
+                                }) { Text("Move to $name", modifier = Modifier.widthIn(max = 220.dp),
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis) }
                             }
                             onResizeWidget?.takeIf { canResizeWidget(widget) }?.let { resize ->
                                 TextButton(enabled = !busy && widget.heightDp > 48,
@@ -245,6 +250,7 @@ fun WorkspaceSettingsUi(
             val position = if (left) home else home + 1
             save(OrganizationEdit.CreateWorkspacePage(WorkspacePage(UUID.randomUUID().toString(), name), position)) {
                 addPage = false
+                scope.launch { dialogScroll.animateScrollTo(0) }
             }
         },
     )
@@ -406,6 +412,7 @@ private fun WorkspacePageEditor(
     page: WorkspacePage?, snapshot: OrganizationSnapshot, busy: Boolean, error: String?,
     onDismiss: () -> Unit, onSave: (String, Boolean) -> Unit,
 ) {
+    val keyboard = LocalSoftwareKeyboardController.current
     var name by remember(page?.id) { mutableStateOf(page?.name.orEmpty()) }
     var left by remember(page?.id) { mutableStateOf(false) }
     val validation = workspacePageNameError(name, snapshot, page?.id)
@@ -428,7 +435,10 @@ private fun WorkspacePageEditor(
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
-        confirmButton = { Button(enabled = !busy && validation == null, onClick = { onSave(name.trim(), left) }) { Text("Save") } },
+        confirmButton = { Button(enabled = !busy && validation == null, onClick = {
+            keyboard?.hide()
+            onSave(name.trim(), left)
+        }) { Text("Save") } },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") } },
     )
 }

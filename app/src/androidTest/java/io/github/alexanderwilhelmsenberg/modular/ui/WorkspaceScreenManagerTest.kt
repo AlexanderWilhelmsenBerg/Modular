@@ -38,6 +38,9 @@ class WorkspaceScreenManagerTest {
             rule.onNodeWithTag("workspace-page-name").performTextInput(name)
             rule.onNodeWithText("Left").performClick()
             rule.onNodeWithText("Save").performClick()
+            rule.waitUntil(15_000) {
+                rule.onAllNodesWithTag("workspace-page-name").fetchSemanticsNodes().isEmpty()
+            }
 
             rule.waitUntil(15_000) {
                 runBlocking { store.currentSnapshot().workspacePages.any { it.name == name } }
@@ -46,7 +49,9 @@ class WorkspaceScreenManagerTest {
             val page = created.workspacePages.single { it.name == name }
             createdId = page.id
             assertTrue(created.pageOrder.indexOf(HomePageId.Widget(page.id)) < created.pageOrder.indexOf(HomePageId.Home))
-            rule.onNodeWithTag("workspace-tile:widget:${page.id}").performScrollTo().assertIsDisplayed()
+            rule.onNodeWithTag("workspace-page-order").performScrollTo()
+            rule.onNodeWithTag("workspace-tile:widget:${page.id}").performScrollTo()
+            rule.onNodeWithTag("workspace-tile:widget:${page.id}").assertIsDisplayed()
 
             rule.onNodeWithText("Delete").performScrollTo().assertIsDisplayed().performClick()
             rule.onNodeWithText("Delete screen").assertIsDisplayed().performClick()

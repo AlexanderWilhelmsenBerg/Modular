@@ -4,7 +4,9 @@ This is sequencing, not a release-date commitment. Target requirements are defin
 
 [ADR-0006](decisions/ADR-0006-core-most-used-and-feature-order.md) changes the
 Most Used ownership and order below: finish built-in Core Most Used first, then
-write basic categories specifications. No categories design is included here.
+specify categories. That next scope is now a
+[categories, folders and Mega Sorter draft](product/categories-folders-mega-sorter.md)
+under [ADR-0008](decisions/ADR-0008-core-app-organization.md), not a delivered feature.
 
 ## Phase 0 — Align the product boundary
 
@@ -75,11 +77,28 @@ supersedes the baseline text-only/icon and alphabet-index boundary without
 claiming these features already exist. Core owns built-in pinning/ranking under
 ADR-0006; the separate add-on remains a reference/compatibility package.
 
-## Next specification after Core Most Used
+## Phase 1f — Categories, popup folders, and Mega Sorter (draft)
 
-Write the specifications for basic categories after the Core Most Used
-implementation is finished. Category design and implementation are not part of
-Phase 1e's Most Used change.
+Core Most Used local learning is merged. The 2026-11-08 organization request is
+specified in the [product draft](product/categories-folders-mega-sorter.md), with
+[delivery slices](implementation/categories-folders-mega-sorter-plan.md):
+
+1. C1: local metadata classification, durable membership overrides, visibility
+   projections, organization commands and app/folder pin migration.
+2. C2: category settings, custom categories, page-order tiles and page navigation.
+3. C3: popup folders, placements and long-press category/folder management.
+4. C4: Mega Sorter setup, fixed-slot row animations, concurrent interactions and Undo.
+5. C5: integration, visual/gesture evidence and physical-device acceptance.
+
+Categories and folders are ordinary Core functions. Advanced classification
+sources, nested/smart folders and external integrations need separate scope.
+ORG-A01–A16 have no implementation evidence yet. The draft marks unresolved
+defaults explicitly rather than treating them as user-confirmed decisions.
+
+After the app is finished, investigate any remaining Play Protect harmful-app
+warning using the exact final APK and prepare its Google review/appeal. This is
+a deferred distribution task; it does not remove Android's normal restricted
+settings requirements and no submission has been made by this specification change.
 
 ## Phase 2 — Module UX and richer composition
 

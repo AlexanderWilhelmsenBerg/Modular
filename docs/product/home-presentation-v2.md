@@ -12,7 +12,10 @@ and [the original presentation decision](../decisions/ADR-0005-indexed-home-and-
 the Most Used add-on ownership and migration portions below;
 [ADR-0007](../decisions/ADR-0007-local-most-used-learning.md) sets local launch
 learning as the default suggestion source. The generic featured-app contract
-remains. Basic categories are specified later, after Core Most Used implementation.
+remains. The next [categories, folders and Mega Sorter draft](categories-folders-mega-sorter.md)
+now specifies optional Core organization after Most Used. Its proposed category
+Home filtering refines the complete-main-list wording below; the raw catalog
+and global search remain complete. Those organization features are not yet implemented.
 
 ## 1. Reference and design intent
 

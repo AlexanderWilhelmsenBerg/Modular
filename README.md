@@ -120,7 +120,10 @@ alphabetical catalog when the feature is disabled. The Signed APKs workflow
 distributes Core debug and release by default; reference add-on APKs are an
 optional SDK-testing output.
 
-Basic categories will be specified after the Core Most Used implementation.
+The next Core scope is the
+[categories, popup folders, and Mega Sorter specification draft](docs/product/categories-folders-mega-sorter.md),
+with [an implementation plan](docs/implementation/categories-folders-mega-sorter-plan.md).
+These organization features are proposed and are not yet in the app.
 
 Module cards have a **Settings** button with normal controls and a **Use on Home**
 action for sort helpers. Instances, contexts, and JSON editing are under Advanced

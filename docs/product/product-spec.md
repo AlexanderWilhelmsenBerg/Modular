@@ -1,12 +1,15 @@
 # Modular — Product Specification
 
-Status: **Delivered Core baseline plus specified Home v2 requirements (2026-11-07)**
+Status: **Delivered Core baseline plus Home v2 requirements; organization specification draft added 2026-11-08**
 
 Most Used ownership follows [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md),
 with local learning as the default under
 [ADR-0007](../decisions/ADR-0007-local-most-used-learning.md).
-Earlier add-on-owned language in the Home v2 history is superseded. Basic
-categories will be specified after Core Most Used is implemented.
+Earlier add-on-owned language in the Home v2 history is superseded. The next
+Core organization scope is drafted in
+[Categories, popup folders, and Mega Sorter](categories-folders-mega-sorter.md)
+and [ADR-0008](../decisions/ADR-0008-core-app-organization.md); implementation is in
+the feature branch with [acceptance tracking](../implementation/category-validation.md).
 
 This document captures the product intent established before implementation. Items marked **Open** are deliberately unresolved rather than guessed.
 
@@ -379,3 +382,38 @@ Acceptance: sparse Norwegian rail before/after last-entry removal; search
 without add-ons; rename/reset/restart; hide/search/star exclusion and restore;
 Android uninstall cancellation; invalid cache and profile/locale mismatch;
 incremental update/removal; unchanged generations after identical refresh.
+
+## 21. Categories, popup folders, and Mega Sorter (specification draft)
+
+The 2026-11-08 request adds three optional Core functions. Full behavior, confirmed
+clarifications, proposed defaults and ORG-A01–A22 acceptance cases are in
+[the organization specification](categories-folders-mega-sorter.md).
+
+- Categories: Games, Media, Social, Productivity, Work, Finance, and custom
+  categories; per-category page enable and Show on Home switches; small settings
+  tiles order pages on either side of the permanent Home page.
+- Apps may belong to multiple categories. Home search finds all non-hidden apps
+  regardless of category-based Home suppression. The draft proposes how that
+  suppression interacts with pins and overlapping categories.
+- Local Android metadata supplies partial automatic Games/Media/Social/
+  Productivity matching; explicit Include/Exclude overrides win. Work, Finance
+  and unknown apps are manually assigned in v1. No Usage Access is required.
+- Popup folders can be placed in the main app list or Most Used pins. Membership
+  does not itself remove standalone app entries. App long press adds a chooser
+  for category/folder membership and inline creation.
+- Each folder has its own settings and optional smart shortcut visibility for
+  headset connection, schedules, connected Wi-Fi and map-defined areas. All
+  folders remain editable in Settings while hidden. Support Any/All conditions,
+  default Any. The draft proposes foreground evaluation and bounded location
+  requests to limit battery use; optional signals request relevant permissions.
+- Online metadata services are researched candidates, not chosen or enabled
+  dependencies. Local/manual organization continues to work without them.
+- Mega Sorter chooses one/two destinations and uses blue/right and green/left
+  app-row swipes. X exits; accepted assignments persist with Undo. Row animation
+  must keep its layout slot and leave other rows and scrolling responsive.
+
+This draft proposes an explicit exception to older always-complete main-list
+wording: category switches may filter direct Home entries, while raw discovery
+and global search remain complete. Explicit Hide remains distinct. It does not
+retroactively claim implementation or acceptance. Delivery slices are in the
+[organization implementation plan](../implementation/categories-folders-mega-sorter-plan.md).

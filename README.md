@@ -120,7 +120,13 @@ alphabetical catalog when the feature is disabled. The Signed APKs workflow
 distributes Core debug and release by default; reference add-on APKs are an
 optional SDK-testing output.
 
-Basic categories will be specified after the Core Most Used implementation.
+The next Core scope is the
+[categories, popup folders, and Mega Sorter specification draft](docs/product/categories-folders-mega-sorter.md),
+with [an implementation plan](docs/implementation/categories-folders-mega-sorter-plan.md).
+The draft includes per-folder smart visibility for headsets, schedules, Wi-Fi and
+map areas, with hidden folders always manageable in Settings. These organization
+features are implemented in the feature branch; release validation is tracked in
+the [category acceptance record](docs/implementation/category-validation.md).
 
 Module cards have a **Settings** button with normal controls and a **Use on Home**
 action for sort helpers. Instances, contexts, and JSON editing are under Advanced

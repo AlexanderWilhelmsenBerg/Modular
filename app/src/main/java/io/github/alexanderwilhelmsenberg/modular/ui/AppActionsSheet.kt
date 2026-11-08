@@ -46,6 +46,8 @@ internal fun AppActionsSheet(
     onUninstallApp: ((LaunchableApp) -> Unit)?,
     onRenameApp: ((LaunchableApp) -> Unit)?,
     onHideApp: ((LaunchableApp) -> Unit)?,
+    onOrganizeApp: ((LaunchableApp) -> Unit)? = null,
+    onRemoveFromFolder: ((LaunchableApp) -> Unit)? = null,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -106,6 +108,18 @@ internal fun AppActionsSheet(
                 tag = "app-action:pin",
                 iconRes = R.drawable.ic_app_action_pin,
                 onClick = { onDismiss(); onPinApp(app, !pinned) },
+            )
+            if (onOrganizeApp != null) AppActionRow(
+                label = "Add to category",
+                tag = "app-action:organize",
+                iconRes = R.drawable.ic_app_action_edit,
+                onClick = { onDismiss(); onOrganizeApp(app) },
+            )
+            if (onRemoveFromFolder != null) AppActionRow(
+                label = "Remove from this folder",
+                tag = "app-action:remove-from-folder",
+                iconRes = R.drawable.ic_app_action_delete,
+                onClick = { onDismiss(); onRemoveFromFolder(app) },
             )
             if (onAppInfo != null) AppActionRow(
                 label = "App info",

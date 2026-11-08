@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.capabilities
 
 import android.app.AppOpsManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Process
@@ -73,11 +74,16 @@ class FeaturedAppsCrossApkTest {
 
         try {
             setUsageAccess("ignore")
-            registry.refresh()
+            // This fixture exercises one provider. Keep unrelated installed modules
+            // from changing the shared route list during a pin transaction.
+            val moduleComponent = ComponentName(MODULE_PACKAGE, MODULE_SERVICE_CLASS)
+            registry.setConnectionDemand(setOf(moduleComponent))
             val route = withTimeout(15_000) {
-                router.routes.first { routes -> routes.any {
-                    it.providerId == MODULE_ID && it.capability == StandardCapabilities.AppsFeatured
-                } }.single { it.providerId == MODULE_ID && it.capability == StandardCapabilities.AppsFeatured }
+                router.routes.first { routes ->
+                    routes.filter { it.component != null }.all { it.component == moduleComponent } &&
+                        routes.any { it.providerId == MODULE_ID &&
+                            it.capability == StandardCapabilities.AppsFeatured }
+                }.single { it.providerId == MODULE_ID && it.capability == StandardCapabilities.AppsFeatured }
             }
             assertEquals(MODULE_PACKAGE, requireNotNull(route.component).packageName)
 
@@ -261,6 +267,7 @@ class FeaturedAppsCrossApkTest {
     private companion object {
         const val MODULE_ID = "modular.addon.sort.mostused"
         const val MODULE_PACKAGE = "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug"
+        const val MODULE_SERVICE_CLASS = "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.MostUsedSortService"
         const val TEST_LAUNCHER_PACKAGE = "io.github.alexanderwilhelmsenberg.modular.testlauncher"
     }
 }

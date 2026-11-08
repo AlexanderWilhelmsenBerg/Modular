@@ -20,7 +20,7 @@ internal data class CachedAppCatalog(
 
 internal object AppCatalogCacheCodec {
     private const val MAGIC = 0x4d414331 // MAC1
-    private const val VERSION = 1
+    private const val VERSION = 2
     const val MAX_BYTES = 4 * 1024 * 1024
     private const val MAX_PROFILES = 32
     private const val MAX_APPS = 20_000
@@ -47,6 +47,8 @@ internal object AppCatalogCacheCodec {
                 out.writeBoolean(app.enabled)
                 out.writeBoolean(app.loadingProgress != null)
                 app.loadingProgress?.let { out.writeFloat(it) }
+                out.writeBoolean(app.androidCategory != null)
+                app.androidCategory?.let { out.writeInt(it) }
             }
         }
         return bytes.toByteArray().also { require(it.size <= MAX_BYTES) }
@@ -57,7 +59,9 @@ internal object AppCatalogCacheCodec {
         return try {
             val input = ByteArrayInputStream(bytes)
             val data = DataInputStream(input)
-            if (data.readInt() != MAGIC || data.readInt() != VERSION) return null
+            if (data.readInt() != MAGIC) return null
+            val version = data.readInt()
+            if (version !in 1..VERSION) return null
             val locale = data.readUTF()
             val profileCount = data.readInt()
             if (profileCount !in 0..MAX_PROFILES) return null
@@ -77,6 +81,7 @@ internal object AppCatalogCacheCodec {
                     data.readLong(),
                     data.readBoolean(),
                     if (data.readBoolean()) data.readFloat() else null,
+                    if (version >= 2 && data.readBoolean()) data.readInt() else null,
                 )
             }
             if (apps.any { app ->

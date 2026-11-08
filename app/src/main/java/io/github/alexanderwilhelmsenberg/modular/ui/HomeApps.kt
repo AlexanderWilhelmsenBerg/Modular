@@ -58,6 +58,7 @@ internal fun HomeAppRow(
     onUninstallApp: ((LaunchableApp) -> Unit)? = null,
     onRenameApp: ((LaunchableApp) -> Unit)? = null,
     onHideApp: ((LaunchableApp) -> Unit)? = null,
+    onOrganizeApp: ((LaunchableApp) -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     var menuOpen by remember(app.key) { mutableStateOf(false) }
@@ -120,5 +121,6 @@ internal fun HomeAppRow(
         onUninstallApp = onUninstallApp,
         onRenameApp = onRenameApp,
         onHideApp = onHideApp,
+        onOrganizeApp = onOrganizeApp,
     )
 }

@@ -348,6 +348,10 @@ class AndroidAppRepository internal constructor(
                                     } else {
                                         null
                                     },
+                                androidCategory =
+                                    io.github.alexanderwilhelmsenberg.modular.organization.CategoryClassifier
+                                        .categorySignal(activity.applicationInfo.category,
+                                            (activity.applicationInfo.flags and ApplicationInfo.FLAG_IS_GAME) != 0),
                             ),
                         )
                     }

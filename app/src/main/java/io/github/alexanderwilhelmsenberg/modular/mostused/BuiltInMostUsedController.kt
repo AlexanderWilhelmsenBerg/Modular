@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationSnapshot
+import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationProjector
 
 data class BuiltInMostUsedState(
     val settings: MostUsedSettings = MostUsedSettings(),
@@ -45,6 +47,7 @@ class BuiltInMostUsedController(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val displayCustomizations: Flow<AppCustomizations> = flowOf(AppCustomizations()),
     private val localHistory: LocalMostUsedHistoryStore? = null,
+    private val organization: Flow<OrganizationSnapshot> = flowOf(OrganizationSnapshot()),
 ) {
     private val refreshSignal = MutableStateFlow(0L)
     private val mutableState = MutableStateFlow(BuiltInMostUsedState())
@@ -61,11 +64,11 @@ class BuiltInMostUsedController(
                 val baseFlow = combine(repository.catalog, store.settings, store.error, refreshSignal) {
                     catalog, settings, error, _ -> Triple(catalog, settings, error)
                 }
-                combine(baseFlow, displayCustomizations, historyAndError) { base, customizations, history ->
-                    Snapshot(base.first, base.second, base.third, customizations, history.first, history.second)
+                combine(baseFlow, displayCustomizations, historyAndError, organization) { base, customizations, history, organizationState ->
+                    Snapshot(base.first, base.second, base.third, customizations, history.first, history.second, organizationState)
                 }.collectLatest { snapshot ->
                     calculate(snapshot.catalog, snapshot.settings, snapshot.error, snapshot.customizations,
-                        snapshot.history, snapshot.historyError)
+                        snapshot.history, snapshot.historyError, snapshot.organization)
                 }
             } catch (failure: Exception) {
                 if (failure is CancellationException) throw failure
@@ -112,11 +115,16 @@ class BuiltInMostUsedController(
         customizations: AppCustomizations,
         history: LocalMostUsedHistory,
         historyError: String?,
+        organizationState: OrganizationSnapshot,
     ) {
-        val apps = customizations.visibleApps(usableApps(catalog))
+        val usable = customizations.visibleApps(usableApps(catalog))
+        // Filter before ranking/count limits so suppressed category members do not
+        // consume suggestion slots. Keep pins stored and independently manageable.
+        val apps = OrganizationProjector.project(catalog.copy(apps = usable), AppCustomizations(), organizationState).homeApps
         val available = apps.associateBy { it.key }
         val pins = settings.pinnedKeys.mapNotNull(available::get)
-        val unavailable = settings.pinnedKeys.filterNot(available::containsKey)
+        val usableKeys = usable.mapTo(HashSet()) { it.key }
+        val unavailable = settings.pinnedKeys.filterNot { it in usableKeys }
         val initial = BuiltInMostUsedState(
             settings = settings,
             pinnedKeys = settings.pinnedKeys,
@@ -252,5 +260,6 @@ class BuiltInMostUsedController(
         val customizations: AppCustomizations,
         val history: LocalMostUsedHistory,
         val historyError: String?,
+        val organization: OrganizationSnapshot,
     )
 }

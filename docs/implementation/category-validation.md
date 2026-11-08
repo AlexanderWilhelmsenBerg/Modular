@@ -22,16 +22,19 @@ Date: 2026-11-08. Contract: [organization specification](../product/categories-f
 ## Automated evidence
 
 Local Gradle has passed 134 Core unit tests (zero failures), debug lint, debug app
-assembly and Android instrumentation APK assembly. Final exact-commit CI results
-will be recorded here.
+assembly and Android instrumentation APK assembly. [CI run 137](https://github.com/AlexanderWilhelmsenBerg/Modular/actions/runs/42483176328)
+passed the full verification job and 119 of 120 Core device tests. The remaining
+picker retry test checked a below-fold error without scrolling; its interaction
+was corrected while retaining the visibility assertion. Subsequent exact-commit
+results and screenshot review are tracked in [PR #26](https://github.com/AlexanderWilhelmsenBerg/Modular/pull/26).
 
 Focused tests cover classification/cache migration, atomic organization writes,
 typed pins, multi-category visibility, per-pair Undo, unknown smart signals,
 schedule boundaries, location uncertainty and request budgets. Device tests cover
 picker cancellation/retry, hidden-folder management, global search, page navigation
 and overlapping sorter gestures. Native screenshot fixtures cover category
-settings, popup folders, smart rules and Mega Sorter. Device execution and visual
-review are pending; compiling those tests is not an execution result.
+settings, popup folders, smart rules and Mega Sorter. The first device run executed
+those fixtures successfully; visual review and the corrected full run are pending.
 
 ## Physical acceptance still required
 

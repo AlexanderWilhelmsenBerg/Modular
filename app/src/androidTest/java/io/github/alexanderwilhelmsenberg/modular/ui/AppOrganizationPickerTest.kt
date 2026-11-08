@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
@@ -33,11 +34,11 @@ class AppOrganizationPickerTest {
                     onUpdate = { writes++; Result.success(OrganizationSnapshot()) }, onDismiss = {})
             }
         }
-        rule.onNodeWithText("Create folder").performClick()
+        rule.onNodeWithText("Create folder").performScrollTo().performClick()
         rule.onNodeWithTag("organization-create-name").performTextInput("Travel")
         rule.onNodeWithText("Create", useUnmergedTree = true).performClick()
-        rule.onNodeWithText("Travel · Folder · new").assertIsDisplayed()
-        rule.onNodeWithText("Cancel").performClick()
+        rule.onNodeWithText("Travel · Folder · new").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Cancel").performScrollTo().performClick()
         rule.runOnIdle { assertEquals(0, writes) }
     }
 
@@ -54,13 +55,13 @@ class AppOrganizationPickerTest {
                     }, onDismiss = {})
             }
         }
-        rule.onNodeWithText("Create folder").performClick()
+        rule.onNodeWithText("Create folder").performScrollTo().performClick()
         rule.onNodeWithTag("organization-create-name").performTextInput("Travel")
         rule.onNodeWithText("Create", useUnmergedTree = true).performClick()
-        rule.onNodeWithTag("organization-done").performClick()
-        rule.onNodeWithTag("organization-save-error").assertIsDisplayed()
-        rule.onNodeWithText("Travel · Folder · new").assertIsDisplayed()
-        rule.onNodeWithTag("organization-done").performClick()
+        rule.onNodeWithTag("organization-done").performScrollTo().performClick()
+        rule.onNodeWithTag("organization-save-error").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Travel · Folder · new").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithTag("organization-done").performScrollTo().performClick()
         rule.runOnIdle {
             assertEquals(2, attempts)
             val folder = (committed!!.edits.single() as OrganizationEdit.CreateFolder).folder

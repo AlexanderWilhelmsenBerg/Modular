@@ -439,7 +439,7 @@ fun OrganizationHomeScreen(
             val sections = remember(projection.homeApps, locale) {
                 HomeSectionBuilder(locale).sections(homeOrderedApps(projection.homeApps, orderedApps?.filter { it.key in projection.homeKeys }, locale))
             }
-            val hasFeatured = featuredApps != null || projection.mostUsedFolders.isNotEmpty()
+            val hasFeatured = featuredApps != null || (mostUsedEnabled && projection.mostUsedFolders.isNotEmpty())
             val alphabet = remember(sections, projection.appListFolders, hasFeatured) {
                 (if (hasFeatured) listOf("★") else emptyList()) + sections.map { it.label } +
                     (if (projection.appListFolders.isNotEmpty()) listOf("◇") else emptyList())

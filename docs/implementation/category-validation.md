@@ -33,8 +33,13 @@ typed pins, multi-category visibility, per-pair Undo, unknown smart signals,
 schedule boundaries, location uncertainty and request budgets. Device tests cover
 picker cancellation/retry, hidden-folder management, global search, page navigation
 and overlapping sorter gestures. Native screenshot fixtures cover category
-settings, popup folders, smart rules and Mega Sorter. The first device run executed
-those fixtures successfully; visual review and the corrected full run are pending.
+settings, popup folders, smart rules and Mega Sorter. [CI run 139](https://github.com/AlexanderWilhelmsenBerg/Modular/actions/runs/42485350607)
+passed all new organization device tests. Its 320dp light-theme captures were
+reviewed: settings scroll correctly, the folder popup stays bounded, and both long
+sorter labels remain visible above the list. An existing add-on revocation test
+exposed a synchronization race; it now waits for Home to accept the exact granted
+catalog generation before revoking access. The full final run remains tracked in
+PR #26. Physical checks below remain separate from emulator evidence.
 
 ## Physical acceptance still required
 

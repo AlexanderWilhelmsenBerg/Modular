@@ -106,7 +106,6 @@ jobs:
   ipc-smoke:
     env:
       MODULAR_KEYSTORE_PASSWORD: modular-ci-only
-    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

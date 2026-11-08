@@ -216,8 +216,22 @@ class MostUsedCrossApkTest {
 
             // Android's app-op change is not a Core StateFlow input. A new
             // catalog generation causes Home to request a fresh sort.
-            repository.publish()
-            assertHomeOrder(homeController, HELPER_ZERO_DATA_ORDER, "Granted access")
+            val grantedGeneration = repository.publish()
+            val grantedOrder = withTimeoutOrNull(15_000) {
+                homeController.orderedApps.first { ordered ->
+                    ordered.map(LaunchableApp::label) == HELPER_ZERO_DATA_ORDER &&
+                        ordered.all { it.firstInstallTime == grantedGeneration }
+                }
+            }
+            assertTrue(
+                "Granted access: Home did not accept catalog generation $grantedGeneration; " +
+                    "order=${homeController.orderedApps.value.map(LaunchableApp::label)}, " +
+                    "calls=${calls.get()}, failures=$failures",
+                grantedOrder != null,
+            )
+            awaitCondition(15_000, "Granted access: Home did not activate the helper order") {
+                homeController.customOrderActive.value
+            }
             assertTrue("Home should accept the add-on's successful result", successes.get() > 0)
 
             setUsageAccess("ignore")
@@ -230,10 +244,18 @@ class MostUsedCrossApkTest {
                     .contains("usage access", ignoreCase = true),
             )
             val failureCountBeforePublish = failures.size
-            repository.publish()
-            awaitCondition(15_000, "Home did not report revoked Usage Access; failures=$failures") {
-                failures.size > failureCountBeforePublish
+            val revokedGeneration = repository.publish()
+            val reportedRevocation = withTimeoutOrNull(15_000) {
+                while (failures.size <= failureCountBeforePublish) delay(25)
+                true
             }
+            assertTrue(
+                "Home did not report revoked Usage Access for catalog generation $revokedGeneration; " +
+                    "failures=$failures, calls=${calls.get()}, " +
+                    "order=${homeController.orderedApps.value.map(LaunchableApp::label)}, " +
+                    "customOrderActive=${homeController.customOrderActive.value}",
+                reportedRevocation == true,
+            )
             assertEquals(CORE_ORDER, homeController.orderedApps.value.map(LaunchableApp::label))
             Unit
         } finally {
@@ -323,8 +345,13 @@ class MostUsedCrossApkTest {
     private class FakeAppRepository(apps: List<LaunchableApp>) : AppRepository {
         private val state = MutableStateFlow(AppCatalog(generation = 1, apps = apps))
         override val catalog: StateFlow<AppCatalog> = state
-        fun publish() {
-            state.value = state.value.copy(generation = state.value.generation + 1)
+        fun publish(): Long {
+            val generation = state.value.generation + 1
+            // Unique per-publish metadata proves Home accepted this generation,
+            // even when labels and keys happen to have an earlier matching order.
+            state.value = state.value.copy(generation = generation,
+                apps = state.value.apps.map { it.copy(firstInstallTime = generation) })
+            return generation
         }
         override fun refresh() = Unit
         override suspend fun launch(key: AppKey): Result<Unit> = Result.success(Unit)

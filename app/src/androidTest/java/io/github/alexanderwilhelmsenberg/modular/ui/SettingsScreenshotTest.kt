@@ -6,6 +6,9 @@ import android.os.ParcelFileDescriptor
 import androidx.compose.material3.Text
 import androidx.compose.material3.Switch
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -48,6 +51,9 @@ class SettingsScreenshotTest {
             "settings-open-addons", "settings-open-advanced",
         ) else listOf("settings-root-title", "settings-open-productivity", "settings-open-appearance")
         val bounds = tags.map { rule.onNodeWithTag(it).assertIsDisplayed().fetchSemanticsNode().boundsInRoot }
+        val listBounds = rule.onNodeWithTag("settings-list").fetchSemanticsNode().boundsInRoot
+        assertTrue("Settings title must be centered in the content column",
+            kotlin.math.abs(bounds.first().center.x - listBounds.center.x) <= 2f)
         bounds.zipWithNext().forEach { (above, below) ->
             assertTrue("Settings rows overlap", above.bottom <= below.top)
         }
@@ -164,7 +170,9 @@ class SettingsScreenshotTest {
         val file = File(requireNotNull(context.getExternalFilesDir("settings-screenshots")),
             "settings-$scene-${configuration.screenWidthDp}dp-$theme-font$font.png")
         FileOutputStream(file).use { output ->
-            val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            // Capture the drawn Compose surface, avoiding a race with the Activity window's
+            // opening transition that can leave UiAutomation screenshots blank.
+            val bitmap = rule.onRoot().captureToImage().asAndroidBitmap()
             check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
         }
         val destinationDir = "/sdcard/Pictures/ModularSettings"

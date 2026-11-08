@@ -130,7 +130,7 @@ fun ModularApp(
             contentPadding = PaddingValues(bottom = 40.dp),
         ) {
             item(key = "settings-header") {
-                Column {
+                Column(Modifier.fillMaxWidth()) {
                     if (currentPage == SettingsPage.ROOT) {
                         Spacer(Modifier.height(rootTopGap))
                         Image(
@@ -193,7 +193,6 @@ fun ModularApp(
                             AppearanceSelector(appearanceTheme, appearanceError, onAppearanceThemeSelected)
                         }
                     }
-                    item(key = "home-appearance-label") { SettingsSectionLabel("Home display") }
                     item(key = "home-appearance") { Column(Modifier.fillMaxWidth()) { appearanceContent() } }
                 }
                 SettingsPage.ADDONS -> {
@@ -257,7 +256,6 @@ fun ModularApp(
                             },
                         )
                     }
-                    item(key = "diagnostics-label") { SettingsSectionLabel("Diagnostics") }
                     item(key = "diagnostics") {
                         Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
                             DiagnosticsSection(

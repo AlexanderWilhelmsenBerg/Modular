@@ -62,6 +62,7 @@ internal fun SettingsRow(
                 title,
                 color = if (enabled) ink else secondary,
                 fontSize = 20.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
                 lineHeight = 25.sp,
                 style = MaterialTheme.typography.titleMedium,
             )

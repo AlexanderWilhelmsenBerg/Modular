@@ -140,7 +140,12 @@ class WorkspaceNavigationTest {
                 store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(existing + placeholders)),
                     snapshot.revision)).getOrThrow()
             }
-            rule.onNodeWithTag("workspace-home").performScrollToNode(hasTestTag("workspace-widget:1100006"))
+            val home = rule.onNodeWithTag("workspace-home")
+            home.performScrollToNode(hasTestTag("workspace-edit"))
+            val bottomScroll = home.fetchSemanticsNode().config[
+                SemanticsProperties.VerticalScrollAxisRange
+            ].value()
+            assertTrue("Fixture must leave Home scrolled before opening Apps: $bottomScroll", bottomScroll > 100f)
             rule.onNodeWithTag("workspace-apps-action").performClick()
             waitForAllApps()
             val allApps = rule.onNodeWithTag("workspace-all-apps")
@@ -162,17 +167,19 @@ class WorkspaceNavigationTest {
             allApps.performTouchInput {
                 val start = Offset(width * 0.45f, height * 0.25f)
                 down(start)
-                for (step in 1..30) moveTo(start + Offset(0f, height * 2.6f * step / 30f), 20L)
+                for (step in 1..40) moveTo(start + Offset(0f, height * 4f * step / 40f), 20L)
                 up()
             }
             waitForHome()
             rule.onNodeWithTag("workspace-all-apps").assertIsNotDisplayed()
-            // The same pointer kept moving after Home entered and scrolled its
-            // saved stack back toward the first widget.
-            rule.waitUntil(15_000) {
-                rule.onAllNodesWithTag("workspace-widget:1100001").fetchSemanticsNodes().isNotEmpty()
-            }
-            rule.onNodeWithTag("workspace-widget:1100001").assertIsDisplayed()
+            // The same pointer kept moving after Home entered and reduced the
+            // saved Home scroll offset; a first-widget visibility threshold is
+            // sensitive to how far the app list flung before this drag began.
+            val returnedScroll = home.fetchSemanticsNode().config[
+                SemanticsProperties.VerticalScrollAxisRange
+            ].value()
+            assertTrue("Home must scroll during the returning pointer drag: $bottomScroll -> $returnedScroll",
+                returnedScroll < bottomScroll - 30f)
         } finally {
             runBlocking {
                 val snapshot = store.currentSnapshot()

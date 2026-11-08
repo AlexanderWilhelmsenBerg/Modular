@@ -2,9 +2,6 @@ package io.github.alexanderwilhelmsenberg.modular.ui
 
 import android.appwidget.AppWidgetHost
 import android.content.ComponentName
-import android.content.Context
-import android.net.Uri
-import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
@@ -29,7 +26,8 @@ import org.junit.Test
 /** Exercises provider-owned configuration through the real picker and host trampoline. */
 class WorkspaceConfiguredWidgetTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
-    private val fixtureUri = Uri.parse("content://io.github.alexanderwilhelmsenberg.modular.debug.test.workspacefixture")
+    private val fixtureUri = "content://io.github.alexanderwilhelmsenberg.modular.debug.test.workspacefixture"
+    private data class FixtureState(val acceptNext: Boolean, val launches: Int, val lastId: Int)
 
     @Test fun configureSuccessNewCancellationAndReconfigureCancellation() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -40,28 +38,28 @@ class WorkspaceConfiguredWidgetTest {
         val beforeIds = host.appWidgetIds.toSet()
         val beforeWidgets = runBlocking { store.currentSnapshot().widgets }
         val provider = ComponentName(fixture, ConfiguredWorkspaceFixtureProvider::class.java).flattenToString()
-        val originalChoice = fixtureState(target).getBoolean("accept_next", true)
-        val startingLaunches = fixtureState(target).getInt("launches", 0)
+        val originalChoice = fixtureState().acceptNext
+        val startingLaunches = fixtureState().launches
         try {
             val shell = instrumentation.uiAutomation.executeShellCommand("appwidget grantbind --package ${target.packageName}")
-            ParcelFileDescriptor.AutoCloseInputStream(shell).close()
-            setFixtureChoice(target, true)
+            ParcelFileDescriptor.AutoCloseInputStream(shell).bufferedReader().use { it.readText() }
+            setFixtureChoice(true)
             waitForHome()
             addConfiguredFixture()
             rule.waitUntil(15_000) {
-                fixtureState(target).getInt("launches", 0) > startingLaunches &&
+                fixtureState().launches > startingLaunches &&
                     runBlocking { store.currentSnapshot().widgets.count { it.provider == provider } } ==
                     beforeWidgets.count { it.provider == provider } + 1
             }
             val added = runBlocking { store.currentSnapshot().widgets.last { it.provider == provider } }
-            assertEquals(added.appWidgetId, fixtureState(target).getInt("last_id", -1))
+            assertEquals(added.appWidgetId, fixtureState().lastId)
             rule.onNodeWithTag("workspace-widget:${added.appWidgetId}").assertIsDisplayed()
             val afterSuccessIds = host.appWidgetIds.toSet()
 
-            setFixtureChoice(target, false)
-            val launchesBeforeCancel = fixtureState(target).getInt("launches", 0)
+            setFixtureChoice(false)
+            val launchesBeforeCancel = fixtureState().launches
             addConfiguredFixture()
-            rule.waitUntil(15_000) { fixtureState(target).getInt("launches", 0) > launchesBeforeCancel }
+            rule.waitUntil(15_000) { fixtureState().launches > launchesBeforeCancel }
             rule.waitUntil(15_000) { host.appWidgetIds.toSet() == afterSuccessIds }
             assertEquals(beforeWidgets.size + 1, runBlocking { store.currentSnapshot().widgets.size })
 
@@ -69,13 +67,13 @@ class WorkspaceConfiguredWidgetTest {
             rule.onNodeWithTag("settings-open-productivity").performClick()
             rule.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("settings-home-screens"))
             rule.onNodeWithTag("settings-home-screens").performClick()
-            val launchesBeforeReconfigure = fixtureState(target).getInt("launches", 0)
+            val launchesBeforeReconfigure = fixtureState().launches
             rule.onNodeWithText("Configure").performScrollTo().performClick()
-            rule.waitUntil(15_000) { fixtureState(target).getInt("launches", 0) > launchesBeforeReconfigure }
-            assertEquals(added.appWidgetId, fixtureState(target).getInt("last_id", -1))
+            rule.waitUntil(15_000) { fixtureState().launches > launchesBeforeReconfigure }
+            assertEquals(added.appWidgetId, fixtureState().lastId)
             assertTrue(runBlocking { store.currentSnapshot().widgets.any { it.appWidgetId == added.appWidgetId } })
         } finally {
-            setFixtureChoice(target, originalChoice)
+            setFixtureChoice(originalChoice)
             runBlocking {
                 val snapshot = store.currentSnapshot()
                 store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(beforeWidgets)),
@@ -99,12 +97,26 @@ class WorkspaceConfiguredWidgetTest {
         rule.onNodeWithTag(tag).performClick()
     }
 
-    private fun fixtureState(context: Context): Bundle = requireNotNull(
-        context.contentResolver.call(fixtureUri, "snapshot", null, null),
-    )
+    private fun fixtureState(): FixtureState {
+        val output = fixtureCall("snapshot")
+        fun field(name: String): String = requireNotNull(
+            Regex("(?:^|[,{\\s])$name=([^,}\\]]+)").find(output)?.groupValues?.get(1)?.trim(),
+        ) { "Missing $name in fixture response: $output" }
+        val accept = field("accept_next")
+        require(accept == "true" || accept == "false") { "Invalid fixture choice: $output" }
+        return FixtureState(accept.toBoolean(), field("launches").toInt(), field("last_id").toInt())
+    }
 
-    private fun setFixtureChoice(context: Context, accept: Boolean) {
-        requireNotNull(context.contentResolver.call(fixtureUri, "set_accept", null,
-            Bundle().apply { putBoolean("accept_next", accept) }))
+    private fun setFixtureChoice(accept: Boolean) {
+        fixtureCall("set_accept --extra accept_next:b:$accept")
+        check(fixtureState().acceptNext == accept) { "Fixture choice did not persist" }
+    }
+
+    private fun fixtureCall(methodAndArgs: String): String {
+        val command = "content call --uri $fixtureUri --method $methodAndArgs"
+        val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
+        val output = ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText().trim() }
+        check(output.startsWith("Result: Bundle[")) { "Fixture command failed ($command): $output" }
+        return output
     }
 }

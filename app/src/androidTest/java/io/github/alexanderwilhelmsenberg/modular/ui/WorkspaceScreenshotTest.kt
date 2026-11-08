@@ -61,7 +61,7 @@ class WorkspaceScreenshotTest {
             try {
                 ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(
                     "appwidget grantbind --package ${context.packageName}",
-                )).close()
+                )).bufferedReader().use { it.readText() }
                 instrumentation.uiAutomation.adoptShellPermissionIdentity("android.permission.BIND_APPWIDGET")
                 val bound = try { manager.bindAppWidgetIdIfAllowed(id, provider) }
                     finally { instrumentation.uiAutomation.dropShellPermissionIdentity() }

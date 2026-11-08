@@ -20,9 +20,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.organization.MegaSorterState
 
@@ -38,6 +41,9 @@ fun MegaSorterOverlay(
     modifier: Modifier = Modifier,
     onHeaderHeightChanged: (Int) -> Unit = {},
 ) {
+    val lightSurface = MaterialTheme.colorScheme.surface.luminance() > .5f
+    val greenLabel = if (lightSurface) Color(0xFF1B7350) else SorterGreen
+    val blueLabel = if (lightSurface) Color(0xFF165CA1) else SorterBlue
     Box(modifier.fillMaxSize()) {
         if (state.left != null) Box(
             Modifier.align(Alignment.CenterStart).width(16.dp).fillMaxHeight()
@@ -66,9 +72,12 @@ fun MegaSorterOverlay(
                         contentDescription = "Exit Mega Sorter"
                     }) { Text("✕ Exit") }
                 }
-                Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    state.left?.let { Text("← ${it.name}", color = SorterGreen) }
-                    state.right?.let { Text("${it.name} →", color = SorterBlue) }
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    state.left?.let { Text("← ${it.name}", color = greenLabel,
+                        modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                    state.right?.let { Text("${it.name} →", color = blueLabel,
+                        modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.End) }
                 }
                 state.undoError?.let { Text(it, modifier = Modifier.padding(8.dp), color = MaterialTheme.colorScheme.error) }
             }

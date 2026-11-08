@@ -112,8 +112,8 @@ class OrganizationScreenshotTest {
     @Test fun megaSorter() {
         val state = MegaSorterState(
             rows = apps.map { SorterRowState(it) },
-            left = SorterDestination("work", "Work", SorterSide.LEFT),
-            right = SorterDestination("games", "Games", SorterSide.RIGHT),
+            left = SorterDestination("work", "Work projects and productivity", SorterSide.LEFT),
+            right = SorterDestination("games", "Games and entertainment", SorterSide.RIGHT),
         )
         rule.setContent {
             var headerHeight by remember { mutableIntStateOf(0) }
@@ -137,7 +137,8 @@ class OrganizationScreenshotTest {
         }
         rule.onNodeWithTag("sorter-row:${apps.first().key.stableId}").assertIsDisplayed()
         rule.onNodeWithContentDescription("Exit Mega Sorter").assertIsDisplayed()
-        rule.onNodeWithText("Games →").assertIsDisplayed()
+        rule.onNodeWithText("← Work projects and productivity").assertIsDisplayed()
+        rule.onNodeWithText("Games and entertainment →").assertIsDisplayed()
         capture("mega-sorter")
     }
 

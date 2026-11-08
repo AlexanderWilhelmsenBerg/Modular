@@ -76,6 +76,7 @@ fun OrganizationHomeScreen(
     homeResetToken: Int = 0,
     workspaceMode: Boolean = false,
     widgetContent: @Composable (WorkspaceWidget) -> Unit = {},
+    onWidgetSurfaceVisible: (Boolean) -> Unit = {},
     onAddWidget: (String) -> Unit = {},
     onEditWorkspace: (String) -> Unit = {},
     listeningApps: List<LaunchableApp> = emptyList(),
@@ -99,6 +100,8 @@ fun OrganizationHomeScreen(
     var observedWorkspaceResetToken by rememberSaveable { mutableIntStateOf(homeResetToken) }
     var viewportHeight by remember { mutableIntStateOf(0) }
     var pointerActive by remember { mutableStateOf(false) }
+    var routeDragToHome by remember { mutableStateOf(false) }
+    var routeDragToApps by remember { mutableStateOf(false) }
     var transitionJob by remember { mutableStateOf<Job?>(null) }
     var railJump by remember { mutableStateOf<String?>(null) }
     var railJumpSerial by remember { mutableIntStateOf(0) }
@@ -111,6 +114,12 @@ fun OrganizationHomeScreen(
     val homeWorkspaceList = rememberLazyListState()
     var retainedListeningApps by remember { mutableStateOf(listeningApps) }
     val workspacePage = pageName == "home" || pageName.startsWith("widget:")
+    val widgetSurfaceVisible = workspaceMode && workspacePage && vertical.progress < 1f
+    val currentWidgetVisibilityCallback by rememberUpdatedState(onWidgetSurfaceVisible)
+    SideEffect { onWidgetSurfaceVisible(widgetSurfaceVisible) }
+    DisposableEffect(Unit) {
+        onDispose { currentWidgetVisibilityCallback(false) }
+    }
     val workspaceGesturesEnabled = workspaceMode && workspacePage && searchQuery.isBlank() &&
         sorterController == null && !editingSearch
     fun settle(open: Boolean, immediate: Boolean = false) {
@@ -136,9 +145,46 @@ fun OrganizationHomeScreen(
     }
     val connection = remember(vertical, workspaceMode, workspacePage, workspaceGesturesEnabled, viewportHeight, pointerActive, activeWorkspaceList) {
         object : NestedScrollConnection {
+            fun consumeTransition(deltaY: Float): Float {
+                val before = vertical.progress
+                val translated = vertical.drag(deltaY, viewportHeight.toFloat())
+                if (before > 0f && vertical.progress == 0f && deltaY > 0f) routeDragToHome = true
+                if (before < 1f && vertical.progress == 1f && deltaY < 0f) routeDragToApps = true
+                // The original child keeps this pointer stream. Forward movement
+                // beyond the endpoint to the surface that just entered view.
+                val remaining = deltaY - translated
+                if (deltaY > 0f && translated > 0f && vertical.progress == 0f && remaining > 0f) {
+                    val homeScroll = activeWorkspaceList?.dispatchRawDelta(-remaining) ?: 0f
+                    return translated - homeScroll
+                }
+                if (deltaY < 0f && translated < 0f && vertical.progress == 1f && remaining < 0f) {
+                    val appsScroll = listState.dispatchRawDelta(-remaining)
+                    return translated - appsScroll
+                }
+                return translated
+            }
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source != NestedScrollSource.UserInput || !workspaceGesturesEnabled || !pointerActive || vertical.progress <= 0f || vertical.progress >= 1f) return Offset.Zero
-                return Offset(0f, vertical.drag(available.y, viewportHeight.toFloat()))
+                if (source != NestedScrollSource.UserInput || !workspaceGesturesEnabled || !pointerActive) return Offset.Zero
+                if (routeDragToHome && vertical.progress == 0f) {
+                    val homeTaken = -(activeWorkspaceList?.dispatchRawDelta(-available.y) ?: 0f)
+                    val remaining = available.y - homeTaken
+                    if (remaining < 0f) {
+                        routeDragToHome = false
+                        return Offset(0f, homeTaken + consumeTransition(remaining))
+                    }
+                    return Offset(0f, homeTaken)
+                }
+                if (routeDragToApps && vertical.progress == 1f) {
+                    val appsTaken = -listState.dispatchRawDelta(-available.y)
+                    val remaining = available.y - appsTaken
+                    if (remaining > 0f) {
+                        routeDragToApps = false
+                        return Offset(0f, appsTaken + consumeTransition(remaining))
+                    }
+                    return Offset(0f, appsTaken)
+                }
+                if (vertical.progress <= 0f || vertical.progress >= 1f) return Offset.Zero
+                return Offset(0f, consumeTransition(available.y))
             }
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
                 if (source != NestedScrollSource.UserInput || !workspaceGesturesEnabled || !pointerActive) return Offset.Zero
@@ -152,7 +198,7 @@ fun OrganizationHomeScreen(
                 if (vertical.progress == 1f && available.y > 0f) activeWorkspaceList?.let { state ->
                     state.requestScrollToItem((state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
                 }
-                return Offset(0f, vertical.drag(available.y, viewportHeight.toFloat()))
+                return Offset(0f, consumeTransition(available.y))
             }
             override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
                 if (vertical.progress > 0f && vertical.progress < 1f) {
@@ -221,12 +267,23 @@ fun OrganizationHomeScreen(
                 awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 transitionJob?.cancel()
                 pointerActive = true
-                var pressed: Boolean
-                do {
-                    pressed = awaitPointerEvent(PointerEventPass.Initial).changes.any { it.pressed }
-                } while (pressed)
-                pointerActive = false
-                if (vertical.progress > 0f && vertical.progress < 1f) settle(vertical.releaseTarget())
+                routeDragToHome = false
+                routeDragToApps = false
+                try {
+                    var pressed: Boolean
+                    do {
+                        pressed = awaitPointerEvent(PointerEventPass.Initial).changes.any { it.pressed }
+                    } while (pressed)
+                } finally {
+                    pointerActive = false
+                    routeDragToHome = false
+                    routeDragToApps = false
+                    when {
+                        vertical.progress == 0f -> savedAppsOpen = false
+                        vertical.progress == 1f -> savedAppsOpen = true
+                        else -> settle(vertical.releaseTarget())
+                    }
+                }
             }
         } else Modifier)) {
         if (workspaceMode && wallpaperMode) WallpaperHomeScrim(wallpaperDimmingPercent, Modifier.fillMaxSize())
@@ -269,7 +326,16 @@ fun OrganizationHomeScreen(
                         pageTitle = widgetPage?.name,
                         preferences = snapshot.workspacePreferences,
                         widgets = snapshot.widgets,
-                        widgetContent = widgetContent,
+                        widgetContent = { widget ->
+                            var slotHeightDp by rememberSaveable(widget.appWidgetId, widget.heightDp) { mutableIntStateOf(widget.heightDp) }
+                            if (widgetSurfaceVisible && pageName == pageKey) {
+                                Box(Modifier.fillMaxWidth().onSizeChanged { size ->
+                                    if (size.height > 0) slotHeightDp = with(density) { size.height.toDp().value.roundToInt() }
+                                }) { widgetContent(widget) }
+                            } else {
+                                Spacer(Modifier.fillMaxWidth().height(slotHeightDp.dp))
+                            }
+                        },
                         featuredApps = if (page == HomePageId.Home) featured else null,
                         featuredFolders = if (page == HomePageId.Home && mostUsedEnabled)
                             projection.mostUsedFolders.map { it.definition } else emptyList(),

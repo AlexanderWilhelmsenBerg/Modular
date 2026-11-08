@@ -26,5 +26,9 @@
         <activity
             android:name="io.github.alexanderwilhelmsenberg.modular.ui.WorkspaceFixtureConfigurationActivity"
             android:exported="false" />
+        <provider
+            android:name="io.github.alexanderwilhelmsenberg.modular.ui.WorkspaceFixtureControlProvider"
+            android:authorities="io.github.alexanderwilhelmsenberg.modular.debug.test.workspacefixture"
+            android:exported="true" />
     </application>
 </manifest>

@@ -341,9 +341,11 @@ class MainActivity : ComponentActivity() {
                         ListeningAppsProjector.project(appCatalog, appCustomizations,
                             organizationSnapshot.listeningPreferences, headsetOutputs)
                     }
-                    // Mount once across Home, drawer, settings and provider configuration trips.
+                    // Retain the controller across navigation; listen only for a visible widget surface.
+                    var widgetSurfaceVisible by remember { mutableStateOf(true) }
                     val widgetController = rememberWorkspaceWidgetController(
-                        organization.store, organizationSnapshot.widgets, visible = !settingsVisible,
+                        organization.store, organizationSnapshot.widgets,
+                        visible = !settingsVisible && widgetSurfaceVisible,
                         onMessage = { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() },
                     )
                     val instances by instanceStore.instances.collectAsState()
@@ -393,6 +395,7 @@ class MainActivity : ComponentActivity() {
                             val homeListState = rememberLazyListState()
                             OrganizationHomeScreen(
                                 workspaceMode = true,
+                                onWidgetSurfaceVisible = { widgetSurfaceVisible = it },
                                 listeningApps = listening.visibleApps,
                                 widgetContent = { widget -> WorkspaceWidgetTile(widgetController, widget, editMode = false) },
                                 onAddWidget = widgetController::addWidget,

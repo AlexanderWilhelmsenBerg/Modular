@@ -4,10 +4,12 @@ import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -127,32 +129,57 @@ class WorkspaceNavigationTest {
 
     @Test fun allAppsScrollsBackToItsTopBeforeOneDragReturnsHome() {
         waitForHome()
-        rule.onNodeWithTag("workspace-apps-action").performClick()
-        waitForAllApps()
-        val allApps = rule.onNodeWithTag("workspace-all-apps")
-        allApps.performTouchInput {
-            val start = Offset(width * 0.45f, height * 0.7f)
-            down(start)
-            for (step in 1..12) moveTo(start - Offset(0f, height * 0.55f * step / 12f), 20L)
-            up()
+        val store = OrganizationStore(rule.activity)
+        val existing = runBlocking { store.currentSnapshot().widgets }
+        val placeholders = (1..6).map { index ->
+            WorkspaceWidget(1_100_000 + index, "home", "fixture.missing/.Provider", 180)
         }
-        allApps.assertIsDisplayed()
-        allApps.performTouchInput {
-            val start = Offset(width * 0.45f, height * 0.35f)
-            down(start)
-            moveTo(start + Offset(0f, 120f), 160L)
-            up()
-        }
-        allApps.assertIsDisplayed()
+        try {
+            runBlocking {
+                val snapshot = store.currentSnapshot()
+                store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(existing + placeholders)),
+                    snapshot.revision)).getOrThrow()
+            }
+            rule.onNodeWithTag("workspace-home").performScrollToNode(hasTestTag("workspace-widget:1100006"))
+            rule.onNodeWithTag("workspace-apps-action").performClick()
+            waitForAllApps()
+            val allApps = rule.onNodeWithTag("workspace-all-apps")
+            allApps.performTouchInput {
+                val start = Offset(width * 0.45f, height * 0.7f)
+                down(start)
+                for (step in 1..12) moveTo(start - Offset(0f, height * 0.55f * step / 12f), 20L)
+                up()
+            }
+            allApps.assertIsDisplayed()
+            allApps.performTouchInput {
+                val start = Offset(width * 0.45f, height * 0.35f)
+                down(start)
+                moveTo(start + Offset(0f, 120f), 160L)
+                up()
+            }
+            allApps.assertIsDisplayed()
 
-        allApps.performTouchInput {
-            val start = Offset(width * 0.45f, height * 0.25f)
-            down(start)
-            for (step in 1..24) moveTo(start + Offset(0f, height * 2.2f * step / 24f), 20L)
-            up()
+            allApps.performTouchInput {
+                val start = Offset(width * 0.45f, height * 0.25f)
+                down(start)
+                for (step in 1..30) moveTo(start + Offset(0f, height * 2.6f * step / 30f), 20L)
+                up()
+            }
+            waitForHome()
+            rule.onNodeWithTag("workspace-all-apps").assertIsNotDisplayed()
+            // The same pointer kept moving after Home entered and scrolled its
+            // saved stack back toward the first widget.
+            rule.waitUntil(15_000) {
+                rule.onAllNodesWithTag("workspace-widget:1100001").fetchSemanticsNodes().isNotEmpty()
+            }
+            rule.onNodeWithTag("workspace-widget:1100001").assertIsDisplayed()
+        } finally {
+            runBlocking {
+                val snapshot = store.currentSnapshot()
+                store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(existing)),
+                    snapshot.revision)).getOrThrow()
+            }
         }
-        waitForHome()
-        rule.onNodeWithTag("workspace-all-apps").assertIsNotDisplayed()
     }
 
     private fun waitForHome() {

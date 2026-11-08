@@ -114,6 +114,7 @@ class SettingsScreenshotTest {
                     onActivateContext = {},
                     onDeactivateContext = {},
                     initialPage = page,
+                    appearanceTheme = theme,
                     coreFeaturesContent = {
                         CoreMostUsedSettingsUi(
                             enabled = true,

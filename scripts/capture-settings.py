@@ -45,6 +45,11 @@ try:
                 if not screenshot.is_file() or screenshot.stat().st_size == 0:
                     raise RuntimeError(f"Missing settings screenshot: {screenshot}")
 finally:
+    # Preserve completed frames even when a later viewport/test fails.
+    try:
+        subprocess.run(["adb", "pull", REMOTE + "/.", str(OUT)], check=False, timeout=45)
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f"Could not recover partial settings captures: {error}")
     for command in [
         ("wm", "size", "reset"),
         ("wm", "density", "reset"),

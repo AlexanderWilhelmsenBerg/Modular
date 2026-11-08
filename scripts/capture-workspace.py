@@ -8,6 +8,7 @@ OUT = Path("build/ui-screenshots/workspace")
 OUT.mkdir(parents=True, exist_ok=True)
 RUNNER = "io.github.alexanderwilhelmsenberg.modular.debug.test/androidx.test.runner.AndroidJUnitRunner"
 TEST = "io.github.alexanderwilhelmsenberg.modular.ui.WorkspaceScreenshotTest"
+PACKAGE = "io.github.alexanderwilhelmsenberg.modular.debug"
 MATRIX = [
     (320, "LIGHT", "1.0", False),
     (375, "LIGHT", "1.0", False),
@@ -29,7 +30,12 @@ try:
         adb("shell", "wm", "size", f"{width}x900")
         adb("shell", "cmd", "uimode", "night", "yes" if theme != "LIGHT" else "no")
         adb("shell", "settings", "put", "system", "font_scale", font)
-        adb("shell", "settings", "put", "global", "debug.force_rtl", "1" if rtl else "0")
+        # App-locales dispatches a real configuration change; merely writing
+        # debug.force_rtl in Settings does not update the system property/layout.
+        if rtl:
+            adb("shell", "cmd", "locale", "set-app-locales", PACKAGE, "--locales", "ar")
+        else:
+            adb("shell", "cmd", "locale", "set-app-locales", PACKAGE)
         result = adb("shell", "am", "instrument", "-w", "-e", "class", TEST,
                      "-e", "workspace_theme", theme, RUNNER, timeout=300)
         if "OK (2 tests)" not in result:
@@ -48,7 +54,7 @@ finally:
         ("wm", "density", "reset"),
         ("cmd", "uimode", "night", "no"),
         ("settings", "put", "system", "font_scale", "1.0"),
-        ("settings", "put", "global", "debug.force_rtl", "0"),
+        ("cmd", "locale", "set-app-locales", PACKAGE),
     ):
         try:
             adb("shell", *command, timeout=15)

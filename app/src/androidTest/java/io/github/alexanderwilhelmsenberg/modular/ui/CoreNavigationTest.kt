@@ -33,7 +33,7 @@ class CoreNavigationTest {
         composeRule.onNodeWithTag("alphabet-rail").assertIsDisplayed()
         composeRule.onNodeWithTag("home-search").assertIsDisplayed()
         composeRule.onNodeWithTag("home-settings").performClick()
-        composeRule.onNodeWithText("Back").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings-back").assertIsDisplayed()
 
         composeRule.runOnIdle {
             composeRule.activity.onBackPressedDispatcher.onBackPressed()
@@ -54,7 +54,7 @@ class CoreNavigationTest {
         }
 
         composeRule.onNodeWithTag("home-settings").assertIsDisplayed()
-        composeRule.onNodeWithText("Back").assertDoesNotExist()
+        composeRule.onNodeWithTag("settings-back").assertDoesNotExist()
         composeRule.onNodeWithTag("home-search-field").assertTextContains("zz unlikely app")
     }
 
@@ -80,8 +80,8 @@ class CoreNavigationTest {
 
         composeRule.onNodeWithTag("home-settings").performClick()
         composeRule.activityRule.scenario.recreate()
-        composeRule.onNodeWithText("Appearance").assertIsDisplayed()
-        composeRule.onNodeWithText("Back").performClick()
+        composeRule.onNodeWithTag("settings-open-appearance").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings-back").performClick()
 
         composeRule.onNodeWithTag("home-search-field").assertTextContains("zz unlikely app")
     }
@@ -93,7 +93,7 @@ class CoreNavigationTest {
             composeRule.onNodeWithTag("home-search-field").performClick()
             composeRule.onNodeWithTag("home-search-field").performTextInput("zz unlikely app")
             composeRule.onNodeWithTag("home-settings").performClick()
-            composeRule.onNodeWithText("Back").assertIsDisplayed()
+            composeRule.onNodeWithTag("settings-back").assertIsDisplayed()
             composeRule.runOnIdle {
                 val homeIntent = Intent(Intent.ACTION_MAIN)
                     .addCategory(Intent.CATEGORY_HOME)

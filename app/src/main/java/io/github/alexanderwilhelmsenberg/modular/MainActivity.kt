@@ -21,6 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceHomeControls
 import io.github.alexanderwilhelmsenberg.modular.appearance.HomeBackground
@@ -82,6 +83,7 @@ import io.github.alexanderwilhelmsenberg.modular.modules.ModuleDescriptorDiscove
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
 import io.github.alexanderwilhelmsenberg.modular.ui.ModuleSettingsDialog
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
+import io.github.alexanderwilhelmsenberg.modular.ui.SettingsPage
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -283,7 +285,7 @@ class MainActivity : ComponentActivity() {
                 }
                 val mostUsedState by builtInMostUsed.state.collectAsState()
                 val mostUsedError by mostUsedStore.error.collectAsState()
-                var mostUsedConfigureRequest by remember { mutableStateOf(0) }
+                var mostUsedConfigureRequest by rememberSaveable { mutableStateOf(0) }
                 var migrationError by remember { mutableStateOf<String?>(null) }
                 var migrationRetry by remember { mutableStateOf(0) }
                 var renameTarget by remember { mutableStateOf<LaunchableApp?>(null) }
@@ -468,19 +470,18 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+                        // Capture the entry destination once. Consuming a configure request or
+                        // closing an add-on dialog must not reset the page being viewed.
+                        val settingsEntryPage = rememberSaveable {
+                            when {
+                                mostUsedConfigureRequest > 0 -> SettingsPage.PRODUCTIVITY
+                                selectedModuleComponent != null -> SettingsPage.ADDONS
+                                else -> SettingsPage.ROOT
+                            }
+                        }
                         ModularApp(
+                            initialPage = settingsEntryPage,
                             coreFeaturesContent = {
-                                OrganizationSettingsHost(
-                                    snapshot = organizationSnapshot,
-                                    catalog = visibleCatalog.apps,
-                                    runtime = organization.runtime,
-                                    mostUsedEnabled = mostUsedSettings.enabled,
-                                    onStartSorter = { left, right ->
-                                        homeSearchQuery = ""
-                                        organization.startSorter(organizationSnapshot, visibleCatalog.apps, left, right)
-                                        settingsVisible = false
-                                    },
-                                )
                                 CoreMostUsedSettingsUi(
                                     enabled = mostUsedSettings.enabled,
                                     days = mostUsedSettings.days,
@@ -503,11 +504,23 @@ class MainActivity : ComponentActivity() {
                                     loadError = mostUsedError ?: mostUsedState.historyError,
                                     statusMessage = mostUsedState.message,
                                     configureRequest = mostUsedConfigureRequest,
+                                    onConfigureRequestConsumed = { mostUsedConfigureRequest = 0 },
                                     hasImportedSettings = mostUsedSettings.importedLegacySources.isNotEmpty() && !mostUsedSettings.userConfigured,
                                     source = mostUsedSettings.source,
                                     onSetSource = mostUsedStore::setSource,
                                     onResetLearnedUsage = builtInMostUsed::resetLearnedUsage,
                                     usingLocalFallback = mostUsedState.usingLocalFallback,
+                                )
+                                OrganizationSettingsHost(
+                                    snapshot = organizationSnapshot,
+                                    catalog = visibleCatalog.apps,
+                                    runtime = organization.runtime,
+                                    mostUsedEnabled = mostUsedSettings.enabled,
+                                    onStartSorter = { left, right ->
+                                        homeSearchQuery = ""
+                                        organization.startSorter(organizationSnapshot, visibleCatalog.apps, left, right)
+                                        settingsVisible = false
+                                    },
                                 )
                                 migrationError?.let { message ->
                                     Text(message, color = androidx.compose.material3.MaterialTheme.colorScheme.error)

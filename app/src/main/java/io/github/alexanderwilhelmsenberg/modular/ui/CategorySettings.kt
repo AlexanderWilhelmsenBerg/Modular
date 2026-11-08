@@ -20,6 +20,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +54,8 @@ fun CategorySettingsUi(
     onUpdate: suspend (OrganizationBatch) -> Result<OrganizationSnapshot>,
     onManageFolders: () -> Unit,
     onStartMegaSorter: () -> Unit,
+    showEntry: Boolean = true,
+    openDetailsRequest: Int = 0,
 ) {
     val scope = rememberCoroutineScope()
     var detailsOpen by remember { mutableStateOf(false) }
@@ -63,6 +66,9 @@ fun CategorySettingsUi(
     var confirmSuppression by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(openDetailsRequest) {
+        if (openDetailsRequest > 0) detailsOpen = true
+    }
     val automaticMembers = remember(catalog, snapshot.categories) {
         snapshot.categories.associate { category ->
             category.id to catalog.filter { CategoryClassifier.matches(category.id, it) }.map { it.key }.toSet()
@@ -88,25 +94,25 @@ fun CategorySettingsUi(
         MembershipOverride.AUTO -> category.automatic && key in automaticMembers[category.id].orEmpty()
     }
 
-    Card(Modifier.fillMaxWidth().testTag("core-categories-card")) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) {
-                    Text("Categories and folders", style = MaterialTheme.typography.titleMedium)
-                    Text("Optional pages for organizing apps", style = MaterialTheme.typography.bodySmall)
-                }
+    if (showEntry) Column(Modifier.fillMaxWidth().testTag("core-categories-card")) {
+        SettingsRow(
+            title = "Categories and folders",
+            description = "Optional pages for organizing apps",
+            icon = SettingsIcon.CATEGORIES,
+            onClick = { detailsOpen = true },
+            trailing = {
                 Switch(
                     checked = snapshot.categoriesEnabled,
                     enabled = !busy,
                     onCheckedChange = { save(listOf(OrganizationEdit.SetCategoriesEnabled(it))) },
                     modifier = Modifier.semantics { contentDescription = "Categories" }.testTag("categories-master-toggle"),
                 )
-            }
-            OutlinedButton(onClick = { detailsOpen = true }, modifier = Modifier.testTag("categories-configure")) {
-                Text("Configure categories")
-            }
-            if (!detailsOpen) error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            },
+        )
+        TextButton(onClick = { detailsOpen = true }, modifier = Modifier.padding(start = 76.dp).testTag("categories-configure")) {
+            Text("Configure categories")
         }
+        if (!detailsOpen) error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 
     if (detailsOpen) AlertDialog(

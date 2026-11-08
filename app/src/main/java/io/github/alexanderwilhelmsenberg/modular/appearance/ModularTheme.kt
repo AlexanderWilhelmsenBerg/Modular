@@ -7,9 +7,11 @@ import android.graphics.drawable.ColorDrawable
 import android.view.WindowManager
 import android.graphics.Color as AndroidColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -71,8 +73,13 @@ fun ModularTheme(theme: AppearanceTheme, content: @Composable () -> Unit) {
             AppearanceTheme.DARK -> darkColors
             AppearanceTheme.AMOLED -> amoledColors
         },
-        content = content,
-    )
+    ) {
+        // Flat settings rows no longer inherit their default ink from a Card.
+        // Surfaces can still override this with their own on-surface color.
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+            content()
+        }
+    }
 }
 
 /** Align edge-to-edge bars with the selected Compose surfaces on API 29–36. */

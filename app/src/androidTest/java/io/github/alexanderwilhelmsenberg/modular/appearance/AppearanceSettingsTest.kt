@@ -3,6 +3,7 @@ package io.github.alexanderwilhelmsenberg.modular.appearance
 import android.content.Context
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -64,11 +65,16 @@ class AppearanceSettingsTest {
     fun builtInThemesKeepTextAndControlContrast() {
         var selected by mutableStateOf(AppearanceTheme.LIGHT)
         lateinit var colors: ColorScheme
-        composeRule.setContent { ModularTheme(selected) { colors = MaterialTheme.colorScheme } }
+        var inheritedTextColor = Color.Unspecified
+        composeRule.setContent { ModularTheme(selected) {
+            colors = MaterialTheme.colorScheme
+            inheritedTextColor = LocalContentColor.current
+        } }
 
         AppearanceTheme.entries.forEach { theme ->
             composeRule.runOnIdle { selected = theme }
             composeRule.runOnIdle {
+                assertEquals("Flat settings inherit the theme's text color", colors.onBackground, inheritedTextColor)
                 listOf(
                     "primary" to contrast(colors.primary, colors.onPrimary),
                     "primary container" to contrast(colors.primaryContainer, colors.onPrimaryContainer),

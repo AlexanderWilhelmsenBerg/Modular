@@ -4,7 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -79,37 +82,54 @@ fun HiddenAppsControls(
     customizations: AppCustomizations,
     onUnhide: (AppKey) -> Unit,
 ) {
+    var managerOpen by remember { mutableStateOf(false) }
     val hiddenApps = remember(apps, customizations) {
         apps.filter { customizations.isHidden(it.key) }
             .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { customizations.labelFor(it) })
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Hidden apps (${hiddenApps.size})", style = MaterialTheme.typography.titleMedium)
-        if (hiddenApps.isEmpty()) {
-            Text("No installed apps are hidden.", style = MaterialTheme.typography.bodyMedium)
-        }
-        hiddenApps.forEach { app ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        customizations.labelFor(app),
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        app.key.packageName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+    SettingsRow(
+        title = "Hidden apps (${hiddenApps.size})",
+        description = if (hiddenApps.isEmpty()) "No installed apps are hidden" else "Restore apps hidden from Home and search",
+        icon = SettingsIcon.HIDDEN,
+        modifier = Modifier.testTag("settings-hidden-apps"),
+        onClick = { managerOpen = true },
+    )
+    if (managerOpen) AlertDialog(
+        onDismissRequest = { managerOpen = false },
+        title = { Text("Hidden apps") },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (hiddenApps.isEmpty()) {
+                    Text("No installed apps are hidden.", style = MaterialTheme.typography.bodyMedium)
                 }
-                TextButton(
-                    onClick = { onUnhide(app.key) },
-                    modifier = Modifier.testTag("unhide-app:${app.key.stableId}"),
-                ) { Text("Show") }
+                hiddenApps.forEach { app ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                customizations.labelFor(app),
+                                style = MaterialTheme.typography.bodyLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                app.key.packageName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        TextButton(
+                            onClick = { onUnhide(app.key) },
+                            modifier = Modifier.testTag("unhide-app:${app.key.stableId}"),
+                        ) { Text("Show") }
+                    }
+                }
             }
-        }
-    }
+        },
+        confirmButton = { TextButton(onClick = { managerOpen = false }) { Text("Done") } },
+    )
 }

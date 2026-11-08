@@ -114,9 +114,11 @@ class AppCustomizationUiTest {
         rule.onNodeWithText("No matching apps").assertIsDisplayed()
 
         rule.onNodeWithTag("home-settings").performClick()
-        rule.onNodeWithText("Hidden apps (1)").assertIsDisplayed()
+        rule.onNodeWithTag("settings-hidden-apps").assertIsDisplayed().performClick()
         rule.onNodeWithText("Alpha").assertIsDisplayed()
         rule.onNodeWithTag("unhide-app:${zulu.key.stableId}").performClick()
+        rule.onNodeWithText("No installed apps are hidden.").assertIsDisplayed()
+        rule.onNodeWithText("Done").performClick()
         rule.onNodeWithText("Hidden apps (0)").assertIsDisplayed()
         rule.onNodeWithText("Back to Home").performClick()
         rule.onAllNodesWithTag("app-row:${zulu.key.stableId}").assertCountEquals(2)

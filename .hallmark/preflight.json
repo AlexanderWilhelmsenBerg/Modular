@@ -1,0 +1,12 @@
+{
+  "date": "2026-11-08",
+  "framework": "Native Android, Kotlin, Jetpack Compose Material 3",
+  "typography": "Existing MaterialTheme typography with scalable sp sizes",
+  "palette": "appearance/ModularTheme.kt: Light, Dark, true-black AMOLED",
+  "brand_tokens": "app/src/main/res/values/brand.xml",
+  "spacing": "4dp scale; 24dp settings margins; 76dp text alignment",
+  "reference": "User-provided Niagara settings screenshots",
+  "preserved": ["themes", "settings persistence", "Android navigation", "feature controllers"],
+  "introduced": ["settings landing page and subpages", "flat icon rows", "original interlocking M vector identity"],
+  "scope": "Native settings and launcher icon; web/CSS/marketing layout rules are inapplicable"
+}

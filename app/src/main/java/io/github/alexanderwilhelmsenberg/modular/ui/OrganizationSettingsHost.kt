@@ -13,6 +13,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.organization.*
@@ -29,10 +32,62 @@ fun OrganizationSettingsHost(
 ) {
     var foldersOpen by remember { mutableStateOf(false) }
     var sorterSetup by remember { mutableStateOf(false) }
+    var categoriesRequest by remember { mutableIntStateOf(0) }
+    var categoriesBusy by remember { mutableStateOf(false) }
+    var categoriesError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val error by runtime.store.error.collectAsState()
     Column {
+        SettingsSectionLabel("Organize apps")
+        SettingsRow(
+            title = "Categories",
+            description = "Create and arrange pages for your apps",
+            icon = SettingsIcon.CATEGORIES,
+            modifier = Modifier.testTag("settings-categories"),
+            onClick = { categoriesRequest++ },
+            trailing = {
+                Switch(
+                    checked = snapshot.categoriesEnabled,
+                    enabled = !categoriesBusy,
+                    onCheckedChange = { checked ->
+                        if (!categoriesBusy) {
+                            categoriesBusy = true
+                            categoriesError = null
+                            scope.launch {
+                                val result = runCatching {
+                                    runtime.update(OrganizationBatch(
+                                        listOf(OrganizationEdit.SetCategoriesEnabled(checked)),
+                                        expectedRevision = snapshot.revision,
+                                    ))
+                                }.getOrElse { Result.failure(it) }
+                                categoriesBusy = false
+                                result.onFailure { categoriesError = it.message ?: "Could not save category settings. Try again." }
+                            }
+                        }
+                    },
+                    modifier = Modifier.semantics { contentDescription = "Categories" }
+                        .testTag("categories-master-toggle"),
+                )
+            },
+        )
+        SettingsRow(
+            title = "Folders",
+            description = "Group apps and set when they appear",
+            icon = SettingsIcon.FOLDER,
+            modifier = Modifier.testTag("settings-folders"),
+            onClick = { foldersOpen = true },
+        )
+        SettingsRow(
+            title = "Mega Sorter",
+            description = "Sort apps into categories side by side",
+            icon = SettingsIcon.SORT,
+            modifier = Modifier.testTag("settings-mega-sorter"),
+            onClick = { sorterSetup = true },
+        )
         CategorySettingsUi(snapshot, catalog, runtime::update,
-            onManageFolders = { foldersOpen = true }, onStartMegaSorter = { sorterSetup = true })
+            onManageFolders = { foldersOpen = true }, onStartMegaSorter = { sorterSetup = true },
+            showEntry = false, openDetailsRequest = categoriesRequest)
+        categoriesError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     if (foldersOpen) OrganizationFoldersDialog(snapshot, catalog, runtime, mostUsedEnabled,

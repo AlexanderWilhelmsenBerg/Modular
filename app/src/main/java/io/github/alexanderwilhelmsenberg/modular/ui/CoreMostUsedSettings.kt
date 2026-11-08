@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -28,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -68,11 +68,12 @@ fun CoreMostUsedSettingsUi(
     usingLocalFallback: Boolean = false,
     onSetSource: suspend (MostUsedSource) -> Result<Unit> = { Result.success(Unit) },
     onResetLearnedUsage: suspend () -> Result<Unit> = { Result.success(Unit) },
+    onConfigureRequestConsumed: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var detailsOpen by remember { mutableStateOf(false) }
+    var detailsOpen by rememberSaveable { mutableStateOf(false) }
     var restrictedTipOpen by remember { mutableStateOf(false) }
     var resetConfirmOpen by remember { mutableStateOf(false) }
     var resetNotice by remember { mutableStateOf(false) }
@@ -84,7 +85,10 @@ fun CoreMostUsedSettingsUi(
             .filter { it.size > 1 }.flatMap { group -> group.map { it.key } }.toSet()
     }
     LaunchedEffect(configureRequest) {
-        if (configureRequest > 0) detailsOpen = true
+        if (configureRequest > 0) {
+            detailsOpen = true
+            onConfigureRequestConsumed()
+        }
     }
 
     fun save(afterSuccess: () -> Unit = {}, action: suspend () -> Result<Unit>) {
@@ -100,23 +104,24 @@ fun CoreMostUsedSettingsUi(
         }
     }
 
-    Card(Modifier.fillMaxWidth().testTag("core-most-used-card")) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) {
-                    Text("Most Used", style = MaterialTheme.typography.titleMedium)
-                    Text("Show pinned and frequently used apps on Home", style = MaterialTheme.typography.bodySmall)
-                }
+    Column(Modifier.fillMaxWidth().testTag("core-most-used-card")) {
+        SettingsRow(
+            title = "Most Used",
+            description = "Show pinned and frequently used apps on Home",
+            icon = SettingsIcon.STAR,
+            onClick = { detailsOpen = true },
+            trailing = {
                 Switch(
                     checked = enabled,
                     enabled = !busy,
-                    onCheckedChange = { checked ->
-                        save { onSetEnabled(checked) }
-                    },
+                    onCheckedChange = { checked -> save { onSetEnabled(checked) } },
                     modifier = Modifier.semantics { contentDescription = "Most Used" }
                         .testTag("core-most-used-toggle"),
                 )
-            }
+            },
+        )
+        Column(Modifier.fillMaxWidth().padding(start = 76.dp, end = 24.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 when (source) {
                     MostUsedSource.LOCAL -> "Learns from apps launched through Modular · no permission needed"
@@ -127,7 +132,7 @@ fun CoreMostUsedSettingsUi(
                 },
                 style = MaterialTheme.typography.bodySmall,
             )
-            OutlinedButton(onClick = { detailsOpen = true }, modifier = Modifier.testTag("core-most-used-configure")) {
+            TextButton(onClick = { detailsOpen = true }, modifier = Modifier.testTag("core-most-used-configure")) {
                 Text("Configure Most Used")
             }
             if (!enabled && hasImportedSettings) Text(

@@ -18,7 +18,10 @@ class OrganizationViewModel(application: Application) : AndroidViewModel(applica
 
     fun startSorter(snapshot: OrganizationSnapshot, apps: List<LaunchableApp>, left: String?, right: String?) {
         exitSorter()
-        sorter = MegaSorterController(store, viewModelScope, snapshot, apps, left, right,
+        // The caller supplies customized visible labels. Capture their locale order once;
+        // later catalog changes must not move rows or alphabet sections in this session.
+        val sessionApps = sorterSessionApps(apps)
+        sorter = MegaSorterController(store, viewModelScope, snapshot, sessionApps, left, right,
             animateMotion = ValueAnimator.areAnimatorsEnabled(),
             onBackgroundFailure = { message -> android.widget.Toast.makeText(applicationContext,
                 message, android.widget.Toast.LENGTH_LONG).show() })

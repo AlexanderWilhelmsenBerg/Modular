@@ -13,9 +13,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
@@ -28,6 +30,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
+import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceTheme
 import io.github.alexanderwilhelmsenberg.modular.appearance.ModularTheme
@@ -113,16 +116,22 @@ class OrganizationScreenshotTest {
             right = SorterDestination("games", "Games", SorterSide.RIGHT),
         )
         rule.setContent {
+            var headerHeight by remember { mutableIntStateOf(0) }
+            val density = LocalDensity.current
             ModularTheme(if (isSystemInDarkTheme()) AppearanceTheme.DARK else AppearanceTheme.LIGHT) {
                 Box(Modifier.fillMaxSize()) {
-                    Column(Modifier.padding(top = 120.dp)) {
-                        state.rows.forEach { row ->
+                    HomeScreen(catalog = AppCatalog(apps = apps),
+                        onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+                        showMakeDefault = false, iconForApp = { null },
+                        listTopInset = with(density) { headerHeight.toDp() },
+                        appRowContent = { app, content ->
+                            val row = state.rows.first { it.app.key == app.key }
                             MegaSorterRow(row, state, onAssign = {}) {
-                                HomeAppRow(row.app, enabled = true, onClick = {})
+                                content()
                             }
-                        }
-                    }
-                    MegaSorterOverlay(state, onExit = {}, onUndo = {})
+                        })
+                    MegaSorterOverlay(state, onExit = {}, onUndo = {},
+                        onHeaderHeightChanged = { headerHeight = it })
                 }
             }
         }

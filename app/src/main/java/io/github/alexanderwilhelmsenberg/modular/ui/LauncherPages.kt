@@ -14,6 +14,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.getValue
@@ -76,6 +77,7 @@ fun LauncherPages(
     initialPageId: HomePageId = HomePageId.Home,
     pageStateHolder: SaveableStateHolder = rememberSaveableStateHolder(),
     onPageChanged: (HomePageId) -> Unit = {},
+    onScrollingChange: (Boolean) -> Unit = {},
 ) {
     val pages = snapshot.visiblePageOrder()
     val keys = pages.map { it.savedKey() }
@@ -86,7 +88,13 @@ fun LauncherPages(
     val contentDirection = LocalLayoutDirection.current
     val currentPages by rememberUpdatedState(pages)
     val currentPageCallback by rememberUpdatedState(onPageChanged)
+    val currentScrollingCallback by rememberUpdatedState(onScrollingChange)
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(pagerState.isScrollInProgress) {
+        currentScrollingCallback(pagerState.isScrollInProgress)
+    }
+    DisposableEffect(Unit) { onDispose { currentScrollingCallback(false) } }
 
     // If the current page is disabled or deleted, navigate to Home. Reorders keep
     // the selected page by stable ID, rather than retaining a now-wrong index.

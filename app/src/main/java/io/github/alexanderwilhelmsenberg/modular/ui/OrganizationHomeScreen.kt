@@ -51,6 +51,8 @@ fun OrganizationHomeScreen(
     homeResetToken: Int = 0,
 ) {
     val scope = rememberCoroutineScope()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var sorterHeaderHeight by remember { mutableIntStateOf(0) }
     val statuses by runtime.signals.statuses.collectAsState()
     var retainedVisibility by remember { mutableStateOf(statuses.mapValues { it.value.eligible }) }
     var folderPressed by remember { mutableStateOf(false) }
@@ -63,7 +65,9 @@ fun OrganizationHomeScreen(
     var categoryMembers by remember { mutableStateOf<String?>(null) }
     var pageName by rememberSaveable { mutableStateOf("home") }
     var error by remember { mutableStateOf<String?>(null) }
-    var pageScrolling by remember { mutableStateOf(false) }
+    val scrollingPages = remember { mutableStateMapOf<HomePageId, Boolean>() }
+    var pagerScrolling by remember { mutableStateOf(false) }
+    val pageScrolling = pagerScrolling || scrollingPages.values.any { it }
     val folderBounds = remember { mutableStateMapOf<String, androidx.compose.ui.unit.IntRect>() }
     LaunchedEffect(statuses, folderPressed, openFolderId, pageScrolling) {
         if (!folderPressed && openFolderId == null && !pageScrolling)
@@ -93,6 +97,7 @@ fun OrganizationHomeScreen(
                 openFolderId == null && organizeApp == null && folderAction == null &&
                 categoryMembers == null && editingFolderId == null && !setupSorter,
             homeResetToken = homeResetToken, initialPageId = initialPage,
+            onScrollingChange = { pagerScrolling = it },
             onPageChanged = { pageName = if (it is HomePageId.Category) it.id else "home" },
             renderPage = { page ->
                 val category = (page as? HomePageId.Category)?.let { id -> snapshot.categories.firstOrNull { it.id == id.id } }
@@ -102,17 +107,21 @@ fun OrganizationHomeScreen(
                     else -> projection.homeApps
                 }
                 val pageList = if (page == HomePageId.Home) listState else rememberLazyListState()
-                LaunchedEffect(pageList.isScrollInProgress) { pageScrolling = pageList.isScrollInProgress }
+                LaunchedEffect(page, pageList.isScrollInProgress) {
+                    scrollingPages[page] = pageList.isScrollInProgress
+                }
+                DisposableEffect(page) { onDispose { scrollingPages.remove(page) } }
                 val featured = if (category == null && sorter == null) featuredApps?.let(projection::filterDirectStarred) else null
                 HomeScreen(
                     catalog = catalog.copy(apps = apps),
-                    searchApps = projection.globalSearchApps,
+                    searchApps = if (sorter != null) apps else projection.globalSearchApps,
                     orderedApps = when {
                         sorter != null -> apps
                         category != null -> null
                         else -> orderedApps?.filter { it.key in projection.homeKeys }
                     },
                     pageTitle = category?.name,
+                    listTopInset = if (sorter != null) with(density) { sorterHeaderHeight.toDp() } else 0.dp,
                     listState = pageList,
                     onLaunch = onLaunch, onRefresh = onRefresh, onMakeDefault = onMakeDefault,
                     onOpenSettings = { if (sorterController != null) onExitSorter(); onOpenSettings() },
@@ -148,6 +157,7 @@ fun OrganizationHomeScreen(
             })
         if (sorter != null && sorterController != null) MegaSorterOverlay(sorter,
             onExit = onExitSorter, onUndo = sorterController::undo,
+            onHeaderHeightChanged = { sorterHeaderHeight = it },
             modifier = Modifier.statusBarsPadding().navigationBarsPadding().padding(bottom = 80.dp))
     }
     openFolderId?.let { id -> snapshot.folders.firstOrNull { it.id == id }?.let { folder ->

@@ -14,6 +14,18 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
+import java.text.Collator
+import java.util.Locale
+
+/** Capture the customized display order once, before the session begins. */
+internal fun sorterSessionApps(apps: List<LaunchableApp>, locale: Locale = Locale.getDefault()): List<LaunchableApp> {
+    val collator = Collator.getInstance(locale).apply { strength = Collator.PRIMARY }
+    return apps.distinctBy { it.key }.sortedWith { a, b ->
+        collator.compare(a.label, b.label).takeIf { it != 0 }
+            ?: a.label.compareTo(b.label).takeIf { it != 0 }
+            ?: a.key.stableId.compareTo(b.key.stableId)
+    }
+}
 
 /** Physical destinations: layout direction never reverses these meanings. */
 enum class SorterSide { LEFT, RIGHT }
@@ -148,7 +160,9 @@ class MegaSorterController(
         _state.update { old ->
             old.copy(rows = old.rows.filterNot { it.app.key in hiddenKeys }.map { row ->
                 val latest = current[row.app.key]
-                val app = latest ?: row.app
+                // Keep the session's display label, and therefore its alphabet bucket, fixed.
+                // Exact-key metadata/availability may still change while sorting.
+                val app = latest?.copy(label = row.app.label) ?: row.app
                 val derived = rowFor(app)
                 row.copy(app = app, available = latest != null && latest.enabled && row.app.key !in unavailableKeys,
                     leftMember = derived.leftMember, rightMember = derived.rightMember)

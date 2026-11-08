@@ -4,6 +4,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -36,6 +38,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCatalog
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
@@ -86,6 +89,7 @@ fun HomeScreen(
     onAddCategoryApps: (() -> Unit)? = null,
     onStartCategorySorter: (() -> Unit)? = null,
     appRowContent: (@Composable (LaunchableApp, @Composable () -> Unit) -> Unit)? = null,
+    listTopInset: Dp = 0.dp,
     iconForApp: @Composable (LaunchableApp) -> ImageBitmap? = { rememberAppIcon(it) },
 ) {
     val locale = LocalConfiguration.current.locales[0]
@@ -244,6 +248,7 @@ fun HomeScreen(
     Box(Modifier.fillMaxSize().background(if (wallpaperMode) Color.Transparent else MaterialTheme.colorScheme.background)) {
         if (wallpaperMode) WallpaperHomeScrim(wallpaperDimmingPercent, Modifier.fillMaxSize())
         Column(Modifier.fillMaxSize().imePadding().navigationBarsPadding().statusBarsPadding()) {
+            Spacer(Modifier.height(listTopInset))
             Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { viewportHeight = it.height; reachability.setViewport(it.height) }) {
                 HomeAppList(
                     entries = entries,

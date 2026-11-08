@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ fun MegaSorterOverlay(
     onExit: () -> Unit,
     onUndo: () -> Unit,
     modifier: Modifier = Modifier,
+    onHeaderHeightChanged: (Int) -> Unit = {},
 ) {
     Box(modifier.fillMaxSize()) {
         if (state.left != null) Box(
@@ -46,7 +48,9 @@ fun MegaSorterOverlay(
                 .background(Brush.horizontalGradient(listOf(Color.Transparent, SorterBlue.copy(alpha = .20f))))
         )
         Surface(
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 4.dp, start = 12.dp, end = 12.dp),
+            modifier = Modifier.align(Alignment.TopCenter)
+                .onSizeChanged { onHeaderHeightChanged(it.height) }
+                .padding(top = 4.dp, start = 12.dp, end = 12.dp),
             shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface.copy(alpha = .94f),
             shadowElevation = 4.dp,

@@ -12,6 +12,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Locale
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MegaSorterControllerTest {
@@ -123,6 +124,26 @@ class MegaSorterControllerTest {
         runCurrent()
         assertFalse(controller.state.value.active)
         assertEquals(0, updates.subscriptionCount.value)
+    }
+
+    @Test fun renameKeepsCapturedRowsAndAlphabetBucketsWhileMetadataRefreshes() = runTest {
+        val z = first.copy(label = "Zulu")
+        val a = second.copy(label = "Alpha")
+        val captured = sorterSessionApps(listOf(z, a), Locale.ENGLISH)
+        assertEquals(listOf(second.key, first.key), captured.map { it.key })
+        val controller = MegaSorterController(DeferredPort(), backgroundScope, initial,
+            captured, null, "blue")
+        controller.updateCatalog(listOf(
+            z.copy(label = "Bravo", enabled = false, androidCategory = 7),
+            a.copy(label = "Yankee", androidCategory = 4),
+            app("new"),
+        ))
+        val rows = controller.state.value.rows
+        assertEquals(listOf(second.key, first.key), rows.map { it.app.key })
+        assertEquals(listOf("Alpha", "Zulu"), rows.map { it.app.label })
+        assertEquals(4, rows[0].app.androidCategory)
+        assertFalse(rows[1].available)
+        assertEquals(7, rows[1].app.androidCategory)
     }
 
     private fun app(name: String) = LaunchableApp(AppKey("com.example.$name", "Main", 0),

@@ -29,6 +29,17 @@ app-list Folders section or Most Used pins. Folder membership does not remove
 the app from its normal list. They are not Android directories, add-on instances,
 categories themselves, or usage-ranked suggestions.
 
+The expanded request adds per-folder smart visibility for headset connection,
+time schedules, connected Wi-Fi and map-defined areas. Both Any/All matching are
+supported, with Any confirmed as the default. Every folder remains configurable
+in Settings while hidden. Rules change shortcut eligibility, not membership.
+The proposed low-resource implementation evaluates while the launcher is visible,
+uses shared callbacks and bounded location refresh, and defers background
+geofencing. Optional Wi-Fi/location rules require relevant permissions; they do
+not require Usage Access. A compatible map renderer/tile provider remains to be
+selected. Online app metadata services are researched options, not selected
+dependencies; local classification continues to work without them.
+
 Mega Sorter adds manual category memberships through directional row swipes.
 Per-row fixed-slot animation must not block another row or vertical scrolling.
 Mode gestures take precedence over ordinary horizontal page changes. Accepted

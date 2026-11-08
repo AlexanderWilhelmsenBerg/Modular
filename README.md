@@ -123,7 +123,9 @@ optional SDK-testing output.
 The next Core scope is the
 [categories, popup folders, and Mega Sorter specification draft](docs/product/categories-folders-mega-sorter.md),
 with [an implementation plan](docs/implementation/categories-folders-mega-sorter-plan.md).
-These organization features are proposed and are not yet in the app.
+The draft includes per-folder smart visibility for headsets, schedules, Wi-Fi and
+map areas, with hidden folders always manageable in Settings. These organization
+features are proposed and are not yet in the app.
 
 Module cards have a **Settings** button with normal controls and a **Use on Home**
 action for sort helpers. Instances, contexts, and JSON editing are under Advanced

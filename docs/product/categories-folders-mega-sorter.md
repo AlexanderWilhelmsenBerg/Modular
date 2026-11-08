@@ -19,6 +19,9 @@ The user requested three connected Core functions:
   Users can create custom categories and order pages using small settings tiles.
 - **Folders:** popup app collections, placed in the Most Used section or the main
   app list. Putting an app in a folder does not remove its standalone app entry.
+  Each folder has its own settings and optional smart visibility: headset
+  connection, time schedules, selected Wi-Fi networks, or areas defined on a map.
+  Hidden folders remain listed and editable in Settings.
 - **Mega Sorter:** choose one or two category destinations, then swipe app rows
   toward them. Blue identifies the right destination and green the left. A
   top-center X exits. The assigned row swipes away and returns from a small
@@ -32,6 +35,9 @@ Confirmed clarifications:
   list because they belong to category pages.
 - Any category may occupy either side of Home. Games was an example, not a fixed
   left-side destination.
+- Folder conditions support **Match any** and **Match all**, defaulting to
+  **Match any**. Location/Wi-Fi behavior must use few resources, not continuous
+  power-hungry tracking. The user requested map-defined areas as well as Wi-Fi.
 
 The following defaults resolve details not explicitly selected by the user.
 They are **proposals in this draft**, not additional confirmed requests:
@@ -45,6 +51,9 @@ They are **proposals in this draft**, not additional confirmed requests:
 | Folder placement | One shortcut per folder, in either Most Used or the app-list Folders section |
 | Folder independence | Folders work when category pages are disabled |
 | Folder contents | Manual ordered list, new members appended; no nested folders in this version |
+| Smart-folder evaluation | Refresh while the launcher is visible; no background tracking by default |
+| Map areas | Named circles with adjustable center/radius initially; arbitrary polygons remain a possible extension |
+| Unknown condition | Show shortcut with an explanation in folder settings; user may choose Hide instead |
 | Sorter assignment | Adds membership; never silently removes other category memberships |
 | Sorter colors | Visible in Mega Sorter only; normal app rows retain the existing appearance |
 
@@ -53,7 +62,11 @@ They are **proposals in this draft**, not additional confirmed requests:
 Settings exposes **Categories and folders** with a Categories master switch,
 the six built-in categories, Create category, Manage folders, page ordering, and
 Start Mega Sorter. These are ordinary Core settings, not module instances or
-launcher contexts. No extra APK, account, network, or Usage Access is required.
+launcher contexts. Basic organization requires no extra APK, account, network,
+or Usage Access.
+Optional map tiles need network access; location/Wi-Fi conditions require the
+relevant Android permissions. Ordinary organization and other folder rules keep
+working when those permissions are denied.
 
 Each category has a stable ID, editable display name, enabled flag, Show on Home
 flag, automatic-matching policy, and manual membership overrides. Names never
@@ -136,8 +149,38 @@ read failures preserve the last usable view and never discard manual choices.
 Do not request `QUERY_ALL_PACKAGES` merely to implement this feature, call
 `setApplicationCategoryHint` for third-party apps, scrape app stores, upload
 installed package lists, or infer categories from Usage Access. A future
-reviewable offline package-rule dataset can be specified separately; it is not
-an assumed complete classifier in this release.
+reviewable metadata provider can extend classification under the constraints
+below; none is an assumed complete classifier or enabled in this release.
+
+### 3.1 Online metadata options and recommendation
+
+Research checked 2026-11-08. These are candidates, not contracted services or
+implemented integrations. No account has been created and no package list sent.
+
+| Source | Useful metadata and access | Fit and limitation |
+| --- | --- | --- |
+| [F-Droid indexes](https://f-droid.org/en/docs/All_our_APIs/) and [build metadata](https://f-droid.org/docs/Build_Metadata_Reference/) | Public repository indexes and package metadata, including categories | Useful open catalog supplement without API credentials; covers apps in the selected repositories, not the full Play catalog; map repository-specific categories explicitly |
+| [42matters Lookup API](https://42matters.com/docs/app-market-data/android/apps/lookup) | Google Play app metadata by package identifier, including category; authenticated API, Tiny plan or above | Direct package lookup; commercial quota/plan and caching/redistribution terms need agreement before a launcher ships it |
+| [AppBrain API](https://www.appbrain.com/docs/api/specification) and [pricing](https://www.appbrain.com/docs/api/pricing) | Google Play app information/categories by package, API key and credit quotas | Published free allowance is 500 credits/month, then paid plans; suitable for a small evaluation, not a free unlimited service for every user |
+| [Appfigures Public Data API](https://help.appfigures.com/en/article/appfigures-api-cli-and-mcp-access-limits-and-public-data-1seiibo/) | App metadata across stores; public-data add-on and purchased credits | Access to apps beyond the developer's own catalog; their terms require contacting them for commercial uses beyond internal analysis, so ordinary API access is not a redistribution license |
+| [Google Play Catalog](https://developers.google.com/android-publisher/play-catalog) | Eligible catalog exports/changes for registered third-party app stores | Not a general public package-to-category API for a launcher; do not base this feature on obtaining that access |
+
+Recommend Android metadata first, then evaluate an optional F-Droid catalog
+supplement. Evaluate commercial lookup only if measured coverage justifies its
+recurring cost and permitted use. Finance may be enriched from store categories;
+Work remains a personal choice rather than a universally correct classification.
+No source guarantees coverage of system apps, private builds, or every region.
+
+Before enabling any provider, specify its category mapping, provenance, conflict
+policy, cache expiry, quota/failure behavior, and permitted storage/redistribution.
+Manual Include/Exclude always wins. An offline cache must keep Home usable when
+the provider fails; avoid lookups per launch or frame. Downloading a permitted
+catalog for local matching can avoid sending installed-app identities, but still
+requires source/license validation and bounded updates. A per-package online
+lookup exposes that package to the service: make it opt-in and minimize requests.
+Do not put a shared paid-service secret in the APK. A backend or user-owned key
+requires a separately specified operating model; neither is implicit in this draft.
+An open client library does not itself grant rights to redistribute provider data.
 
 Evidence checked on 2026-11-08:
 
@@ -258,7 +301,8 @@ Placement choices:
 A folder has one shortcut placement in v1. Moving it changes the placement, not
 its identity or membership. Its contents remain directly available elsewhere
 according to the app visibility rules. No nested folders, filesystem directories,
-smart-folder rules, or category-to-folder live mirroring in this version.
+or category-to-folder live mirroring in this version. Smart rules below control
+shortcut visibility; they do not automatically select or change folder members.
 
 Tap the shortcut to open an anchored rounded popup above the launcher surface.
 It contains a folder title and a scrollable vertical icon/name list. Use the
@@ -274,6 +318,160 @@ the existing action sheet with organization actions and Remove from this folder.
 Only one popup/sheet is interactive at a time. Empty folders show Add apps.
 Hidden/unavailable members are managed through explicit status rather than
 rendered as deceptively launchable entries.
+
+### 6.1 Per-folder settings and smart visibility — ORG-09
+
+**Manage folders always lists every saved folder**, even if its shortcut is
+manually hidden, its rules do not match, it has no available members, or its
+Most Used placement is disabled. Each row shows placement, current visibility,
+and the reason; it opens that folder's settings and a preview of its contents.
+The same settings are reachable from folder shortcut actions and the popup.
+Never require the condition to match before allowing a folder to be edited.
+
+Each folder editor contains name, placement, members/order, visibility mode,
+condition list, Match any/all, missing-signal behavior, current condition status,
+and Delete. Modes are **Always show** (default), **Smart visibility**, and
+**Manually hide**. Switching modes preserves saved rules and membership. A manual
+Show/Hide selection persists until the user chooses Smart visibility again;
+make the override explicit rather than silently forgetting it on restart.
+
+Smart visibility supports these requested conditions in Core:
+
+| Condition | Controls and meaning |
+| --- | --- |
+| Headset connected | Any supported wired, USB, or Bluetooth headphone/headset output is connected; optionally choose one of these types. Connection is independent of playback. Do not treat all speakers/HDMI outputs as headphones |
+| Time schedule | Selected weekdays and local start/end times; support overnight ranges. A Monday 22:00–06:00 interval ends Tuesday morning. Several intervals can be configured; any interval matches this condition |
+| Connected Wi-Fi | One or more explicitly saved network names; matches the current Wi-Fi connection, not a nearby scan result. Internet access is not required. Explain that an SSID is not a secure or unique place identity |
+| Inside a saved area | Create/name an area on a map, then match a usable location fix against it. Proposed initial editor: move center and resize a circular boundary, showing radius and current accuracy; multiple saved areas can be referenced |
+
+Map editing must allow pan/zoom and placing a boundary without granting current
+location access. **Use my location** requests permission when used; evaluation
+needs foreground location access. Start with a GMS-independent renderer and
+location abstraction suitable for both distribution targets. Choose the actual
+map/tile provider before implementation; it is still an open dependency, not a
+promise of free unlimited maps. Include attribution and comply with tile caching
+and request limits. [OSM's public tile policy](https://operations.osmfoundation.org/policies/tiles/)
+does not permit bulk/offline prefetch. Map-load failure must not erase saved
+areas or stop their local evaluation; offer numeric center/radius editing as a
+fallback. Arbitrary polygons and address-search/geocoding need separate scope.
+
+A folder can combine different condition types. **Match any** is the confirmed
+default; offer **Match all**. Example: Work can appear when connected to office
+Wi-Fi OR inside the Work area. Choose All for inside Work AND weekday hours.
+There is one flat rule group per folder initially; no nested expression editor.
+Within a condition, any selected SSID/area/interval matches that condition.
+Folder-level Any/All combines condition rows. Requiring both area A and area B
+therefore uses two area rows with All, not two selections inside one row.
+Reject enabling Smart visibility with no enabled conditions, without hiding the
+folder or discarding its draft. Several matching folders may show together.
+
+Conditions evaluate to Match / No match / Unknown, with a readable reason and
+last-evaluated time. Any returns Match if any rule matches, No match if all do
+not match, otherwise Unknown. All returns No match if any rule does not match,
+Match if all match, otherwise Unknown. Proposed Unknown fallback is **Show**,
+with an optional per-folder **Hide until known**. Permission denial, disabled
+Location, unreadable Wi-Fi identity and stale/inaccurate fixes are Unknown, not
+proof that the user left an area. Show recovery actions only in settings; do not
+open Android permission screens automatically on Home or when a rule changes.
+Explain the chosen fallback when configuring rules: Show may display the folder
+even when its location/network cannot be checked; Hide keeps its shortcut absent
+until known, while Settings still provides access. Do not present this as secure
+app concealment or force warning badges into the ordinary app list.
+
+Rules affect only the shortcut's eligibility, never saved contents, app hiding,
+pin order, category membership, or local usage history. Normal placement gates
+still apply: Always show does not enable Most Used, and a hidden folder keeps its
+saved pin slot and counts toward the existing pin limit. When every app-list
+folder is ineligible, omit the empty Folders section/rail target. Global search
+continues to search apps, not conditionally hidden folder shortcuts.
+
+Do not remove a shortcut under an active press/drag or close an open popup when
+a signal changes. Hold the affected presentation until the interaction/popup
+ends, then apply the newest projection and preserve the nearest scroll anchor.
+Rules do not launch apps, navigate pages, send notifications, or reorder apps.
+They are convenience rules, not a privacy/security boundary.
+
+### 6.2 Resource, permission, and lifecycle contract — ORG-10
+
+The user wants place awareness without significant battery use. The proposed
+baseline refreshes on launcher visibility/resume and listens to relevant
+callbacks while visible; it does not track travel while another app is open.
+A folder can therefore update shortly after returning Home, not necessarily at
+the moment of arrival in the background. Background geofencing is deferred,
+not silently enabled as part of a map-area rule.
+
+- Share one condition coordinator across folders; no polling loop or location
+  listener per folder. Subscribe only to signals needed by active smart rules.
+- Headset detection uses current audio output devices plus audio-device callbacks.
+  Refresh after process recreation; do not mistake paired devices for connected
+  outputs or audio activity for connection.
+- Wi-Fi uses current connectivity changes and the connected network identity;
+  do not initiate Wi-Fi scans. Unreadable identity is Unknown. Android treats
+  SSID as location-sensitive: Nearby Wi-Fi permission alone is not a guarantee
+  of access; account for fine-location permission and Location service state.
+- Location first considers a recent cached fix with known age/accuracy. Proposed
+  bounds: at most two minutes old; one shared foreground refresh request with
+  a ten-second timeout, at most once per minute, using a low-power/balanced
+  provider where available. Cancel on leaving the launcher; no continuous GPS,
+  foreground tracking service, wake lock, or background-location request in this
+  baseline. Where no suitable provider/fix exists, report Unknown and allow a
+  user-initiated retry; never silently escalate to high-accuracy tracking.
+- Boundary decisions account for accuracy: classify inside only when the
+  uncertainty circle is wholly inside, outside when wholly outside. Boundary
+  overlap is indeterminate; retain the last conclusive state for at most two
+  minutes, then use Unknown fallback. Permission revocation, Location-off or
+  provider-disabled invalidates retained area state immediately; an unreadable
+  Wi-Fi identity likewise invalidates the corresponding Wi-Fi result. The short
+  retention applies only to uncertain boundary fixes while location remains
+  available. This proposal limits flickering without pretending a coarse fix
+  establishes a room-sized boundary. Display accuracy/radius guidance.
+- Recompute schedules on resume and time/timezone changes; while visible,
+  schedule the next local boundary. Weekdays use the device's current timezone;
+  evaluate wall-clock membership across DST changes, not fixed 24-hour offsets.
+  No exact-alarm permission or background wakeup is needed for visible UI.
+- Save rule definitions and user-named areas locally. Keep live fixes and signal
+  history out of durable logs/analytics and backups; no movement history is
+  needed. Saved place coordinates/network names are sensitive preferences: omit
+  them from automatic backup in this first version and explain that migration
+  requires recreating them. Logs use rule IDs/reason codes, not raw coordinates
+  or SSIDs. An optional map fetch may reveal viewed regions to its tile provider;
+  do not claim all map-editor traffic stays on device.
+- Ask for permissions only when configuring/using the relevant optional rule,
+  explain denial and provide a settings recovery action. No Usage Access,
+  accessibility service, or notification listener is needed. Core organization
+  remains usable without granting location or Bluetooth identity permissions.
+
+Resource budgets above are testable proposed defaults, not measured battery
+results. Verify callback cleanup, request counts and physical-device battery
+behavior before release, including repeated HOME, screen-off, and many folders.
+The first implementation must work without mandatory Google Play services;
+Google's GeofencingClient is not that fallback.
+
+Platform references: [AudioManager](https://developer.android.com/reference/android/media/AudioManager),
+[AudioDeviceInfo](https://developer.android.com/reference/android/media/AudioDeviceInfo),
+[location permissions](https://developer.android.com/develop/sensors-and-location/location/permissions),
+[background location](https://developer.android.com/develop/sensors-and-location/location/background),
+[geofencing](https://developer.android.com/develop/sensors-and-location/location/geofencing),
+[WifiInfo](https://developer.android.com/reference/android/net/wifi/WifiInfo),
+[Wi-Fi access rules](https://developer.android.com/develop/connectivity/wifi/wifi-scan),
+and [alarm guidance](https://developer.android.com/develop/background-work/services/alarms).
+
+### 6.3 Further visibility features worth considering
+
+Recommendations, **not extra committed first-release scope**:
+
+1. Charging state: useful for bedside/media folders, inexpensive local signal.
+2. A specific connected Bluetooth device: car audio or work headphones; requires
+   real connection state and potentially Nearby devices permission, not merely
+   a paired-device name. Generic headset rules above need no named-device picker.
+3. A timed manual override, such as Show for one hour then resume rules. The
+   persistent explicit override above is already in the baseline proposal.
+
+Keep calendar, weather, activity-recognition, other-app activity, and nested rule
+automation out of initial Core scope; these introduce additional integrations,
+permissions, or ongoing resource costs and are better candidates for later
+providers/add-ons. Rules for shortcut visibility are distinct from automatically
+populating folder contents; that latter feature has not been requested here.
 
 ## 7. Long-press organization picker — ORG-06
 
@@ -456,6 +654,12 @@ specified by the user's description, not observed in these static screenshots.
 | ORG-A14 | Rotation/process death, app uninstall/update, explicit hiding, and category deletion during a session have deterministic recovery without invalid launches |
 | ORG-A15 | Native captures at 320/375/414/768dp, Light/Dark/AMOLED, wallpaper on/off, enlarged text, RTL and reduced motion; controls reachable, readable labels beyond color, basic non-swipe assignment/reorder actions |
 | ORG-A16 | Existing Home/search/Most Used/hidden-app/rename/package-cache/module-failure tests still pass; category/page/learning state never depends on external add-ons |
+| ORG-A17 | Every folder remains editable/previewable in Settings when manually hidden, unmatched, empty, permission-blocked, or placed in disabled Most Used; visibility never changes members, stored pin order, or app search |
+| ORG-A18 | Headset connect/disconnect, overnight/weekday/DST schedules, connected Wi-Fi without internet, and saved map areas produce correct conditions; Any is default, All works, Unknown truth tables and fallback are covered |
+| ORG-A19 | Denied/revoked permissions, Location off, unknown SSID, no provider, timeout, stale/inaccurate/boundary fixes and map failure preserve definitions and provide recovery; no automatic permission launch or false arrival/exit claim |
+| ORG-A20 | Shared coordinator respects configured freshness/timeout/rate bounds for many folders; leaving launcher/screen-off cancels requests/listeners; no Wi-Fi scans, background tracking, exact alarms, or per-folder polling; validate on Samsung and without GMS |
+| ORG-A21 | Visibility changes during pressing, scrolling, popup use, recreation and Most Used toggles preserve interaction/scroll anchors; no shortcut disappears under an active press and no popup closes on signal change |
+| ORG-A22 | Map center/radius editing and numeric fallback save atomically; cancel preserves old area; privacy tests exclude raw location/SSID from logs, live state from storage, and sensitive rules/places from automatic backup; provider terms/attribution reviewed before map integration |
 
 Automated tests and screenshot captures must be tied to the eventual code
 revision. Physical-device checking includes the user's Samsung and its system

@@ -385,7 +385,7 @@ incremental update/removal; unchanged generations after identical refresh.
 ## 21. Categories, popup folders, and Mega Sorter (specification draft)
 
 The 2026-11-08 request adds three optional Core functions. Full behavior, confirmed
-clarifications, proposed defaults and ORG-A01–A16 acceptance cases are in
+clarifications, proposed defaults and ORG-A01–A22 acceptance cases are in
 [the organization specification](categories-folders-mega-sorter.md).
 
 - Categories: Games, Media, Social, Productivity, Work, Finance, and custom
@@ -400,6 +400,13 @@ clarifications, proposed defaults and ORG-A01–A16 acceptance cases are in
 - Popup folders can be placed in the main app list or Most Used pins. Membership
   does not itself remove standalone app entries. App long press adds a chooser
   for category/folder membership and inline creation.
+- Each folder has its own settings and optional smart shortcut visibility for
+  headset connection, schedules, connected Wi-Fi and map-defined areas. All
+  folders remain editable in Settings while hidden. Support Any/All conditions,
+  default Any. The draft proposes foreground evaluation and bounded location
+  requests to limit battery use; optional signals request relevant permissions.
+- Online metadata services are researched candidates, not chosen or enabled
+  dependencies. Local/manual organization continues to work without them.
 - Mega Sorter chooses one/two destinations and uses blue/right and green/left
   app-row swipes. X exits; accepted assignments persist with Undo. Row animation
   must keep its layout slot and leave other rows and scrolling responsive.

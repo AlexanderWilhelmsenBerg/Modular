@@ -15,7 +15,9 @@ learning as the default suggestion source. The generic featured-app contract
 remains. The next [categories, folders and Mega Sorter draft](categories-folders-mega-sorter.md)
 now specifies optional Core organization after Most Used. Its proposed category
 Home filtering refines the complete-main-list wording below; the raw catalog
-and global search remain complete. Those organization features are not yet implemented.
+and global search remain complete. Smart folders change shortcut visibility based
+on local conditions and always remain editable in Settings. Those organization
+features are not yet implemented.
 
 ## 1. Reference and design intent
 

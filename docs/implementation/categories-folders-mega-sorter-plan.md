@@ -45,6 +45,12 @@ Introduce focused logical models (names provisional):
 - `OrganizationSnapshot`: definitions, overrides, folder members, placements and revision.
 - `OrganizationProjection`: global searchable apps, direct Home apps, category
   pages, resolved folders and visible starred entries.
+- `FolderVisibilityPolicy`: Always show / Smart / Manually hide, flat condition
+  group with Any (default) / All and Unknown fallback. Keep contents independent.
+- `FolderCondition`, `SavedPlace`, and `ConditionResult`: headset, schedule,
+  connected Wi-Fi, map area; tri-state result with reason and freshness.
+- `FolderConditionCoordinator`: one shared lifecycle-aware signal collector,
+  pure rule evaluator, bounded location refresh and deferred UI projection.
 - `MegaSorterSession`: target IDs, stable row identities/order, per-row pending
   and visual state, and bounded undo records conditional on the affected
   app/category pair's current override and operation token/version.
@@ -79,6 +85,20 @@ not erase settings to recover from malformed data. Define and test sensible
 documented bounds before implementation review, including the existing shared
 50-pin limit. Version disposable category metadata caches separately from durable
 manual choices. No new backup inclusion for learned usage is permitted.
+Sensitive saved places and network names use immutable versioned records in
+private `noBackupFilesDir` storage; the transactional organization document holds
+opaque references. Do not claim atomic DataStore commits across two files. Stage
+and durably write a complete sensitive record before atomically replacing its
+reference in the organization transaction. Failed/canceled outer saves leave old
+references unchanged; unreferenced staged records are invisible and reclaimed
+on recovery. Shared-place edits update all intended references in that single
+transaction; keep prior records until no committed reference uses them. Reconcile
+at startup, with deterministic cleanup/retry after interruption. No raw SSID or
+coordinates may leak into the backed-up organization document or display names
+generated from sensitive values. On restore, missing sensitive definitions
+produce Unknown/reconfigure, never a fabricated matching place.
+Live fixes and condition history are ephemeral, not an organization audit trail.
+Folder visibility does not rewrite typed pin storage on every signal change.
 
 ## 3. Delivery slices and agent boundaries
 
@@ -141,6 +161,39 @@ Suggested `ui/FolderPopup.kt`, `ui/FolderEditor.kt`,
 
 Gate: ORG-A05, A08–A10, A16; physical wallpaper scrolling test verifies no ghosting.
 
+### C3b — Smart folder visibility and per-folder settings
+
+Owner: condition/state agent plus folder UI owner at their agreed interface;
+depends on C1 models and C3 folder management. No edits to existing module IPC.
+
+- Implement pure tri-state Any/All evaluation, modes, per-folder fallback and
+  status reasons. Manage folders always renders saved definitions independently
+  of shortcut eligibility; preview/edit remains available for hidden folders.
+- Add scoped AudioManager/connectivity/time signal adapters and foreground
+  location abstraction. No mandatory GMS dependency, active Wi-Fi scans,
+  background service, or exact-alarm permission. Named Bluetooth device and
+  charging conditions remain recommendations outside the committed slice.
+- Share listeners/requests across active rules, enforce freshness/timeout/rate
+  bounds, unregister/cancel when not visible, and re-evaluate on resume/recreation.
+  Handle approximate fixes, boundary uncertainty, missing providers, permission
+  revocation, and request failure as explicit state, not exceptions escaping UI.
+- Build map-area editor with proposed circle/radius controls, local named areas,
+  numeric fallback, permission education and optional current-location action.
+  Select compatible renderer and tile service, attribution/cache policy and
+  production quota before implementation. No online app-metadata API is selected
+  by this slice. Saved areas evaluate without downloading map tiles each time.
+- Derive shortcut eligibility without altering contents or pin positions; defer
+  removal under active interaction/open popup and preserve list anchors.
+- Unit tests use fake clock/audio/network/location adapters and permission
+  states. Test Any/All Unknown truth tables, overnight/DST ranges, map boundary
+  accuracy, stable IDs, restore with missing sensitive data and request budgets.
+  UI tests cover settings access for every hidden state and popup transitions.
+
+Gate: ORG-A17–A22. Physical battery/permission validation is required; document
+measured requests and behavior rather than promising zero power consumption.
+Foreground-only evaluation, circle shape and Unknown fallback remain proposed
+defaults; Any as default, Wi-Fi/map support and low-resource intent are confirmed.
+
 ### C4 — Mega Sorter controller, gestures, and animation
 
 Owner: sorter agent; depends on C1 commands and C2 gesture ownership.
@@ -180,7 +233,7 @@ Owner: coordinator/integration agent; separate review agent checks the diff.
 - Check a representative large installed-app catalog. Document device/catalog
   size and observed frame behavior instead of asserting an unmeasured frame-rate
   guarantee. Classification must not requery Android on every list frame.
-- Attach exact commit/run/artifact evidence to ORG-A01–A16. Physical Samsung
+- Attach exact commit/run/artifact evidence to ORG-A01–A22. Physical Samsung
   acceptance remains explicit; automated tests cannot stand in for it.
 - Keep signing identities and existing package IDs. No Google submission is
   performed during specification work. After the app is finished, investigate

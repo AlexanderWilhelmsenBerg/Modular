@@ -95,8 +95,10 @@ specified in the [product draft](product/categories-folders-mega-sorter.md), wit
 Categories, folders and the requested visibility rules are ordinary Core functions.
 Online classification providers are researched but not selected. Nested folders,
 automatic folder contents and advanced integrations need separate scope.
-ORG-A01–A22 have no implementation evidence yet. The draft marks unresolved
-defaults explicitly rather than treating them as user-confirmed decisions.
+C1–C4 (including C3b) now have code and targeted tests in the feature branch.
+Track ORG-A01–A22 evidence and outstanding physical checks in the
+[acceptance record](implementation/category-validation.md); implementation does
+not by itself establish device acceptance.
 
 After the app is finished, investigate any remaining Play Protect harmful-app
 warning using the exact final APK and prepare its Google review/appeal. This is

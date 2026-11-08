@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
+import io.github.alexanderwilhelmsenberg.modular.organization.HomePinRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -18,15 +19,18 @@ import kotlinx.coroutines.flow.retryWhen
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-private val Context.mostUsedDataStore by preferencesDataStore(name = "core_most_used")
-private val settingsKey = stringPreferencesKey("settings_json_v1")
-private val json = Json { ignoreUnknownKeys = true }
+internal val Context.coreMostUsedDataStore by preferencesDataStore(name = "core_most_used")
+internal val mostUsedSettingsKey = stringPreferencesKey("settings_json_v1")
+internal val mostUsedJson = Json { ignoreUnknownKeys = true }
 
 data class MostUsedSettings(
     val enabled: Boolean = false,
     val days: Int = 7,
     val suggestedCount: Int = 8,
     val pinnedKeys: List<AppKey> = emptyList(),
+    val pinRefs: List<HomePinRef> = pinnedKeys.map(HomePinRef::App),
+    /** Legacy app pins are projected immediately; migration is completed on the next edit. */
+    val pinsMigrationComplete: Boolean = false,
     val importedLegacySources: Set<String> = emptySet(),
     val userConfigured: Boolean = false,
     val source: MostUsedSource = MostUsedSource.LOCAL,
@@ -36,7 +40,7 @@ data class MostUsedSettings(
 enum class MostUsedSource { LOCAL, ANDROID }
 
 @Serializable
-private data class SavedAppKey(val packageName: String, val activityName: String, val profileSerial: Long) {
+internal data class SavedAppKey(val packageName: String, val activityName: String, val profileSerial: Long) {
     fun toAppKey() = AppKey(packageName, activityName, profileSerial)
     companion object {
         fun from(key: AppKey) = SavedAppKey(key.packageName, key.activityName, key.profileSerial)
@@ -44,11 +48,29 @@ private data class SavedAppKey(val packageName: String, val activityName: String
 }
 
 @Serializable
-private data class SavedSettings(
+internal data class SavedPinRef(val kind: String, val app: SavedAppKey? = null, val folderId: String? = null) {
+    fun public(): HomePinRef = when (kind) {
+        "app" -> HomePinRef.App(requireNotNull(app).toAppKey())
+        "folder" -> HomePinRef.Folder(requireNotNull(folderId))
+        else -> error("Unknown pin type")
+    }
+    companion object {
+        fun from(ref: HomePinRef): SavedPinRef = when (ref) {
+            is HomePinRef.App -> SavedPinRef("app", SavedAppKey.from(ref.key))
+            is HomePinRef.Folder -> SavedPinRef("folder", folderId = ref.id)
+        }
+    }
+}
+
+@Serializable
+internal data class SavedSettings(
     val enabled: Boolean = false,
     val days: Int = 7,
     val suggestedCount: Int = 8,
     val pins: List<SavedAppKey> = emptyList(),
+    /** Null is the v1 app-only payload. Once set, this is the sole pin order. */
+    val pinRefs: List<SavedPinRef>? = null,
+    val pinSchemaVersion: Int = 1,
     val enabledTouched: Boolean = false,
     val daysTouched: Boolean = false,
     val countTouched: Boolean = false,
@@ -57,8 +79,11 @@ private data class SavedSettings(
     val source: MostUsedSource = MostUsedSource.LOCAL,
     val sourceTouched: Boolean = false,
 ) {
+    fun effectivePins(): List<SavedPinRef> = pinRefs ?: pins.map { SavedPinRef("app", it) }
     fun public() = MostUsedSettings(
-        enabled, days, suggestedCount, pins.map { it.toAppKey() }, importedSources,
+        enabled, days, suggestedCount,
+        effectivePins().mapNotNull { (it.public() as? HomePinRef.App)?.key },
+        effectivePins().map { it.public() }, pinSchemaVersion == 2, importedSources,
         enabledTouched || daysTouched || countTouched || pinsTouched || sourceTouched,
         source,
     )
@@ -66,14 +91,14 @@ private data class SavedSettings(
 
 /** Core-owned preferences. Each mutation is one DataStore transaction. */
 class MostUsedSettingsStore internal constructor(private val dataStore: DataStore<Preferences>) {
-    constructor(context: Context) : this(context.applicationContext.mostUsedDataStore)
+    constructor(context: Context) : this(context.applicationContext.coreMostUsedDataStore)
 
     private val mutableError = MutableStateFlow<String?>(null)
     private val lastGood = MutableStateFlow(MostUsedSettings())
     val error: StateFlow<String?> = mutableError
 
     val settings: Flow<MostUsedSettings> = dataStore.data.map { preferences ->
-        decode(preferences[settingsKey]).public().also { decoded ->
+        decodeMostUsedSettings(preferences[mostUsedSettingsKey]).public().also { decoded ->
             lastGood.value = decoded
             mutableError.value = null
         }
@@ -109,14 +134,16 @@ class MostUsedSettingsStore internal constructor(private val dataStore: DataStor
     suspend fun setPinned(key: AppKey, pinned: Boolean, availableKeys: Set<AppKey>): Result<Unit> = write { current ->
         require(validKey(key)) { "Invalid app key" }
         val saved = SavedAppKey.from(key)
+        val refs = current.effectivePins()
         if (pinned) {
             require(key in availableKeys) { "App is not in the current catalog" }
-            if (saved in current.pins) current else {
-                require(current.pins.size < MAX_PINS) { "Pin limit reached" }
-                current.copy(pins = current.pins + saved, pinsTouched = true)
+            val ref = SavedPinRef("app", saved)
+            if (ref in refs) current else {
+                require(refs.size < MAX_PINS) { "Pin limit reached" }
+                current.copy(pinRefs = refs + ref, pinsTouched = true)
             }
         } else {
-            current.copy(pins = current.pins - saved, pinsTouched = true)
+            current.copy(pinRefs = refs - SavedPinRef("app", saved), pinsTouched = true)
         }
     }
 
@@ -124,10 +151,14 @@ class MostUsedSettingsStore internal constructor(private val dataStore: DataStor
     suspend fun reorderPins(keys: List<AppKey>): Result<Unit> = write { current ->
         require(keys.size <= MAX_PINS && keys.all(::validKey)) { "Invalid pin order" }
         val order = keys.map(SavedAppKey::from)
-        require(order.size == current.pins.size && order.toSet() == current.pins.toSet()) {
+        val currentApps = current.effectivePins().mapNotNull { if (it.kind == "app") it.app else null }
+        require(order.size == currentApps.size && order.toSet() == currentApps.toSet()) {
             "Pin order must include every saved pin exactly once"
         }
-        current.copy(pins = order, pinsTouched = true)
+        val iter = order.iterator()
+        current.copy(pinRefs = current.effectivePins().map { ref ->
+            if (ref.kind == "app") SavedPinRef("app", iter.next()) else ref
+        }, pinsTouched = true)
     }
 
     /** Imports once per source. Existing Core pins keep their order; no pin is silently dropped. */
@@ -143,12 +174,14 @@ class MostUsedSettingsStore internal constructor(private val dataStore: DataStor
             "Invalid legacy pins"
         }
         if (sourceId in current.importedSources) current else {
-            val merged = current.pins + pins.map(SavedAppKey::from).filterNot { it in current.pins }
+            val refs = current.effectivePins()
+            val incoming = pins.map { SavedPinRef("app", SavedAppKey.from(it)) }
+            val merged = refs + incoming.filterNot { it in refs }
             require(merged.size <= MAX_PINS) { "Migration would exceed the pin limit" }
             current.copy(
                 days = if (current.daysTouched) current.days else days,
                 suggestedCount = if (current.countTouched) current.suggestedCount else suggestedCount,
-                pins = merged,
+                pinRefs = merged,
                 importedSources = current.importedSources + sourceId,
             )
         }
@@ -156,7 +189,10 @@ class MostUsedSettingsStore internal constructor(private val dataStore: DataStor
 
     private suspend fun write(change: (SavedSettings) -> SavedSettings): Result<Unit> = try {
         dataStore.edit { preferences ->
-            preferences[settingsKey] = json.encodeToString(SavedSettings.serializer(), change(decode(preferences[settingsKey])))
+            val next = change(decodeMostUsedSettings(preferences[mostUsedSettingsKey]))
+            preferences[mostUsedSettingsKey] = encodeMostUsedSettings(
+                if (next.pinRefs == null) next else next.copy(pinSchemaVersion = 2),
+            )
         }
         mutableError.value = null
         Result.success(Unit)
@@ -166,14 +202,25 @@ class MostUsedSettingsStore internal constructor(private val dataStore: DataStor
         Result.failure(failure)
     }
 
-    private fun decode(raw: String?): SavedSettings = if (raw == null) SavedSettings()
-    else json.decodeFromString(SavedSettings.serializer(), raw).also { saved ->
-        require(saved.days in 1..30 && saved.suggestedCount in 0..20) { "Invalid saved Most Used settings" }
-        require(saved.pins.size <= MAX_PINS && saved.pins.all { validKey(it.toAppKey()) } &&
-            saved.pins.distinct().size == saved.pins.size) { "Invalid saved Most Used pins" }
-    }
-
     companion object { const val MAX_PINS = 50 }
+}
+
+internal fun encodeMostUsedSettings(value: SavedSettings): String =
+    mostUsedJson.encodeToString(SavedSettings.serializer(), value)
+
+internal fun decodeMostUsedSettings(raw: String?): SavedSettings = if (raw == null) SavedSettings()
+else mostUsedJson.decodeFromString(SavedSettings.serializer(), raw).also { saved ->
+    require(saved.days in 1..30 && saved.suggestedCount in 0..20) { "Invalid saved Most Used settings" }
+    require((saved.pinSchemaVersion == 1 && saved.pinRefs == null) ||
+        (saved.pinSchemaVersion == 2 && saved.pinRefs != null)) { "Invalid pin schema version" }
+    val refs = saved.effectivePins()
+    require(refs.size <= MostUsedSettingsStore.MAX_PINS && refs.distinct().size == refs.size) {
+        "Invalid saved Most Used pins"
+    }
+    require(refs.all { ref -> when (val pin = ref.public()) {
+        is HomePinRef.App -> validKey(pin.key)
+        is HomePinRef.Folder -> pin.id.isNotBlank() && pin.id.length <= 128
+    } }) { "Invalid saved Most Used pin reference" }
 }
 
 private fun validKey(key: AppKey): Boolean =

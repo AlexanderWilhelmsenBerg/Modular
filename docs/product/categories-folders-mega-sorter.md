@@ -1,13 +1,19 @@
 <!-- Hallmark · reference study and specification · P4 H4 E4 S5 R5 V4 · native Android; implementation and rendered validation pending -->
 # Categories, popup folders, and Mega Sorter
 
-Status: **Specification draft; not implemented.** Request and clarification: 2026-11-08.
+Status: **Implementation in progress; release acceptance pending.** Request and clarification: 2026-11-08.
 Baseline: `b1b133b3723dd092e4ab083f22ade975098facc8` (Core local Most Used).
 
 This is the next Core feature specification after Most Used. It does not claim
 that category pages, folders, or swipe sorting are in an available APK. See the
 [implementation plan](../implementation/categories-folders-mega-sorter-plan.md)
 and [ADR-0008](../decisions/ADR-0008-core-app-organization.md).
+
+Implementation was authorized on 2026-11-08. The branch now contains category
+pages/settings, popup folders, smart visibility and Mega Sorter. Proposed defaults
+below were used as the implementation baseline; recommendations in section 6.3
+remain future work. Validation and physical-device limits are tracked in
+[the acceptance record](../implementation/category-validation.md).
 
 ## 1. Product contract and decisions
 
@@ -347,9 +353,9 @@ Smart visibility supports these requested conditions in Core:
 Map editing must allow pan/zoom and placing a boundary without granting current
 location access. **Use my location** requests permission when used; evaluation
 needs foreground location access. Start with a GMS-independent renderer and
-location abstraction suitable for both distribution targets. Choose the actual
-map/tile provider before implementation; it is still an open dependency, not a
-promise of free unlimited maps. Include attribution and comply with tile caching
+location abstraction suitable for both distribution targets. The initial
+implementation uses native map drawing and on-demand OpenStreetMap public tiles;
+it is not a promise of free unlimited map hosting. Include attribution and comply with tile caching
 and request limits. [OSM's public tile policy](https://operations.osmfoundation.org/policies/tiles/)
 does not permit bulk/offline prefetch. Map-load failure must not erase saved
 areas or stop their local evaluation; offer numeric center/radius editing as a
@@ -663,4 +669,5 @@ specified by the user's description, not observed in these static screenshots.
 
 Automated tests and screenshot captures must be tied to the eventual code
 revision. Physical-device checking includes the user's Samsung and its system
-Back gestures. This draft provides no new test-pass or rendered-UI claims.
+Back gestures. See the acceptance record for actual test and rendered-UI evidence;
+the presence of a requirement here is not by itself a passing result.

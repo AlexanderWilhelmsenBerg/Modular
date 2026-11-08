@@ -1,6 +1,6 @@
 # ADR-0008 — Core categories, popup folders, and Mega Sorter
 
-Status: **Proposed specification; requested feature scope confirmed, detailed defaults under review**  
+Status: **Accepted for implementation; device acceptance pending**  
 Date: 2026-11-08
 
 ## Context
@@ -62,6 +62,7 @@ repurposing module contexts or removing catalog entries. Typed app/folder pin
 storage must migrate existing exact app identities and order without loss.
 The module API and external-featured contracts remain unchanged in this scope.
 
-This decision does not implement the features, certify physical-device
-behavior, alter signing, publish to an app store, or submit a Google appeal.
+The user authorized implementation using these draft defaults on 2026-11-08.
+This decision does not certify physical-device behavior, alter signing, publish
+to an app store, or submit a Google appeal.
 See the [implementation plan](../implementation/categories-folders-mega-sorter-plan.md).

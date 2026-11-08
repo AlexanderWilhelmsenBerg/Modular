@@ -15,6 +15,21 @@ def adb(*args, timeout=120):
     return subprocess.check_output(["adb", *args], timeout=timeout, text=True)
 
 
+def pull_captures():
+    """Recover a transient offline ADB transport; missing evidence still fails CI."""
+    for attempt in range(3):
+        try:
+            subprocess.run(["adb", "pull", "/sdcard/Pictures/ModularHomeV2/.", str(out)],
+                           check=True, timeout=60)
+            return
+        except (OSError, subprocess.SubprocessError):
+            if attempt == 2:
+                raise
+            subprocess.run(["adb", "reconnect", "offline"], check=False, timeout=15)
+            subprocess.run(["adb", "wait-for-device"], check=True, timeout=30)
+            time.sleep(2)
+
+
 try:
     adb("shell", "wm", "density", "160")
     viewports = [(320, "no", "1.0"), (375, "no", "1.0"), (411, "no", "1.0"), (414, "yes", "1.0"), (768, "yes", "1.0"), (375, "no", "1.5")]
@@ -26,9 +41,10 @@ try:
         if "OK (" not in result:
             raise RuntimeError(f"Home v2 screenshots failed at {width}dp, font {font}:\n{result}")
         print(f"Captured Home v2 at {width}dp, font {font}")
+        # Preserve each completed viewport before another display reconfiguration.
+        pull_captures()
     # Required evidence must be on the runner before the optional video starts.
     # Some emulator codecs disconnect ADB while recording; do not lose the PNGs.
-    subprocess.run(["adb", "pull", "/sdcard/Pictures/ModularHomeV2/.", str(out)], check=True, timeout=60)
     for width, night, font in viewports:
         mode = "dark" if night == "yes" else "light"
         actions = out / f"home-actions-{width}dp-{mode}-font{font}.png"

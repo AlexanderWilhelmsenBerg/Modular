@@ -17,7 +17,8 @@ now specifies optional Core organization after Most Used. Its proposed category
 Home filtering refines the complete-main-list wording below; the raw catalog
 and global search remain complete. Smart folders change shortcut visibility based
 on local conditions and always remain editable in Settings. Those organization
-features are not yet implemented.
+features are in the implementation branch; see the
+[acceptance record](../implementation/category-validation.md) for release evidence.
 
 ## 1. Reference and design intent
 

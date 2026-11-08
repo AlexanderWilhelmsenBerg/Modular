@@ -8,7 +8,8 @@ with local learning as the default under
 Earlier add-on-owned language in the Home v2 history is superseded. The next
 Core organization scope is drafted in
 [Categories, popup folders, and Mega Sorter](categories-folders-mega-sorter.md)
-and [ADR-0008](../decisions/ADR-0008-core-app-organization.md); it is not yet implemented.
+and [ADR-0008](../decisions/ADR-0008-core-app-organization.md); implementation is in
+the feature branch with [acceptance tracking](../implementation/category-validation.md).
 
 This document captures the product intent established before implementation. Items marked **Open** are deliberately unresolved rather than guessed.
 

@@ -36,6 +36,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.Lifecycle
+import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationViewModel
+import io.github.alexanderwilhelmsenberg.modular.ui.OrganizationHomeScreen
+import io.github.alexanderwilhelmsenberg.modular.ui.OrganizationSettingsHost
 import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceSettingsStore
 import io.github.alexanderwilhelmsenberg.modular.appearance.ModularTheme
 import io.github.alexanderwilhelmsenberg.modular.capabilities.AppSortClient
@@ -89,6 +94,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var appActions: AndroidAppActions
     private lateinit var appCustomizationStore: AppCustomizationStore
     private lateinit var mostUsedStore: MostUsedSettingsStore
+    private lateinit var organization: OrganizationViewModel
     private lateinit var builtInMostUsed: BuiltInMostUsedController
     private lateinit var mostUsedMigration: LegacyMostUsedMigration
     private lateinit var compositionStore:
@@ -157,6 +163,7 @@ class MainActivity : ComponentActivity() {
         appearanceStore = AppearanceSettingsStore(this)
         appCustomizationStore = AppCustomizationStore(this)
         mostUsedStore = MostUsedSettingsStore(this)
+        organization = ViewModelProvider(this)[OrganizationViewModel::class.java]
         settingsVisible = savedInstanceState?.getBoolean("settingsVisible") ?: false
         pendingUninstallPackage = savedInstanceState?.getString("pendingUninstallPackage")
         selectedModuleComponent = savedInstanceState?.getString("selectedModuleComponent")
@@ -170,6 +177,7 @@ class MainActivity : ComponentActivity() {
             CoroutineScope(lifecycleScope.coroutineContext + Dispatchers.Default),
             displayCustomizations = appCustomizationStore.customizations,
             localHistory = LocalMostUsedHistoryStore(this),
+            organization = organization.store.snapshots,
         )
         grantStore =
             DataStoreModuleGrantStateStore(this)
@@ -253,6 +261,8 @@ class MainActivity : ComponentActivity() {
             val initialTheme = appearanceStore.currentTheme()
             val initialHomeAppearance = appearanceStore.currentSettings()
             val initialCustomizations = appCustomizationStore.currentCustomizations()
+            val initialOrganization = organization.store.currentSnapshot()
+            organization.runtime.initialize()
             val initialMostUsed = mostUsedStore.currentSettings()
             val initialWallpaper = applyHomeWindowAppearance(
                 this@MainActivity, initialTheme,
@@ -266,6 +276,11 @@ class MainActivity : ComponentActivity() {
                 val appCustomizations by appCustomizationStore.customizations.collectAsState(initial = initialCustomizations)
                 val customizationError by appCustomizationStore.error.collectAsState()
                 val mostUsedSettings by mostUsedStore.settings.collectAsState(initial = initialMostUsed)
+                val organizationSnapshot by organization.store.snapshots.collectAsState(initial = initialOrganization)
+                LaunchedEffect(organizationSnapshot.folders) {
+                    if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+                        organization.runtime.signals.start(organizationSnapshot.folders)
+                }
                 val mostUsedState by builtInMostUsed.state.collectAsState()
                 val mostUsedError by mostUsedStore.error.collectAsState()
                 var mostUsedConfigureRequest by remember { mutableStateOf(0) }
@@ -351,8 +366,19 @@ class MainActivity : ComponentActivity() {
                         homeStateHolder.SaveableStateProvider("home") {
                         key(homeIntentGeneration) {
                             val homeListState = rememberLazyListState()
-                            HomeScreen(
+                            OrganizationHomeScreen(
                                 catalog = visibleCatalog,
+                                runtime = organization.runtime,
+                                snapshot = organizationSnapshot,
+                                mostUsedEnabled = mostUsedSettings.enabled,
+                                hiddenKeys = appCatalog.apps.filter { appCustomizations.isHidden(it.key) }.mapTo(HashSet()) { it.key },
+                                sorterController = organization.sorter,
+                                onExitSorter = organization::exitSorter,
+                                onStartSorter = { left, right ->
+                                    homeSearchQuery = ""
+                                    organization.startSorter(organizationSnapshot, visibleCatalog.apps, left, right)
+                                },
+                                homeResetToken = homeIntentGeneration,
                                 orderedApps = visibleOrderedApps.takeIf { customHomeOrderActive && !mostUsedSettings.enabled },
                                 showAppIcons = homeAppearance.showAppIcons,
                                 wallpaperMode = wallpaperActive,
@@ -444,6 +470,17 @@ class MainActivity : ComponentActivity() {
 
                         ModularApp(
                             coreFeaturesContent = {
+                                OrganizationSettingsHost(
+                                    snapshot = organizationSnapshot,
+                                    catalog = visibleCatalog.apps,
+                                    runtime = organization.runtime,
+                                    mostUsedEnabled = mostUsedSettings.enabled,
+                                    onStartSorter = { left, right ->
+                                        homeSearchQuery = ""
+                                        organization.startSorter(organizationSnapshot, visibleCatalog.apps, left, right)
+                                        settingsVisible = false
+                                    },
+                                )
                                 CoreMostUsedSettingsUi(
                                     enabled = mostUsedSettings.enabled,
                                     days = mostUsedSettings.days,
@@ -694,6 +731,7 @@ class MainActivity : ComponentActivity() {
             settingsVisible = false
             selectedModuleComponent = null
             homeSearchQuery = ""
+            if (::organization.isInitialized) organization.exitSorter()
             homeIntentGeneration++
         }
     }
@@ -710,6 +748,15 @@ class MainActivity : ComponentActivity() {
         // reconciles a cold-start cache; returning Home does not need a full scan.
         if (::homeFeaturedController.isInitialized) homeFeaturedController.refresh()
         if (::builtInMostUsed.isInitialized) builtInMostUsed.refresh()
+        if (::organization.isInitialized) lifecycleScope.launch {
+            val folders = organization.store.currentSnapshot().folders
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) organization.runtime.signals.start(folders)
+        }
+    }
+
+    override fun onPause() {
+        if (::organization.isInitialized) organization.runtime.signals.stop()
+        super.onPause()
     }
 
     private fun openCoreUsageAccess() {

@@ -1,8 +1,9 @@
 # Categories, folders, and Mega Sorter implementation plan
 
-Status: **Planning only; no application implementation in this change.**
+Status: **Implementation authorized and integrated in the feature branch; acceptance in progress.**
 Date: 2026-11-08. Product contract:
 [Categories, popup folders, and Mega Sorter](../product/categories-folders-mega-sorter.md).
+Current evidence and device checks: [acceptance record](category-validation.md).
 
 ## 1. Verified baseline and impact
 
@@ -85,6 +86,15 @@ not erase settings to recover from malformed data. Define and test sensible
 documented bounds before implementation review, including the existing shared
 50-pin limit. Version disposable category metadata caches separately from durable
 manual choices. No new backup inclusion for learned usage is permitted.
+
+The C1 organization store enforces these bounds: 2 MiB encoded organization
+document; 64 total categories including built-ins; 128 folders; 2,000 ordered
+members per folder; 20,000 distinct app/category membership pairs; 60 Unicode
+code points per category or folder name; 128 characters per ID; 16 condition
+references per folder; and 50 shared app/folder pins. Names are trimmed,
+nonblank, and unique within their own category or folder namespace using the
+device locale's primary-strength collation. Invalid edits fail atomically with
+an error; malformed stored data retains the last validated snapshot.
 Sensitive saved places and network names use immutable versioned records in
 private `noBackupFilesDir` storage; the transactional organization document holds
 opaque references. Do not claim atomic DataStore commits across two files. Stage
@@ -241,13 +251,12 @@ Owner: coordinator/integration agent; separate review agent checks the diff.
   and prepare the user-authorized Google review/appeal; ordinary Android
   restricted settings are a separate mechanism.
 
-## 4. Specification validation now
+## 4. Validation and release gate
 
-This change contains Markdown only. Check local links, requirement IDs,
-cross-document precedence, research sources and consistency of proposed defaults.
-No new Android tests or APK are needed to validate this draft, and no application
-test-pass claim follows from documentation review.
-
-Implementation starts only as the next requested work, with the draft defaults
-made explicit in the implementation brief. Keep any unresolved product choice
-visible; do not silently interpret an implementation detail as user approval.
+The user authorized implementation on 2026-11-08. C1, C2, C3, C3b and C4 have
+implementations and targeted tests in this branch. C5 requires local builds/lint,
+CI emulator regression and screenshot evidence, plus physical Samsung testing
+for location/headset/Wi-Fi, battery and gesture behavior. Record actual results
+in the acceptance record. Do not infer physical-device acceptance from a compile
+or a documentation check. Online metadata providers, background geofencing and
+the optional recommendations remain outside the implementation scope.

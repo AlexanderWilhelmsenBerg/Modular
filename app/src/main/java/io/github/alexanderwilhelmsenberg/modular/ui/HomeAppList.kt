@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
+import io.github.alexanderwilhelmsenberg.modular.organization.FolderDefinition
 
 internal sealed interface HomeListEntry {
     val id: String
@@ -43,6 +44,8 @@ internal sealed interface HomeListEntry {
         override val id = (if (featured) "featured:" else "app:") + app.key.stableId
     }
     data class Notice(override val id: String, val message: String) : HomeListEntry
+    data class Folder(val folder: FolderDefinition) : HomeListEntry { override val id = "folder:${folder.id}" }
+    data class PageTitle(val title: String) : HomeListEntry { override val id = "page-title" }
     data object Error : HomeListEntry { override val id = "catalog-error" }
     data object Loading : HomeListEntry { override val id = "catalog-loading" }
     data object Empty : HomeListEntry { override val id = "catalog-empty" }
@@ -80,6 +83,14 @@ internal fun HomeAppList(
     onOpenFeaturedManagement: (() -> Unit)?,
     featuredMessage: String?,
     iconForApp: @Composable (LaunchableApp) -> ImageBitmap?,
+    onOrganizeApp: ((LaunchableApp) -> Unit)? = null,
+    onOpenFolder: (FolderDefinition) -> Unit = {},
+    onEditFolder: (FolderDefinition) -> Unit = {},
+    onFolderPress: (Boolean) -> Unit = {},
+    onFolderBounds: (String, androidx.compose.ui.unit.IntRect) -> Unit = { _, _ -> },
+    onAddCategoryApps: (() -> Unit)? = null,
+    onStartCategorySorter: (() -> Unit)? = null,
+    appRowContent: (@Composable (LaunchableApp, @Composable () -> Unit) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val foreground = if (wallpaperMode) Color.White else MaterialTheme.colorScheme.onSurface
@@ -101,7 +112,7 @@ internal fun HomeAppList(
                     val app = entry.app
                     val quiet = app.key.profileSerial in pausedProfiles
                     val icon = if (showIcons) iconForApp(app) else null
-                    HomeAppRow(
+                    val row: @Composable () -> Unit = { HomeAppRow(
                         app = app,
                         enabled = app.enabled && !quiet,
                         unavailabilityReason = if (quiet) "Profile paused" else null,
@@ -114,9 +125,13 @@ internal fun HomeAppList(
                         onUninstallApp = onUninstallApp,
                         onRenameApp = onRenameApp,
                         onHideApp = onHideApp,
+                        onOrganizeApp = onOrganizeApp,
                         onClick = { onLaunch(app) },
-                    )
+                    ) }
+                    if (appRowContent != null) appRowContent(app, row) else row()
                 }
+                is HomeListEntry.Folder -> FolderShortcut(entry.folder, wallpaperMode, onOpenFolder, onEditFolder, onFolderPress, onFolderBounds)
+                is HomeListEntry.PageTitle -> Text(entry.title, Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), color = foreground, style = MaterialTheme.typography.titleLarge)
                 is HomeListEntry.Notice -> Text(entry.message, Modifier.fillMaxWidth().padding(16.dp).semantics { liveRegion = LiveRegionMode.Polite }, color = foreground.copy(alpha = 0.7f), style = MaterialTheme.typography.bodyMedium)
                 HomeListEntry.Error -> Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Text("Apps could not be loaded", color = foreground, style = MaterialTheme.typography.titleMedium)
@@ -124,7 +139,11 @@ internal fun HomeAppList(
                     Button(onClick = onRefresh, modifier = Modifier.testTag("home-retry").semantics { contentDescription = "Retry loading apps" }) { Text("Retry") }
                 }
                 HomeListEntry.Loading -> Column(Modifier.fillMaxWidth().padding(24.dp)) { CircularProgressIndicator(); Text("Loading apps…", color = foreground) }
-                HomeListEntry.Empty -> Text("No apps available", Modifier.fillMaxWidth().padding(24.dp), color = foreground)
+                HomeListEntry.Empty -> Column(Modifier.fillMaxWidth().padding(24.dp)) {
+                    Text("No apps available", color = foreground)
+                    if (onAddCategoryApps != null) Button(onClick = onAddCategoryApps) { Text("Add apps") }
+                    if (onStartCategorySorter != null) Button(onClick = onStartCategorySorter) { Text("Start Mega Sorter") }
+                }
                 HomeListEntry.NoResults -> Text("No matching apps", Modifier.fillMaxWidth().padding(24.dp), color = foreground)
                 HomeListEntry.FeaturedEmpty -> Column(Modifier.fillMaxWidth().padding(start = 52.dp, end = 56.dp, top = 8.dp, bottom = 20.dp)) {
                     Text(featuredMessage ?: "Pin apps to show them here", color = foreground)

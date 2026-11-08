@@ -10,6 +10,9 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.AppRepository
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.model.FeaturedAppsResultParcel
+import io.github.alexanderwilhelmsenberg.modular.organization.BuiltInCategories
+import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationSnapshot
+import android.content.pm.ApplicationInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -97,6 +100,50 @@ class BuiltInMostUsedControllerTest {
         advanceUntilIdle()
         assertEquals(listOf(second, first), controller.state.value.featuredApps.map { it.key })
         assertEquals(listOf("Aaa", "Zed"), controller.state.value.featuredApps.map { it.label })
+    }
+
+    @Test fun categorySuppressionPrecedesSuggestionLimitAndRetainsPins() = runTest {
+        val third = AppKey("three.app", "Main", 1)
+        val fourth = AppKey("four.app", "Main", 1)
+        val memory = MemoryPreferences()
+        val store = MostUsedSettingsStore(memory)
+        store.setEnabled(true).getOrThrow()
+        store.setSource(MostUsedSource.ANDROID).getOrThrow()
+        store.setSuggestedCount(1).getOrThrow()
+        store.setPinned(first, true, setOf(first, second, third, fourth)).getOrThrow()
+        val categories = BuiltInCategories.defaults.map { category ->
+            if (category.id == BuiltInCategories.GAMES) category.copy(enabled = true, showOnHome = false)
+            else category
+        }
+        val organization = MutableStateFlow(OrganizationSnapshot(
+            categoriesEnabled = true, categories = categories))
+        val repository = FakeRepository(listOf(
+            app(first).copy(androidCategory = ApplicationInfo.CATEGORY_GAME),
+            app(second).copy(androidCategory = ApplicationInfo.CATEGORY_GAME),
+            app(third), app(fourth),
+        ))
+        val usage = FakeUsage(weights = mapOf(
+            first.packageName to 1_000L, second.packageName to 500L,
+            third.packageName to 50L, fourth.packageName to 5L,
+        ))
+        val controller = BuiltInMostUsedController(repository, store, usage, controllerScope(),
+            StandardTestDispatcher(testScheduler), organization = organization)
+        advanceUntilIdle()
+        // The high-ranked excluded game does not consume the single suggestion slot.
+        assertEquals(listOf(third), controller.state.value.featuredApps.map { it.key })
+        assertEquals(listOf(first), store.currentSettings().pinnedKeys)
+        assertEquals(listOf(first), controller.state.value.pinnedKeys)
+
+        organization.value = organization.value.copy(categories = categories.map { category ->
+            if (category.id == BuiltInCategories.GAMES) category.copy(enabled = false) else category
+        })
+        advanceUntilIdle()
+        assertEquals(listOf(first, second), controller.state.value.featuredApps.map { it.key })
+        assertEquals(listOf(first), store.currentSettings().pinnedKeys)
+
+        organization.value = organization.value.copy(categoriesEnabled = false, categories = categories)
+        advanceUntilIdle()
+        assertEquals(listOf(first, second), controller.state.value.featuredApps.map { it.key })
     }
 
     @Test fun unavailablePinsRemainOrderedAndCannotBeNewlyAdded() = runTest {

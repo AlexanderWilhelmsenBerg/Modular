@@ -15,6 +15,8 @@ data class LaunchableApp(
     val firstInstallTime: Long,
     val enabled: Boolean,
     val loadingProgress: Float?,
+    /** Null means the cached metadata is unknown until LauncherApps reconciles it. */
+    val androidCategory: Int? = null,
 )
 
 data class AppProfile(

@@ -41,6 +41,8 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.apps.rememberAppIcon
 import io.github.alexanderwilhelmsenberg.modular.appearance.WallpaperHomeScrim
+import io.github.alexanderwilhelmsenberg.modular.organization.FolderDefinition
+import io.github.alexanderwilhelmsenberg.modular.organization.HomePinRef
 
 @Composable
 fun HomeScreen(
@@ -70,11 +72,25 @@ fun HomeScreen(
     onHideApp: ((LaunchableApp) -> Unit)? = null,
     alphabeticalSections: Boolean = true,
     homeResetToken: Int = 0,
+    searchApps: List<LaunchableApp> = catalog.apps,
+    pageTitle: String? = null,
+    folders: List<FolderDefinition> = emptyList(),
+    featuredFolders: List<FolderDefinition> = emptyList(),
+    featuredPinOrder: List<HomePinRef> = emptyList(),
+    onOpenFolder: (FolderDefinition) -> Unit = {},
+    onEditFolder: (FolderDefinition) -> Unit = {},
+    onFolderPress: (Boolean) -> Unit = {},
+    onFolderBounds: (String, androidx.compose.ui.unit.IntRect) -> Unit = { _, _ -> },
+    onOrganizeApp: ((LaunchableApp) -> Unit)? = null,
+    onEditingChange: (Boolean) -> Unit = {},
+    onAddCategoryApps: (() -> Unit)? = null,
+    onStartCategorySorter: (() -> Unit)? = null,
+    appRowContent: (@Composable (LaunchableApp, @Composable () -> Unit) -> Unit)? = null,
     iconForApp: @Composable (LaunchableApp) -> ImageBitmap? = { rememberAppIcon(it) },
 ) {
     val locale = LocalConfiguration.current.locales[0]
     val normalApps = remember(catalog.apps, orderedApps, locale) { homeOrderedApps(catalog.apps, orderedApps, locale) }
-    val alphabeticalApps = remember(catalog.apps, locale) { homeOrderedApps(catalog.apps, null, locale) }
+    val alphabeticalApps = remember(searchApps, locale) { homeOrderedApps(searchApps, null, locale) }
     var localQuery by rememberSaveable { mutableStateOf("") }
     val query = searchQuery ?: localQuery
     val searching = query.isNotBlank()
@@ -92,18 +108,28 @@ fun HomeScreen(
     val sections = remember(visibleApps, sectionBuilder, useSections) {
         if (useSections) sectionBuilder.sections(visibleApps) else emptyList()
     }
-    val entries = remember(sections, visibleApps, safeFeatured, featuredMessage, featuredNeedsPermission, searching, useSections, hasPausedProfileApps, catalog.isRefreshing, catalog.lastError, showMakeDefault) {
+    val entries = remember(sections, visibleApps, safeFeatured, featuredMessage, featuredNeedsPermission, searching, useSections, hasPausedProfileApps, catalog.isRefreshing, catalog.lastError, showMakeDefault, folders, featuredFolders, featuredPinOrder, pageTitle) {
         buildList {
+            if (!searching && pageTitle != null) add(HomeListEntry.PageTitle(pageTitle))
             if (hasPausedProfileApps) add(HomeListEntry.Notice("paused-profile-notice", "Some apps are unavailable while a profile is paused."))
             if (catalog.lastError != null) add(HomeListEntry.Error)
             if (catalog.isRefreshing && normalApps.isEmpty() && catalog.lastError == null) add(HomeListEntry.Loading)
-            else if (normalApps.isEmpty() && catalog.lastError == null) add(HomeListEntry.Empty)
+            else if (!searching && normalApps.isEmpty() && catalog.lastError == null) add(HomeListEntry.Empty)
             else if (visibleApps.isEmpty() && searching && catalog.lastError == null) add(HomeListEntry.NoResults)
-            if (!searching && safeFeatured != null) {
+            if (!searching && (safeFeatured != null || featuredFolders.isNotEmpty())) {
                 add(HomeListEntry.Header("★"))
-                if (safeFeatured.isEmpty()) add(HomeListEntry.FeaturedEmpty)
+                if (safeFeatured.isNullOrEmpty() && featuredFolders.isEmpty()) add(HomeListEntry.FeaturedEmpty)
                 else {
-                    safeFeatured.forEach { add(HomeListEntry.App(it, featured = true)) }
+                    val appPins = safeFeatured.orEmpty().associateBy { it.key }
+                    val folderPins = featuredFolders.associateBy { it.id }
+                    val emittedApps = mutableSetOf<AppKey>()
+                    val emittedFolders = mutableSetOf<String>()
+                    featuredPinOrder.forEach { pin -> when (pin) {
+                        is HomePinRef.App -> appPins[pin.key]?.let { if (emittedApps.add(it.key)) add(HomeListEntry.App(it, featured = true)) }
+                        is HomePinRef.Folder -> folderPins[pin.id]?.let { if (emittedFolders.add(it.id)) add(HomeListEntry.Folder(it)) }
+                    } }
+                    featuredFolders.filter { it.id !in emittedFolders }.forEach { add(HomeListEntry.Folder(it)) }
+                    safeFeatured.orEmpty().filter { it.key !in emittedApps }.forEach { add(HomeListEntry.App(it, featured = true)) }
                     if (!featuredMessage.isNullOrBlank() || featuredNeedsPermission) add(HomeListEntry.FeaturedStatus)
                 }
             }
@@ -111,14 +137,19 @@ fun HomeScreen(
                 add(HomeListEntry.Header(section.label))
                 section.apps.forEach { add(HomeListEntry.App(it)) }
             } else visibleApps.forEach { add(HomeListEntry.App(it)) }
+            if (!searching && folders.isNotEmpty()) {
+                add(HomeListEntry.Header("Folders"))
+                folders.forEach { add(HomeListEntry.Folder(it)) }
+            }
             add(HomeListEntry.Actions)
         }
     }
     var anchorableEntries by remember { mutableStateOf(entries) }
     SideEffect { if (!searching) anchorableEntries = entries }
     val headerIndices = remember(entries) { entries.mapIndexedNotNull { i, entry -> (entry as? HomeListEntry.Header)?.let { it.label to i + 1 } }.toMap() }
-    val alphabet = remember(sections, safeFeatured) {
-        (if (safeFeatured != null) listOf("★") else emptyList()) + sections.map { it.label }
+    val alphabet = remember(sections, safeFeatured, featuredFolders, folders) {
+        (if (safeFeatured != null || featuredFolders.isNotEmpty()) listOf("★") else emptyList()) + sections.map { it.label } +
+            (if (folders.isNotEmpty()) listOf("◇") else emptyList())
     }
     val reachability = rememberSaveable(saver = Saver(save = { it.offsetPx }, restore = { HomeReachabilityState(it) })) { HomeReachabilityState() }
     val density = LocalDensity.current
@@ -207,7 +238,7 @@ fun HomeScreen(
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
-    fun endEditing() { editing = false; keyboard?.hide(); focusManager.clearFocus() }
+    fun endEditing() { editing = false; onEditingChange(false); keyboard?.hide(); focusManager.clearFocus() }
     BackHandler(enabled = editing) { endEditing() }
 
     Box(Modifier.fillMaxSize().background(if (wallpaperMode) Color.Transparent else MaterialTheme.colorScheme.background)) {
@@ -225,11 +256,19 @@ fun HomeScreen(
                     showIcons = showAppIcons,
                     wallpaperMode = wallpaperMode,
                     pinnedKeys = pinnedAppKeys,
-                    onPinApp = onPinApp.takeIf { safeFeatured != null },
+                    onPinApp = onPinApp,
                     onAppInfo = onAppInfo,
                     onUninstallApp = onUninstallApp,
                     onRenameApp = onRenameApp,
                     onHideApp = onHideApp,
+                    onOrganizeApp = onOrganizeApp,
+                    onOpenFolder = onOpenFolder,
+                    onEditFolder = onEditFolder,
+                    onFolderPress = onFolderPress,
+                    onFolderBounds = onFolderBounds,
+                    onAddCategoryApps = onAddCategoryApps,
+                    onStartCategorySorter = onStartCategorySorter,
+                    appRowContent = appRowContent,
                     onLaunch = { endEditing(); onLaunch(it) },
                     onRefresh = onRefresh,
                     onMakeDefault = onMakeDefault,
@@ -242,10 +281,10 @@ fun HomeScreen(
                     featuredMessage = featuredMessage,
                     iconForApp = iconForApp,
                 )
-                if (useSections && normalApps.isNotEmpty()) AlphabetRail(
+                if (useSections && alphabet.isNotEmpty()) AlphabetRail(
                     alphabet = alphabet,
-                    populated = headerIndices.keys,
-                    onSelect = { label -> jumpSerial += 1; jump = label to jumpSerial },
+                    populated = headerIndices.keys + if ("Folders" in headerIndices) setOf("◇") else emptySet(),
+                    onSelect = { label -> jumpSerial += 1; jump = (if (label == "◇") "Folders" else label) to jumpSerial },
                     wallpaperMode = wallpaperMode,
                     modifier = Modifier.align(AbsoluteAlignment.BottomRight),
                 )
@@ -255,7 +294,7 @@ fun HomeScreen(
                     query = query,
                     onQueryChange = updateQuery,
                     focusRequester = focusRequester,
-                    onEditingChange = { editing = it },
+                    onEditingChange = { editing = it; onEditingChange(it) },
                     onSearchAction = { endEditing() },
                     onOpenSettings = { endEditing(); onOpenSettings() },
                     wallpaperMode = wallpaperMode,

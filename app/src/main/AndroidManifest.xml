@@ -22,6 +22,10 @@
         <intent>
             <action android:name="io.github.alexanderwilhelmsenberg.modular.action.MODULE" />
         </intent>
+        <!-- Widget-only apps may not expose a launcher Activity. -->
+        <intent>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent>
     </queries>
 
     <application

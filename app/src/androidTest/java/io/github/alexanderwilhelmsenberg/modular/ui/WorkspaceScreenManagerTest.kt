@@ -46,10 +46,10 @@ class WorkspaceScreenManagerTest {
             val page = created.workspacePages.single { it.name == name }
             createdId = page.id
             assertTrue(created.pageOrder.indexOf(HomePageId.Widget(page.id)) < created.pageOrder.indexOf(HomePageId.Home))
-            rule.onNodeWithTag("workspace-tile:widget:${page.id}").assertIsDisplayed()
+            rule.onNodeWithTag("workspace-tile:widget:${page.id}").performScrollTo().assertIsDisplayed()
 
-            rule.onNodeWithText("Delete").performClick()
-            rule.onNodeWithText("Delete screen").performClick()
+            rule.onNodeWithText("Delete").performScrollTo().assertIsDisplayed().performClick()
+            rule.onNodeWithText("Delete screen").assertIsDisplayed().performClick()
             rule.waitUntil(15_000) {
                 runBlocking { store.currentSnapshot().workspacePages.none { it.id == page.id } }
             }

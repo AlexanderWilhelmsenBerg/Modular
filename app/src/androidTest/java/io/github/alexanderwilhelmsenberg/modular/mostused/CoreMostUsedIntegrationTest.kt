@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -45,11 +46,11 @@ class CoreMostUsedIntegrationTest {
             waitToggle(ToggleableState.On)
             rule.onNodeWithTag("settings-back").performClick()
             rule.onNodeWithTag("settings-back").performClick()
-            rule.waitUntil(10_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithTag("section:★").assertIsDisplayed()
+            rule.waitUntil(10_000) { rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("Most Used").assertIsDisplayed()
             rule.activityRule.scenario.recreate()
-            rule.waitUntil(15_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithTag("section:★").assertIsDisplayed()
+            rule.waitUntil(15_000) { rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("Most Used").assertIsDisplayed()
             rule.onNodeWithTag("home-settings").performClick()
             rule.onNodeWithTag("settings-open-productivity").performClick()
             waitToggle(ToggleableState.On)
@@ -57,7 +58,7 @@ class CoreMostUsedIntegrationTest {
             waitToggle(ToggleableState.Off)
             rule.onNodeWithTag("settings-back").performClick()
             rule.onNodeWithTag("settings-back").performClick()
-            rule.onNodeWithTag("section:★").assertDoesNotExist()
+            rule.onNodeWithText("Most Used").assertDoesNotExist()
             rule.onNodeWithTag("home-search").assertIsDisplayed()
         } finally {
             store.setSuggestedCount(original.suggestedCount).getOrThrow()
@@ -82,11 +83,10 @@ class CoreMostUsedIntegrationTest {
             store.setSource(MostUsedSource.LOCAL).getOrThrow()
             store.setSuggestedCount(1).getOrThrow()
             store.setEnabled(true).getOrThrow()
-            // Enabling while Home is visible preserves the current LazyColumn anchor.
-            // Wait for the non-lazy rail, then reveal the newly inserted star section.
-            rule.waitUntil(15_000) { rule.onAllNodesWithTag("rail:★").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithTag("home-list").performScrollToIndex(0)
-            rule.waitUntil(15_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
+            // Most Used now lives in the workspace stack above All apps.
+            rule.waitUntil(15_000) { rule.onAllNodesWithTag("workspace-home").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithTag("workspace-home").performScrollToIndex(0)
+            rule.waitUntil(15_000) { rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithTag("featured-permission").assertDoesNotExist()
             rule.onNodeWithTag("home-search-field").performTextInput(fixture.packageName)
             rule.waitUntil(10_000) { rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty() }
@@ -102,14 +102,14 @@ class CoreMostUsedIntegrationTest {
             rule.waitUntil(15_000) { rule.activityRule.scenario.state == Lifecycle.State.RESUMED }
             rule.onNodeWithTag("home-search-field").performTextClearance()
             rule.waitUntil(15_000) {
-                rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() &&
+                rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() &&
                     rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty()
             }
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("featured-permission").assertDoesNotExist()
             rule.activityRule.scenario.recreate()
             rule.waitUntil(15_000) { rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithTag("section:★").assertIsDisplayed()
+            rule.onNodeWithText("Most Used").assertIsDisplayed()
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("home-settings").performClick()
             rule.onNodeWithTag("settings-open-productivity").performClick()

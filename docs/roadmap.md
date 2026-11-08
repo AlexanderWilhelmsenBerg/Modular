@@ -107,6 +107,12 @@ settings requirements and no submission has been made by this specification chan
 
 ## Phase 2 — Module UX and richer composition
 
+The intervening [Home workspace v1](product/home-workspace-v1.md) Core update is
+authorized: stacked widgets, a landing Home above All apps, unified screen order,
+and headset-triggered Listening apps. Track implementation and device evidence in
+[workspace acceptance](implementation/home-workspace-validation.md). The external
+add-on page schema remains a later part of Phase 2.
+
 - richer nested schemas and configuration controls beyond the implemented flat fields.
 - bounded external surface protocol and optional alternative Home/Drawer modules.
 - additional favorites/grouping providers and alternative layouts beyond phase 1e.

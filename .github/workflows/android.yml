@@ -167,7 +167,7 @@ jobs:
             gradle :addon-most-used:connectedDebugAndroidTest :reference-sort-alphabetical:connectedDebugAndroidTest --stacktrace
             adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
             adb install -r addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
-            gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; mkdir -p build/ui-screenshots/home-v2 build/ui-screenshots/organization build/ui-screenshots/settings; adb pull /sdcard/Pictures/ModularHomeV2/. build/ui-screenshots/home-v2/ || true; adb pull /sdcard/Pictures/ModularOrganization/. build/ui-screenshots/organization/ || true; adb pull /sdcard/Pictures/ModularSettings/. build/ui-screenshots/settings/ || true; exit 1; }
+            gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; mkdir -p build/ui-screenshots/home-v2 build/ui-screenshots/organization build/ui-screenshots/settings build/ui-screenshots/workspace; adb pull /sdcard/Pictures/ModularHomeV2/. build/ui-screenshots/home-v2/ || true; adb pull /sdcard/Pictures/ModularOrganization/. build/ui-screenshots/organization/ || true; adb pull /sdcard/Pictures/ModularSettings/. build/ui-screenshots/settings/ || true; adb pull /sdcard/Pictures/ModularWorkspace/. build/ui-screenshots/workspace/ || true; exit 1; }
 
             mkdir -p build/ui-screenshots/organization
             adb pull /sdcard/Pictures/ModularOrganization/. build/ui-screenshots/organization/
@@ -179,6 +179,7 @@ jobs:
             adb shell cmd package set-home-activity io.github.alexanderwilhelmsenberg.modular.debug/io.github.alexanderwilhelmsenberg.modular.MainActivity
             adb shell am force-stop com.google.android.apps.nexuslauncher
             python3 scripts/capture-home-v2.py
+            python3 scripts/capture-workspace.py
             python3 scripts/capture-settings.py
 
             adb install -r reference-sort-alphabetical/build/outputs/apk/release/reference-sort-alphabetical-release.apk

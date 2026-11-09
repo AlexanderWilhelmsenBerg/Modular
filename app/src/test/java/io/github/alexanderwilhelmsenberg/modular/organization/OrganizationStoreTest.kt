@@ -9,10 +9,19 @@ import io.github.alexanderwilhelmsenberg.modular.mostused.MostUsedSettingsStore
 import io.github.alexanderwilhelmsenberg.modular.mostused.SavedAppKey
 import io.github.alexanderwilhelmsenberg.modular.mostused.SavedSettings
 import io.github.alexanderwilhelmsenberg.modular.mostused.encodeMostUsedSettings
+import io.github.alexanderwilhelmsenberg.modular.workspace.ListeningPreferences
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePage
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePageId
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePreferences
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceSection
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -169,6 +178,134 @@ class OrganizationStoreTest {
         assertEquals("future-icon", after.folders.single().iconId)
         assertEquals(listOf(a), after.folders.single().members)
         assertTrue(after.categories.any { it.id == "custom" && it.name == "Renamed" })
+    }
+
+    @Test fun versionOneOrganizationMigratesWithoutChangingLegacyPageOrder() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        val before = store.update(OrganizationBatch(listOf(
+            OrganizationEdit.CreateCategory(CategoryDefinition("widget:legacy", "Legacy", builtIn = false)),
+            OrganizationEdit.SetCategoriesEnabled(true),
+        ))).getOrThrow()
+        val key = "organization_json_v1"
+        val saved = Json.parseToJsonElement(requireNotNull(memory.raw(key))) as JsonObject
+        val versionOne = JsonObject(saved.filterKeys { it !in setOf(
+            "workspacePages", "workspacePreferences", "widgets", "listeningPreferences") } +
+            ("version" to JsonPrimitive(1))).toString()
+        memory.setRaw(key, JsonObject((Json.parseToJsonElement(versionOne) as JsonObject)
+            .filterKeys { it != "version" }).toString())
+        assertEquals(before.pageOrder, OrganizationStore(memory).currentSnapshot().pageOrder)
+        memory.setRaw(key, versionOne)
+
+        val migrated = OrganizationStore(memory)
+        assertEquals(before.pageOrder, migrated.currentSnapshot().pageOrder)
+        assertEquals(HomePageId.Category("widget:legacy"), migrated.currentSnapshot().pageOrder[1])
+        migrated.update(OrganizationBatch(listOf(
+            OrganizationEdit.SetWorkspacePreferences(WorkspacePreferences(showBattery = true)),
+        ))).getOrThrow()
+        assertTrue(requireNotNull(memory.raw(key)).contains("\"version\":2"))
+        assertTrue(OrganizationStore(memory).currentSnapshot().workspacePreferences.showBattery)
+    }
+
+    @Test fun workspacePagesAndWidgetsRoundTripAndPageDeletionRemovesOnlyOwnedWidgets() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        val homeWidget = WorkspaceWidget(1, WorkspacePageId.HOME, "example.home/.Widget", 180,
+            hostToken = "device-local-host-a")
+        val pageWidget = WorkspaceWidget(2, WorkspacePageId.widget("tools"), "example.tools/.Widget", 240,
+            hostToken = "device-local-host-a")
+        val preferences = WorkspacePreferences(sectionOrder = listOf(
+            WorkspaceSection.WIDGETS, WorkspaceSection.CLOCK, WorkspaceSection.MOST_USED,
+            WorkspaceSection.LISTENING))
+        val startingRevision = store.currentSnapshot().revision
+        store.update(OrganizationBatch(listOf(
+            OrganizationEdit.CreateWorkspacePage(WorkspacePage("tools", "Tools")),
+            OrganizationEdit.SetWidgets(listOf(homeWidget, pageWidget)),
+            OrganizationEdit.SetWorkspacePreferences(preferences),
+            OrganizationEdit.SetListeningPreferences(ListeningPreferences(true, HeadsetKind.USB, listOf(a, b))),
+        ), expectedRevision = startingRevision)).getOrThrow()
+        val restored = OrganizationStore(memory).currentSnapshot()
+        assertEquals(listOf(homeWidget, pageWidget), restored.widgets)
+        assertTrue(requireNotNull(memory.raw("organization_json_v1"))
+            .contains("\"hostToken\":\"device-local-host-a\""))
+        assertEquals(preferences, restored.workspacePreferences)
+        assertEquals(listOf(a, b), restored.listeningPreferences.apps)
+        assertTrue(HomePageId.Widget("tools") in restored.visiblePageOrder())
+
+        val categoriesOff = store.update(OrganizationBatch(listOf(
+            OrganizationEdit.SetCategoriesEnabled(false),
+        ))).getOrThrow()
+        assertTrue(HomePageId.Widget("tools") in categoriesOff.visiblePageOrder())
+
+        store.update(OrganizationBatch(listOf(
+            OrganizationEdit.DeleteWorkspacePage("tools"),
+        ))).getOrThrow()
+        val deleted = OrganizationStore(memory).currentSnapshot()
+        assertEquals(listOf(HomePageId.Home), deleted.visiblePageOrder())
+        assertEquals(listOf(homeWidget), deleted.widgets)
+        assertEquals(listOf(a, b), deleted.listeningPreferences.apps)
+    }
+
+    @Test fun invalidWidgetUpdateIsAtomicAndExistingPlacementsRemain() = runBlocking {
+        val store = OrganizationStore(MemoryPreferences())
+        val good = WorkspaceWidget(1, WorkspacePageId.HOME, "example.home/.Widget", 180)
+        store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(listOf(good))),
+            expectedRevision = store.currentSnapshot().revision)).getOrThrow()
+        val before = store.currentSnapshot()
+        assertTrue(store.update(OrganizationBatch(listOf(
+            OrganizationEdit.CreateWorkspacePage(WorkspacePage("tools", "Tools")),
+            OrganizationEdit.SetWidgets(listOf(good, good.copy(appWidgetId = 2, pageId = "widget:missing"))),
+        ), expectedRevision = before.revision)).isFailure)
+        assertEquals(before, store.currentSnapshot())
+    }
+
+    @Test fun staleWidgetLayoutCannotReplaceConcurrentWidget() = runBlocking {
+        val memory = MemoryPreferences()
+        val first = OrganizationStore(memory)
+        val second = OrganizationStore(memory)
+        val stale = first.currentSnapshot()
+        val added = WorkspaceWidget(1, WorkspacePageId.HOME, "example.home/.Widget", 180)
+        second.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(listOf(added))),
+            expectedRevision = stale.revision)).getOrThrow()
+
+        val replacement = WorkspaceWidget(2, WorkspacePageId.HOME, "example.other/.Widget", 180)
+        assertTrue(first.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(listOf(replacement))),
+            expectedRevision = stale.revision)).isFailure)
+        assertEquals(listOf(added), first.currentSnapshot().widgets)
+        assertTrue(first.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(listOf(replacement))))).isFailure)
+    }
+
+    @Test fun widgetHostTokenIsBoundedAndLegacyPlacementLoads() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        val placement = WorkspaceWidget(1, WorkspacePageId.HOME, "example.home/.Widget", 180,
+            hostToken = "original-host")
+        store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(listOf(placement))),
+            expectedRevision = store.currentSnapshot().revision)).getOrThrow()
+        val saved = requireNotNull(memory.raw("organization_json_v1"))
+        memory.setRaw("organization_json_v1", saved.replace(",\"hostToken\":\"original-host\"", ""))
+        val legacy = OrganizationStore(memory).currentSnapshot()
+        assertEquals("", legacy.widgets.single().hostToken)
+        assertTrue(store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(listOf(
+            placement.copy(hostToken = "x".repeat(129))))),
+            expectedRevision = legacy.revision)).isFailure)
+        assertEquals("", OrganizationStore(memory).currentSnapshot().widgets.single().hostToken)
+    }
+
+    @Test fun unsupportedWorkspaceVersionKeepsLastGoodWithoutResettingStorage() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        store.update(OrganizationBatch(listOf(OrganizationEdit.SetCategoriesEnabled(true)))).getOrThrow()
+        val good = store.currentSnapshot()
+        val raw = requireNotNull(memory.raw("organization_json_v1"))
+        val unsupported = raw.replace("\"version\":2", "\"version\":99")
+        memory.setRaw("organization_json_v1", unsupported)
+        assertTrue(store.update(OrganizationBatch(listOf(
+            OrganizationEdit.SetWorkspacePreferences(WorkspacePreferences(showBattery = true)),
+        ))).isFailure)
+        assertFalse(store.error.value.isNullOrEmpty())
+        assertEquals(unsupported, memory.raw("organization_json_v1"))
+        assertEquals(good, store.snapshots.first())
     }
 
     private class MemoryPreferences : DataStore<Preferences> {

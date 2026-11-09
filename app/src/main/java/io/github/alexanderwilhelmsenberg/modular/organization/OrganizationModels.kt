@@ -1,6 +1,10 @@
 package io.github.alexanderwilhelmsenberg.modular.organization
 
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
+import io.github.alexanderwilhelmsenberg.modular.workspace.ListeningPreferences
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePage
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePreferences
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
 
 /** IDs are stable storage keys. Names are presentation only. */
 object BuiltInCategories {
@@ -54,6 +58,7 @@ data class FolderDefinition(
 sealed interface HomePageId {
     data object Home : HomePageId
     data class Category(val id: String) : HomePageId
+    data class Widget(val id: String) : HomePageId
 }
 
 sealed interface HomePinRef {
@@ -76,15 +81,22 @@ data class OrganizationSnapshot(
     val membershipTokens: Map<MembershipKey, Long> = emptyMap(),
     val pins: List<HomePinRef> = emptyList(),
     val pinsMigrated: Boolean = false,
+    val workspacePages: List<WorkspacePage> = emptyList(),
+    val workspacePreferences: WorkspacePreferences = WorkspacePreferences(),
+    val widgets: List<WorkspaceWidget> = emptyList(),
+    val listeningPreferences: ListeningPreferences = ListeningPreferences(),
 ) {
     fun overrideFor(categoryId: String, appKey: AppKey): MembershipOverride =
         overrides[MembershipKey(categoryId, appKey)] ?: MembershipOverride.AUTO
 
     fun visiblePageOrder(): List<HomePageId> {
-        if (!categoriesEnabled) return listOf(HomePageId.Home)
         val enabled = categories.filter { it.enabled }.mapTo(HashSet()) { it.id }
-        return pageOrder.filter { it == HomePageId.Home ||
-            it is HomePageId.Category && it.id in enabled }
+        val enabledWidgets = workspacePages.filter { it.enabled }.mapTo(HashSet()) { it.id }
+        return pageOrder.filter { page -> when (page) {
+            HomePageId.Home -> true
+            is HomePageId.Category -> categoriesEnabled && page.id in enabled
+            is HomePageId.Widget -> page.id in enabledWidgets
+        } }
     }
 }
 
@@ -107,6 +119,12 @@ sealed interface OrganizationEdit {
     data class UpdateFolder(val folder: FolderDefinition) : OrganizationEdit
     data class DeleteFolder(val id: String) : OrganizationEdit
     data class SetPins(val order: List<HomePinRef>) : OrganizationEdit
+    data class CreateWorkspacePage(val page: WorkspacePage, val position: Int? = null) : OrganizationEdit
+    data class UpdateWorkspacePage(val page: WorkspacePage) : OrganizationEdit
+    data class DeleteWorkspacePage(val id: String) : OrganizationEdit
+    data class SetWorkspacePreferences(val preferences: WorkspacePreferences) : OrganizationEdit
+    data class SetWidgets(val widgets: List<WorkspaceWidget>) : OrganizationEdit
+    data class SetListeningPreferences(val preferences: ListeningPreferences) : OrganizationEdit
 }
 
 data class MembershipChange(

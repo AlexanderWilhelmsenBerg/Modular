@@ -12,6 +12,12 @@ import io.github.alexanderwilhelmsenberg.modular.mostused.coreMostUsedDataStore
 import io.github.alexanderwilhelmsenberg.modular.mostused.decodeMostUsedSettings
 import io.github.alexanderwilhelmsenberg.modular.mostused.encodeMostUsedSettings
 import io.github.alexanderwilhelmsenberg.modular.mostused.mostUsedSettingsKey
+import io.github.alexanderwilhelmsenberg.modular.workspace.ListeningPreferences
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePage
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePageId
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePreferences
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceSection
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
 import java.text.Collator
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
@@ -28,7 +34,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 private val organizationKey = stringPreferencesKey("organization_json_v1")
-private val json = Json { ignoreUnknownKeys = false }
+private val json = Json { ignoreUnknownKeys = false; encodeDefaults = true }
 
 /** Limits prevent a malformed preference or picker batch from exhausting Home. */
 object OrganizationLimits {
@@ -40,6 +46,11 @@ object OrganizationLimits {
     const val MAX_NAME_CODE_POINTS = 60
     const val MAX_ID_LENGTH = 128
     const val MAX_CONDITIONS_PER_FOLDER = 16
+    const val MAX_WORKSPACE_PAGES = 32
+    const val MAX_WIDGETS = 128
+    const val MAX_LISTENING_APPS = 64
+    const val MIN_WIDGET_HEIGHT_DP = 48
+    const val MAX_WIDGET_HEIGHT_DP = 2_048
 }
 
 /** Shares the single core_most_used DataStore with MostUsedSettingsStore. */
@@ -88,6 +99,9 @@ class OrganizationStore internal constructor(private val dataStore: DataStore<Pr
 
     suspend fun update(batch: OrganizationBatch): Result<OrganizationSnapshot> =
         mutate { current ->
+            require(batch.expectedRevision != null || batch.edits.none { it is OrganizationEdit.SetWidgets }) {
+                "Widget edits require the revision of the layout being changed"
+            }
             require(batch.expectedRevision == null || batch.expectedRevision == current.revision) {
                 "Organization changed; review and retry"
             }
@@ -164,6 +178,7 @@ class OrganizationStore internal constructor(private val dataStore: DataStore<Pr
         is OrganizationEdit.CreateCategory -> {
             val category = edit.category
             require(!category.builtIn && category.id != "home" && category.id !in BuiltInCategories.ids &&
+                state.workspacePages.none { WorkspacePageId.widget(it.id) == category.id } &&
                 state.categories.none { it.id == category.id }) { "Category ID already exists" }
             val order = state.pageOrder.toMutableList()
             val position = edit.position ?: (order.indexOf(HomePageId.Home) + 1)
@@ -231,6 +246,32 @@ class OrganizationStore internal constructor(private val dataStore: DataStore<Pr
             }
             state.copy(pins = edit.order)
         }
+        is OrganizationEdit.CreateWorkspacePage -> {
+            require(state.workspacePages.none { it.id == edit.page.id } &&
+                state.categories.none { it.id == WorkspacePageId.widget(edit.page.id) }) {
+                "Workspace page ID already exists"
+            }
+            val order = state.pageOrder.toMutableList()
+            val position = edit.position ?: (order.indexOf(HomePageId.Home) + 1)
+            require(position in 0..order.size) { "Invalid page position" }
+            order.add(position, HomePageId.Widget(edit.page.id))
+            state.copy(workspacePages = state.workspacePages + edit.page, pageOrder = order)
+        }
+        is OrganizationEdit.UpdateWorkspacePage -> {
+            require(state.workspacePages.any { it.id == edit.page.id }) { "Workspace page no longer exists" }
+            state.copy(workspacePages = state.workspacePages.map {
+                if (it.id == edit.page.id) edit.page else it
+            })
+        }
+        is OrganizationEdit.DeleteWorkspacePage -> {
+            require(state.workspacePages.any { it.id == edit.id }) { "Workspace page no longer exists" }
+            state.copy(workspacePages = state.workspacePages.filterNot { it.id == edit.id },
+                pageOrder = state.pageOrder - HomePageId.Widget(edit.id),
+                widgets = state.widgets.filterNot { it.pageId == WorkspacePageId.widget(edit.id) })
+        }
+        is OrganizationEdit.SetWorkspacePreferences -> state.copy(workspacePreferences = edit.preferences)
+        is OrganizationEdit.SetWidgets -> state.copy(widgets = edit.widgets)
+        is OrganizationEdit.SetListeningPreferences -> state.copy(listeningPreferences = edit.preferences)
     }
 
     private fun applyMembership(state: OrganizationSnapshot, pair: MembershipKey,
@@ -256,7 +297,7 @@ private fun decodeSnapshot(preferences: Preferences): OrganizationSnapshot {
     }
     val saved = if (raw == null) SavedOrganization() else
         json.decodeFromString(SavedOrganization.serializer(), raw)
-    require(saved.version == 1) { "Unsupported organization version" }
+    require(saved.version in 1..2) { "Unsupported organization version" }
     val settings = decodeMostUsedSettings(preferences[mostUsedSettingsKey])
     val snapshot = saved.public().copy(
         pins = settings.effectivePins().map { it.public() },
@@ -287,11 +328,40 @@ private fun validate(snapshot: OrganizationSnapshot) {
             collator.compare(snapshot.categories[index].name, snapshot.categories[it].name) == 0
         }
     }) { "Duplicate category name" }
-    require(snapshot.pageOrder.size == snapshot.categories.size + 1 &&
+    val workspaceIds = snapshot.workspacePages.map { it.id }
+    require(workspaceIds.size <= OrganizationLimits.MAX_WORKSPACE_PAGES &&
+        workspaceIds.distinct().size == workspaceIds.size &&
+        snapshot.workspacePages.all { validId(it.id) && validName(it.name) &&
+            WorkspacePageId.widget(it.id) !in categoryIds }) { "Invalid workspace pages" }
+    require(snapshot.workspacePages.indices.all { index ->
+        (index + 1 until snapshot.workspacePages.size).none {
+            collator.compare(snapshot.workspacePages[index].name, snapshot.workspacePages[it].name) == 0
+        }
+    }) { "Duplicate workspace page name" }
+    require(snapshot.pageOrder.size == snapshot.categories.size + workspaceIds.size + 1 &&
         snapshot.pageOrder.count { it == HomePageId.Home } == 1 &&
-        snapshot.pageOrder.toSet() == categoryIds.map(HomePageId::Category).toSet() + HomePageId.Home) {
+        snapshot.pageOrder.toSet() == categoryIds.map(HomePageId::Category).toSet() +
+            workspaceIds.map(HomePageId::Widget).toSet() + HomePageId.Home) {
         "Invalid page order"
     }
+    require(snapshot.workspacePreferences.sectionOrder.size == WorkspaceSection.entries.size &&
+        snapshot.workspacePreferences.sectionOrder.toSet() == WorkspaceSection.entries.toSet()) {
+        "Invalid workspace section order"
+    }
+    val validWidgetPages = workspaceIds.mapTo(HashSet()) { WorkspacePageId.widget(it) }
+    validWidgetPages.add(WorkspacePageId.HOME)
+    require(snapshot.widgets.size <= OrganizationLimits.MAX_WIDGETS &&
+        snapshot.widgets.map { it.appWidgetId }.distinct().size == snapshot.widgets.size &&
+        snapshot.widgets.all { widget -> widget.appWidgetId > 0 &&
+            widget.pageId in validWidgetPages &&
+            widget.provider.length in 3..512 && widget.provider.contains('/') &&
+            widget.provider.none { it.isISOControl() } &&
+            widget.hostToken.length <= 128 && widget.hostToken.none { it.isISOControl() } &&
+            widget.heightDp in OrganizationLimits.MIN_WIDGET_HEIGHT_DP..OrganizationLimits.MAX_WIDGET_HEIGHT_DP
+        }) { "Invalid widget placement" }
+    require(snapshot.listeningPreferences.apps.size <= OrganizationLimits.MAX_LISTENING_APPS &&
+        snapshot.listeningPreferences.apps.distinct().size == snapshot.listeningPreferences.apps.size &&
+        snapshot.listeningPreferences.apps.all(::validAppKey)) { "Invalid listening apps" }
     val folderIds = snapshot.folders.map { it.id }
     require(folderIds.distinct().size == folderIds.size && snapshot.folders.all { folder ->
         validId(folder.id) && validName(folder.name) &&
@@ -366,7 +436,38 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
     val override: MembershipOverride, val token: Long) {
     fun pair() = MembershipKey(categoryId, app.public())
 }
+@Serializable private data class SavedWorkspacePage(val id: String, val name: String,
+    val enabled: Boolean = true) {
+    fun public() = WorkspacePage(id, name, enabled)
+    companion object { fun from(page: WorkspacePage) = SavedWorkspacePage(page.id, page.name, page.enabled) }
+}
+@Serializable private data class SavedWorkspacePreferences(
+    val showClock: Boolean = true,
+    val showDate: Boolean = true,
+    val showBattery: Boolean = false,
+    val sectionOrder: List<WorkspaceSection> = WorkspaceSection.entries.toList(),
+) {
+    fun public() = WorkspacePreferences(showClock, showDate, showBattery, sectionOrder)
+    companion object { fun from(preferences: WorkspacePreferences) = SavedWorkspacePreferences(
+        preferences.showClock, preferences.showDate, preferences.showBattery, preferences.sectionOrder) }
+}
+@Serializable private data class SavedWidget(val appWidgetId: Int, val pageId: String,
+    val provider: String, val heightDp: Int, val hostToken: String = "") {
+    fun public() = WorkspaceWidget(appWidgetId, pageId, provider, heightDp, hostToken)
+    companion object { fun from(widget: WorkspaceWidget) = SavedWidget(widget.appWidgetId,
+        widget.pageId, widget.provider, widget.heightDp, widget.hostToken) }
+}
+@Serializable private data class SavedListeningPreferences(
+    val enabled: Boolean = false,
+    val kind: HeadsetKind = HeadsetKind.ANY,
+    val apps: List<SavedKey> = emptyList(),
+) {
+    fun public() = ListeningPreferences(enabled, kind, apps.map { it.public() })
+    companion object { fun from(preferences: ListeningPreferences) = SavedListeningPreferences(
+        preferences.enabled, preferences.kind, preferences.apps.map(SavedKey::from)) }
+}
 @Serializable private data class SavedOrganization(
+    /** Legacy JSON omitted this field when its default was version 1. */
     val version: Int = 1,
     val revision: Long = 0,
     val categoriesEnabled: Boolean = false,
@@ -374,30 +475,51 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
     val folders: List<SavedFolder> = emptyList(),
     val pageOrder: List<String> = listOf("home") + BuiltInCategories.ids,
     val memberships: List<SavedMembership> = emptyList(),
+    val workspacePages: List<SavedWorkspacePage> = emptyList(),
+    val workspacePreferences: SavedWorkspacePreferences = SavedWorkspacePreferences(),
+    val widgets: List<SavedWidget> = emptyList(),
+    val listeningPreferences: SavedListeningPreferences = SavedListeningPreferences(),
 ) {
     fun public(): OrganizationSnapshot {
         val pairs = memberships.map { it.pair() }
         require(pairs.distinct().size == pairs.size) { "Duplicate membership pair" }
-        return OrganizationSnapshot(revision, categoriesEnabled, categories.map { it.public() },
-            folders.map { it.public() }, pageOrder.map { if (it == "home") HomePageId.Home
-                else HomePageId.Category(it) },
-            memberships.filter { it.override != MembershipOverride.AUTO }.associate { it.pair() to it.override },
-            memberships.associate { it.pair() to it.token })
+        val categoryIds = categories.mapTo(HashSet()) { it.id }
+        val widgetIds = workspacePages.mapTo(HashSet()) { WorkspacePageId.widget(it.id) }
+        return OrganizationSnapshot(revision = revision, categoriesEnabled = categoriesEnabled,
+            categories = categories.map { it.public() }, folders = folders.map { it.public() },
+            pageOrder = pageOrder.map { key -> when {
+                key == WorkspacePageId.HOME -> HomePageId.Home
+                key in categoryIds || version == 1 -> HomePageId.Category(key)
+                key in widgetIds -> HomePageId.Widget(key.removePrefix(WorkspacePageId.WIDGET_PREFIX))
+                else -> HomePageId.Category(key)
+            } },
+            overrides = memberships.filter { it.override != MembershipOverride.AUTO }
+                .associate { it.pair() to it.override },
+            membershipTokens = memberships.associate { it.pair() to it.token },
+            workspacePages = workspacePages.map { it.public() },
+            workspacePreferences = workspacePreferences.public(),
+            widgets = widgets.map { it.public() },
+            listeningPreferences = listeningPreferences.public())
     }
     companion object {
         fun from(snapshot: OrganizationSnapshot): SavedOrganization {
             val pairs = (snapshot.overrides.keys + snapshot.membershipTokens.keys).distinct()
-            return SavedOrganization(revision = snapshot.revision,
+            return SavedOrganization(version = 2, revision = snapshot.revision,
                 categoriesEnabled = snapshot.categoriesEnabled,
                 categories = snapshot.categories.map(SavedCategory::from),
                 folders = snapshot.folders.map(SavedFolder::from),
                 pageOrder = snapshot.pageOrder.map { when (it) {
                     HomePageId.Home -> "home"
                     is HomePageId.Category -> it.id
+                    is HomePageId.Widget -> WorkspacePageId.widget(it.id)
                 } },
                 memberships = pairs.map { pair -> SavedMembership(pair.categoryId,
                     SavedKey.from(pair.appKey), snapshot.overrides[pair] ?: MembershipOverride.AUTO,
-                    snapshot.membershipTokens[pair] ?: 0L) })
+                    snapshot.membershipTokens[pair] ?: 0L) },
+                workspacePages = snapshot.workspacePages.map(SavedWorkspacePage::from),
+                workspacePreferences = SavedWorkspacePreferences.from(snapshot.workspacePreferences),
+                widgets = snapshot.widgets.map(SavedWidget::from),
+                listeningPreferences = SavedListeningPreferences.from(snapshot.listeningPreferences))
         }
     }
 }

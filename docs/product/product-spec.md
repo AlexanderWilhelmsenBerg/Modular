@@ -2,6 +2,13 @@
 
 Status: **Delivered Core baseline plus Home v2 requirements; organization specification draft added 2026-11-08**
 
+The authorized [Home workspace v1](home-workspace-v1.md) update introduces a
+landing Home above All apps, stacked Android widgets, custom left/right pages
+and Listening apps. It supersedes the earlier default-Home-is-the-app-list and
+All-apps pull-down reachability wording below; category-list reachability stays.
+Implementation and acceptance are tracked in
+[the workspace acceptance record](../implementation/home-workspace-validation.md).
+
 Most Used ownership follows [ADR-0006](../decisions/ADR-0006-core-most-used-and-feature-order.md),
 with local learning as the default under
 [ADR-0007](../decisions/ADR-0007-local-most-used-learning.md).
@@ -417,3 +424,23 @@ wording: category switches may filter direct Home entries, while raw discovery
 and global search remain complete. Explicit Hide remains distinct. It does not
 retroactively claim implementation or acceptance. Delivery slices are in the
 [organization implementation plan](../implementation/categories-folders-mega-sorter-plan.md).
+
+## 22. Home workspace, widgets and Listening apps
+
+Core provides a configurable landing Home with a vertical widget stack above
+All apps. Upward dragging scrolls Home content first, then brings All apps from
+below at the bottom boundary. Downward dragging scrolls All apps to its top,
+then brings Home from above. The visible populated alphabet opens a selected
+section directly with the existing rail animation. Native Android widgets use
+platform consent/configuration and Core-hosted views; they do not require
+Modular add-on APKs or Usage Access.
+
+The unified page organizer retains category order and adds custom widget pages
+on either side of the permanent Home. Most Used and its folders move to Home;
+app-list folders remain at the bottom of All apps. Listening apps are selected
+and ordered by the user and appear on a matching headset output connection.
+Core shares foreground audio signals with smart folders; no scanning, automatic
+playback or background service is introduced. Future add-on page rendering is
+reserved architecture, not an implemented capability.
+
+Full behavior and WS-A01–A10 acceptance are in [Home workspace v1](home-workspace-v1.md).

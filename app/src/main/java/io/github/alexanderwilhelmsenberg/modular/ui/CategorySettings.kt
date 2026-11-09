@@ -22,6 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,6 +65,7 @@ fun CategorySettingsUi(
     var memberId by remember { mutableStateOf<String?>(null) }
     var deleteId by remember { mutableStateOf<String?>(null) }
     var confirmSuppression by remember { mutableStateOf<String?>(null) }
+    var workspaceRequest by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(openDetailsRequest) {
@@ -128,7 +130,7 @@ fun CategorySettingsUi(
                             CategorySettingSwitch("Page enabled", category.enabled, !busy, "category-enabled:${category.id}") {
                                 save(listOf(OrganizationEdit.UpdateCategory(category.copy(enabled = it))))
                             }
-                            CategorySettingSwitch("Show apps on Home", category.showOnHome, !busy, "category-home:${category.id}") { show ->
+                            CategorySettingSwitch("Show in main app list and Most Used", category.showOnHome, !busy, "category-home:${category.id}") { show ->
                                 if (!show && category.enabled && snapshot.categoriesEnabled) confirmSuppression = category.id
                                 else save(listOf(OrganizationEdit.UpdateCategory(category.copy(showOnHome = show))))
                             }
@@ -146,9 +148,10 @@ fun CategorySettingsUi(
                     }
                 }
                 OutlinedButton(onClick = { creating = true }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("category-create")) { Text("Create category") }
-                CategoryPageOrder(snapshot.pageOrder, snapshot.categories, onReorder = {
-                    save(listOf(OrganizationEdit.SetPageOrder(it)))
-                }, enabled = !busy)
+                OutlinedButton(onClick = { detailsOpen = false; workspaceRequest++ }, enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().testTag("categories-manage-screens")) {
+                    Text("Arrange all Home screens")
+                }
                 OutlinedButton(onClick = { detailsOpen = false; onManageFolders() }, modifier = Modifier.fillMaxWidth().testTag("categories-manage-folders")) { Text("Manage folders") }
                 OutlinedButton(onClick = { detailsOpen = false; onStartMegaSorter() }, modifier = Modifier.fillMaxWidth().testTag("categories-start-sorter")) { Text("Start Mega Sorter") }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -212,14 +215,16 @@ fun CategorySettingsUi(
         val pins = snapshot.pins.count { it is HomePinRef.App && it.key in affected }
         AlertDialog(
             onDismissRequest = { confirmSuppression = null },
-            title = { Text("Hide ${category.name} apps from Home?") },
-            text = { Text("${affected.size} direct app entries, including $pins pins, will leave Home. Search and the category page will still show them. Saved pins return if you show these apps on Home again.") },
+            title = { Text("Hide ${category.name} apps from the main list and Most Used?") },
+            text = { Text("${affected.size} direct app entries, including $pins saved pins, will leave the main app list and Most Used. Search and the category page will still show them. Listening choices stay as configured. Saved pins return if you show these apps again.") },
             confirmButton = { Button(enabled = !busy, onClick = {
                 save(listOf(OrganizationEdit.UpdateCategory(category.copy(showOnHome = false)))) { confirmSuppression = null }
-            }) { Text("Hide from Home") } },
+            }) { Text("Hide from both") } },
             dismissButton = { TextButton(onClick = { confirmSuppression = null }) { Text("Cancel") } },
         )
     }
+    WorkspaceSettingsUi(snapshot, onUpdate, initialOpenRequest = workspaceRequest,
+        onOpenRequestConsumed = { workspaceRequest = 0 }, showEntry = false)
 }
 
 @Composable
@@ -262,7 +267,7 @@ private fun CategoryEditorDialog(
                 validation?.let { if (name.isNotEmpty()) Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (category == null) {
                     CategorySettingSwitch("Page enabled", enabled, !busy, "category-editor-enabled") { enabled = it }
-                    CategorySettingSwitch("Show apps on Home", showOnHome, !busy, "category-editor-home") { showOnHome = it }
+                    CategorySettingSwitch("Show in main app list and Most Used", showOnHome, !busy, "category-editor-home") { showOnHome = it }
                     Text("Initial position", style = MaterialTheme.typography.titleSmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         TextButton(onClick = { leftOfHome = true }) { Text(if (leftOfHome) "✓ Left of Home" else "Left of Home") }

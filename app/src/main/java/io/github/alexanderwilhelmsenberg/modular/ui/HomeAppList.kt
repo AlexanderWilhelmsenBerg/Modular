@@ -94,12 +94,14 @@ internal fun HomeAppList(
     onStartCategorySorter: (() -> Unit)? = null,
     appRowContent: (@Composable (LaunchableApp, @Composable () -> Unit) -> Unit)? = null,
     modifier: Modifier = Modifier,
+    enableReachability: Boolean = true,
+    bottomPadding: androidx.compose.ui.unit.Dp = 12.dp,
 ) {
     val foreground = if (wallpaperMode) Color.White else MaterialTheme.colorScheme.onSurface
     LazyColumn(
-        modifier = modifier.fillMaxSize().testTag("home-list").nestedScroll(remember(reachability, listState) { reachability.nestedScroll(listState) }),
+        modifier = modifier.fillMaxSize().testTag("home-list").then(if (enableReachability) Modifier.nestedScroll(remember(reachability, listState) { reachability.nestedScroll(listState) }) else Modifier),
         state = listState,
-        contentPadding = PaddingValues(bottom = 12.dp),
+        contentPadding = PaddingValues(bottom = bottomPadding),
     ) {
         item(key = "reachability-space") { Spacer(Modifier.height(with(androidx.compose.ui.platform.LocalDensity.current) { reachability.offsetPx.toDp() })) }
         items(entries, key = { it.id }) { entry ->

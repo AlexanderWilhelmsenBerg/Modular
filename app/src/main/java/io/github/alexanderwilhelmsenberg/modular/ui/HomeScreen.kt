@@ -91,6 +91,12 @@ fun HomeScreen(
     appRowContent: (@Composable (LaunchableApp, @Composable () -> Unit) -> Unit)? = null,
     listTopInset: Dp = 0.dp,
     iconForApp: @Composable (LaunchableApp) -> ImageBitmap? = { rememberAppIcon(it) },
+    showChrome: Boolean = true,
+    showAlphabetRail: Boolean = true,
+    enableReachability: Boolean = true,
+    externalJump: String? = null,
+    externalJumpSerial: Int = 0,
+    drawWallpaperScrim: Boolean = true,
 ) {
     val locale = LocalConfiguration.current.locales[0]
     val normalApps = remember(catalog.apps, orderedApps, locale) { homeOrderedApps(catalog.apps, orderedApps, locale) }
@@ -147,6 +153,15 @@ fun HomeScreen(
     var jumpHeaderLabel by rememberSaveable { mutableStateOf<String?>(null) }
     var jump by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var jumpSerial by remember { mutableIntStateOf(0) }
+    LaunchedEffect(externalJump, externalJumpSerial) {
+        if (externalJump != null) {
+            jumpSerial += 1
+            jump = externalJump to jumpSerial
+        } else if (externalJumpSerial > 0) {
+            jumpHeaderLabel = null
+            navigationSpacePx = 0
+        }
+    }
     var savedAnchorIndex by rememberSaveable { mutableIntStateOf(-1) }
     var savedAnchorOffset by rememberSaveable { mutableIntStateOf(0) }
     var savedAnchorId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -231,7 +246,7 @@ fun HomeScreen(
     BackHandler(enabled = editing) { endEditing() }
 
     Box(Modifier.fillMaxSize().background(if (wallpaperMode) Color.Transparent else MaterialTheme.colorScheme.background)) {
-        if (wallpaperMode) WallpaperHomeScrim(wallpaperDimmingPercent, Modifier.fillMaxSize())
+        if (wallpaperMode && drawWallpaperScrim) WallpaperHomeScrim(wallpaperDimmingPercent, Modifier.fillMaxSize())
         Column(Modifier.fillMaxSize().imePadding().navigationBarsPadding().statusBarsPadding()) {
             Spacer(Modifier.height(listTopInset))
             Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { viewportHeight = it.height; reachability.setViewport(it.height) }) {
@@ -270,8 +285,10 @@ fun HomeScreen(
                     onOpenFeaturedManagement = onOpenFeaturedManagement,
                     featuredMessage = featuredMessage,
                     iconForApp = iconForApp,
+                    enableReachability = enableReachability,
+                    bottomPadding = if (showChrome) 12.dp else 108.dp,
                 )
-                if (useSections && alphabet.isNotEmpty()) AlphabetRail(
+                if (showAlphabetRail && useSections && alphabet.isNotEmpty()) AlphabetRail(
                     alphabet = alphabet,
                     populated = headerIndices.keys + if ("Folders" in headerIndices) setOf("◇") else emptySet(),
                     onSelect = { label -> jumpSerial += 1; jump = (if (label == "◇") "Folders" else label) to jumpSerial },
@@ -279,7 +296,7 @@ fun HomeScreen(
                     modifier = Modifier.align(AbsoluteAlignment.BottomRight),
                 )
             }
-            Box(Modifier.fillMaxWidth().background(if (wallpaperMode) Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Black.copy(alpha = 0.75f))) else Brush.verticalGradient(listOf(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.background)))) {
+            if (showChrome) Box(Modifier.fillMaxWidth().background(if (wallpaperMode) Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Black.copy(alpha = 0.75f))) else Brush.verticalGradient(listOf(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.background)))) {
                 HomeBottomControls(
                     query = query,
                     onQueryChange = updateQuery,

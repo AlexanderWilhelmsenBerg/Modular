@@ -40,7 +40,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import kotlin.coroutines.resume
 
-/** One foreground-only collector shared by all folder rules. Call stop on pause/hidden Home. */
+/** One foreground-only collector shared by folder rules and contextual Listening apps. */
 class FolderConditionCoordinator(
     context: Context,
     private val store: SavedConditionStore,
@@ -54,6 +54,9 @@ class FolderConditionCoordinator(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableStatuses = MutableStateFlow<Map<String, FolderVisibilityStatus>>(emptyMap())
     val statuses: StateFlow<Map<String, FolderVisibilityStatus>> = mutableStatuses
+    private val mutableHeadsetOutputs = MutableStateFlow<Set<HeadsetKind>?>(null)
+    /** Null means unavailable or not observed; empty means conclusively disconnected. */
+    val headsetOutputs: StateFlow<Set<HeadsetKind>?> = mutableHeadsetOutputs
     private var folders = emptyList<FolderDefinition>()
     private var definitions = emptyMap<String, FolderCondition>()
     private var foreground = false
@@ -68,6 +71,7 @@ class FolderConditionCoordinator(
     private var timeRegistered = false
     private var locationModeRegistered = false
     private var needsAreaActive = false
+    private var needsWifiActive = false
 
     private val audioCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = refresh()
@@ -99,16 +103,18 @@ class FolderConditionCoordinator(
         }
     }
 
-    fun start(currentFolders: List<FolderDefinition>) {
+    /** Called again on resume and settings changes; each call reads the current outputs. */
+    fun start(currentFolders: List<FolderDefinition>, listeningEnabled: Boolean = false) {
         folders = currentFolders
         definitions = store.loadAll(currentFolders.flatMap { it.conditionIds })
         val needed = currentFolders.filter { it.visibilityMode == FolderVisibilityMode.SMART }
             .flatMap { folder -> folder.conditionIds.mapNotNull(definitions::get) }.filter { it.enabled }
-        val needsHeadset = needed.any { it is FolderCondition.Headset }
+        val needsHeadset = audioObserverNeeded(currentFolders, definitions, listeningEnabled)
         val needsWifi = needed.any { it is FolderCondition.Wifi }
         val needsArea = needed.any { it is FolderCondition.Area }
         val needsTime = needed.any { it is FolderCondition.Schedule }
         needsAreaActive = needsArea
+        needsWifiActive = needsWifi
         if (!needsArea) {
             locationJob?.cancel(); locationJob = null
             locationExpiryJob?.cancel(); locationExpiryJob = null
@@ -116,7 +122,8 @@ class FolderConditionCoordinator(
             retainedAreas.clear()
         }
         if (needsHeadset && !audioRegistered) {
-            audio.registerAudioDeviceCallback(audioCallback, Handler(Looper.getMainLooper())); audioRegistered = true
+            runCatching { audio.registerAudioDeviceCallback(audioCallback, Handler(Looper.getMainLooper())) }
+                .onSuccess { audioRegistered = true }
         } else if (!needsHeadset && audioRegistered) {
             audio.unregisterAudioDeviceCallback(audioCallback); audioRegistered = false
         }
@@ -171,6 +178,7 @@ class FolderConditionCoordinator(
     fun stop() {
         foreground = false
         needsAreaActive = false
+        needsWifiActive = false
         locationJob?.cancel(); locationJob = null
         locationExpiryJob?.cancel(); locationExpiryJob = null
         scheduleJob?.cancel(); scheduleJob = null
@@ -179,6 +187,7 @@ class FolderConditionCoordinator(
         if (timeRegistered) { app.unregisterReceiver(timeReceiver); timeRegistered = false }
         if (locationModeRegistered) { app.unregisterReceiver(locationModeReceiver); locationModeRegistered = false }
         signals = FolderSignals()
+        mutableHeadsetOutputs.value = null
         retainedAreas.clear()
         mutableStatuses.value = emptyMap()
     }
@@ -192,17 +201,19 @@ class FolderConditionCoordinator(
 
     private fun refresh() {
         if (!foreground) return
-        val locationPermission = hasLocationPermission()
-        val locationEnabled = locationManager.isLocationEnabled
-        val wifiPermission = ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED && locationEnabled
+        val locationPermission = needsAreaActive && hasLocationPermission()
+        val locationEnabled = (needsAreaActive || needsWifiActive) && locationManager.isLocationEnabled
+        val wifiPermission = needsWifiActive && locationEnabled &&
+            ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!locationPermission || !locationEnabled) retainedAreas.clear()
         signals = signals.copy(
-            headsetOutputs = readHeadsets(),
+            headsetOutputs = if (audioRegistered) readHeadsets() else null,
             connectedSsid = if (wifiPermission) readConnectedWifi() else null,
             locationPermission = locationPermission,
             locationEnabled = locationEnabled,
             wifiPermission = wifiPermission,
         )
+        mutableHeadsetOutputs.value = signals.headsetOutputs
         val now = currentWallClock(clock)
         val next = folders.associate { folder ->
             folder.id to FolderRuleEvaluator.evaluate(folder, definitions, signals, now, retainedAreas)
@@ -270,6 +281,17 @@ class FolderConditionCoordinator(
         }
     }
 }
+
+/** One observer serves Listening and only enabled rules on active smart folders. */
+internal fun audioObserverNeeded(
+    folders: List<FolderDefinition>,
+    definitions: Map<String, FolderCondition>,
+    listeningEnabled: Boolean,
+): Boolean = listeningEnabled || folders.asSequence()
+    .filter { it.visibilityMode == FolderVisibilityMode.SMART }
+    .flatMap { it.conditionIds.asSequence() }
+    .mapNotNull(definitions::get)
+    .any { it.enabled && it is FolderCondition.Headset }
 
 /** Android may redact one SSID source while the other still exposes the current identity. */
 internal fun normalizeConnectedSsid(raw: String?): String? = raw?.removeSurrounding("\"")

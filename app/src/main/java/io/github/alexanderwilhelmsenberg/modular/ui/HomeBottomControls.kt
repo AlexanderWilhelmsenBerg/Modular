@@ -76,7 +76,7 @@ internal fun HomeBottomControls(
                             onClick = { onQueryChange(""); focusRequester.requestFocus() },
                             modifier = Modifier.size(48.dp).testTag("home-search-clear").semantics { contentDescription = "Clear search" },
                         ) { Icon(painterResource(R.drawable.ic_home_clear), null) }
-                        else Spacer(Modifier.size(48.dp))
+                        else Spacer(Modifier.size(12.dp))
                     }
                 },
             )

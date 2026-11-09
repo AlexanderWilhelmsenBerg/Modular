@@ -84,6 +84,12 @@ import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
 import io.github.alexanderwilhelmsenberg.modular.ui.ModuleSettingsDialog
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
 import io.github.alexanderwilhelmsenberg.modular.ui.SettingsPage
+import io.github.alexanderwilhelmsenberg.modular.ui.WorkspaceSettingsUi
+import io.github.alexanderwilhelmsenberg.modular.ui.ListeningAppsSettings
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePageId
+import io.github.alexanderwilhelmsenberg.modular.workspace.ListeningAppsProjector
+import io.github.alexanderwilhelmsenberg.modular.widgets.rememberWorkspaceWidgetController
+import io.github.alexanderwilhelmsenberg.modular.widgets.WorkspaceWidgetTile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -279,19 +285,26 @@ class MainActivity : ComponentActivity() {
                 val customizationError by appCustomizationStore.error.collectAsState()
                 val mostUsedSettings by mostUsedStore.settings.collectAsState(initial = initialMostUsed)
                 val organizationSnapshot by organization.store.snapshots.collectAsState(initial = initialOrganization)
-                LaunchedEffect(organizationSnapshot.folders) {
+                LaunchedEffect(organizationSnapshot.folders, organizationSnapshot.listeningPreferences.enabled) {
                     if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
-                        organization.runtime.signals.start(organizationSnapshot.folders)
+                        organization.runtime.signals.start(organizationSnapshot.folders,
+                            listeningEnabled = organizationSnapshot.listeningPreferences.enabled)
                 }
+                val headsetOutputs by organization.runtime.signals.headsetOutputs.collectAsState()
                 val mostUsedState by builtInMostUsed.state.collectAsState()
                 val mostUsedError by mostUsedStore.error.collectAsState()
                 var mostUsedConfigureRequest by rememberSaveable { mutableStateOf(0) }
+                var workspaceConfigureRequest by rememberSaveable { mutableStateOf(0) }
+                var workspacePageToEdit by rememberSaveable { mutableStateOf(WorkspacePageId.HOME) }
                 var migrationError by remember { mutableStateOf<String?>(null) }
                 var migrationRetry by remember { mutableStateOf(0) }
                 var renameTarget by remember { mutableStateOf<LaunchableApp?>(null) }
                 LaunchedEffect(homeIntentGeneration, settingsVisible) {
                     renameTarget = null
-                    if (!settingsVisible) mostUsedConfigureRequest = 0
+                    if (!settingsVisible) {
+                        mostUsedConfigureRequest = 0
+                        workspaceConfigureRequest = 0
+                    }
                 }
                 val featured by homeFeaturedController.featured.collectAsState()
                 val externalFeatured = featured?.takeUnless {
@@ -323,6 +336,18 @@ class MainActivity : ComponentActivity() {
                     val visibleOrderedApps = remember(homeOrderedApps, appCustomizations) {
                         homeOrderedApps?.let(appCustomizations::visibleApps)
                     }
+                    val listening = remember(appCatalog, appCustomizations,
+                        organizationSnapshot.listeningPreferences, headsetOutputs) {
+                        ListeningAppsProjector.project(appCatalog, appCustomizations,
+                            organizationSnapshot.listeningPreferences, headsetOutputs)
+                    }
+                    // Retain the controller across navigation; listen only for a visible widget surface.
+                    var widgetSurfaceVisible by remember { mutableStateOf(true) }
+                    val widgetController = rememberWorkspaceWidgetController(
+                        organization.store, organizationSnapshot.widgets,
+                        visible = !settingsVisible && widgetSurfaceVisible,
+                        onMessage = { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() },
+                    )
                     val instances by instanceStore.instances.collectAsState()
                     val compositionState by compositionStore.state.collectAsState()
                     val availableRoutes by capabilityRouter.routes.collectAsState()
@@ -369,6 +394,16 @@ class MainActivity : ComponentActivity() {
                         key(homeIntentGeneration) {
                             val homeListState = rememberLazyListState()
                             OrganizationHomeScreen(
+                                workspaceMode = true,
+                                onWidgetSurfaceVisible = { widgetSurfaceVisible = it },
+                                listeningApps = listening.visibleApps,
+                                widgetContent = { widget -> WorkspaceWidgetTile(widgetController, widget, editMode = false) },
+                                onAddWidget = widgetController::addWidget,
+                                onEditWorkspace = { pageId ->
+                                    workspacePageToEdit = pageId
+                                    workspaceConfigureRequest += 1
+                                    settingsVisible = true
+                                },
                                 catalog = visibleCatalog,
                                 runtime = organization.runtime,
                                 snapshot = organizationSnapshot,
@@ -474,7 +509,7 @@ class MainActivity : ComponentActivity() {
                         // closing an add-on dialog must not reset the page being viewed.
                         val settingsEntryPage = rememberSaveable {
                             when {
-                                mostUsedConfigureRequest > 0 -> SettingsPage.PRODUCTIVITY
+                                mostUsedConfigureRequest > 0 || workspaceConfigureRequest > 0 -> SettingsPage.PRODUCTIVITY
                                 selectedModuleComponent != null -> SettingsPage.ADDONS
                                 else -> SettingsPage.ROOT
                             }
@@ -482,6 +517,33 @@ class MainActivity : ComponentActivity() {
                         ModularApp(
                             initialPage = settingsEntryPage,
                             coreFeaturesContent = {
+                                WorkspaceSettingsUi(
+                                    snapshot = organizationSnapshot,
+                                    onUpdate = organization.runtime::update,
+                                    onAddWidget = widgetController::addWidget,
+                                    onReconfigureWidget = widgetController::reconfigureWidget,
+                                    onResizeWidget = widgetController::resizeWidget,
+                                    onRemoveWidget = widgetController::removeWidget,
+                                    onMoveWidget = widgetController::moveWidget,
+                                    onMoveWidgetBy = widgetController::moveWidgetBy,
+                                    widgetLabel = { widget -> runCatching {
+                                        widgetController.providerInfo(widget)?.loadLabel(packageManager).orEmpty()
+                                    }.getOrDefault("").ifBlank { "Unavailable widget" } },
+                                    canConfigureWidget = { widgetController.providerInfo(it)?.configure != null },
+                                    canResizeWidget = { widget -> widgetController.providerInfo(widget)?.let {
+                                        it.resizeMode and android.appwidget.AppWidgetProviderInfo.RESIZE_VERTICAL != 0
+                                    } == true },
+                                    initialOpenRequest = workspaceConfigureRequest,
+                                    initialPageId = workspacePageToEdit,
+                                    onOpenRequestConsumed = { workspaceConfigureRequest = 0 },
+                                )
+                                ListeningAppsSettings(
+                                    snapshot = organizationSnapshot,
+                                    catalog = appCatalog,
+                                    customizations = appCustomizations,
+                                    headsetOutputs = headsetOutputs,
+                                    onUpdate = organization.runtime::update,
+                                )
                                 CoreMostUsedSettingsUi(
                                     enabled = mostUsedSettings.enabled,
                                     days = mostUsedSettings.days,
@@ -762,8 +824,10 @@ class MainActivity : ComponentActivity() {
         if (::homeFeaturedController.isInitialized) homeFeaturedController.refresh()
         if (::builtInMostUsed.isInitialized) builtInMostUsed.refresh()
         if (::organization.isInitialized) lifecycleScope.launch {
-            val folders = organization.store.currentSnapshot().folders
-            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) organization.runtime.signals.start(folders)
+            val snapshot = organization.store.currentSnapshot()
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+                organization.runtime.signals.start(snapshot.folders,
+                    listeningEnabled = snapshot.listeningPreferences.enabled)
         }
     }
 

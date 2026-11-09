@@ -39,6 +39,7 @@ import kotlinx.coroutines.launch
 private fun HomePageId.savedKey(): String = when (this) {
     HomePageId.Home -> "home"
     is HomePageId.Category -> "category:$id"
+    is HomePageId.Widget -> "widget:$id"
 }
 
 /** Category pages use this compact label; ordinary Home intentionally has none. */
@@ -78,6 +79,8 @@ fun LauncherPages(
     pageStateHolder: SaveableStateHolder = rememberSaveableStateHolder(),
     onPageChanged: (HomePageId) -> Unit = {},
     onScrollingChange: (Boolean) -> Unit = {},
+    requestedPage: HomePageId? = null,
+    pageRequestSerial: Int = 0,
 ) {
     val pages = snapshot.visiblePageOrder()
     val keys = pages.map { it.savedKey() }
@@ -106,6 +109,13 @@ fun LauncherPages(
         if (pagerState.currentPage != target) pagerState.scrollToPage(target)
         selectedKey = targetKey
         pages.getOrNull(target)?.let(currentPageCallback)
+    }
+    LaunchedEffect(requestedPage, pageRequestSerial) {
+        val target = requestedPage?.savedKey()?.let(keys::indexOf) ?: -1
+        if (target >= 0) {
+            pagerState.animateScrollToPage(target)
+            selectedKey = keys[target]
+        }
     }
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }.collect { index ->

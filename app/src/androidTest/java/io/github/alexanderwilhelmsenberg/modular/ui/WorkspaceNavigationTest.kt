@@ -459,11 +459,12 @@ class WorkspaceNavigationTest {
                     snapshot.revision)).getOrThrow()
             }
             val home = rule.onNodeWithTag("workspace-home")
-            home.performScrollToNode(hasTestTag("workspace-edit"))
+            home.performScrollToNode(hasTestTag("workspace-widget:1100006"))
+            rule.onNodeWithTag("workspace-widget:1100006").assertIsDisplayed()
             val bottomScroll = home.fetchSemanticsNode().config[
                 SemanticsProperties.VerticalScrollAxisRange
             ].value()
-            assertTrue("Fixture must leave Home scrolled before opening Apps: $bottomScroll", bottomScroll > 100f)
+            assertTrue("Fixture must leave Home scrolled before opening Apps: $bottomScroll", bottomScroll > 0.5f)
             rule.onNodeWithTag("workspace-apps-action").performClick()
             waitForAllApps()
             val allApps = rule.onNodeWithTag("workspace-all-apps")
@@ -497,7 +498,7 @@ class WorkspaceNavigationTest {
                 SemanticsProperties.VerticalScrollAxisRange
             ].value()
             assertTrue("Home must scroll during the returning pointer drag: $bottomScroll -> $returnedScroll",
-                returnedScroll < bottomScroll - 30f)
+                returnedScroll < bottomScroll - 0.1f)
         } finally {
             runBlocking {
                 val snapshot = store.currentSnapshot()

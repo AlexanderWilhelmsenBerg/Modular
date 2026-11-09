@@ -191,8 +191,12 @@ Core hosts ordinary installed Android app widgets. Users do not need a Modular
 add-on for each widget. Android widgets and Modular add-on pages are separate
 extension mechanisms with separate lifecycle/security boundaries.
 
-- Long press empty Home space or choose Settings > Productivity > Home screens
-  to enter edit mode. Offer Add widget, Manage screens and Done.
+- Long press empty Home space or a widget to open the **Home screen** bottom
+  sheet with Add widget, Edit and Advanced. Edit enables hold-and-drag movement,
+  a bottom-left resize grip and a selected-widget removal icon in the edit header; Done exits.
+  Settings > Productivity > Home screens manages pages and widget configuration.
+  The [grid v2 contract](home-widget-grid-v2.md) supersedes the original stack
+  controls; Home has no permanent Add widget or Edit Home footer buttons.
 - Show installed widget providers grouped by app, with label, available preview
   and sizing information. A missing preview never prevents choosing a provider.
 - Use Android's widget binding/consent and provider configuration flows. Binding

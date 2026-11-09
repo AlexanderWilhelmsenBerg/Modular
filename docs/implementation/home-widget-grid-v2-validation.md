@@ -4,8 +4,9 @@ Product contract: [Home widget grid v2](../product/home-widget-grid-v2.md).
 The grid baseline was merged in PR #31 as `23cee7489c13`: verification, signed
 builds, native API 35 tests and all seven screenshot configurations passed
 ([CI run](https://github.com/AlexanderWilhelmsenBerg/Modular/actions/runs/42614089377)).
-The subsequent Home/drawer page separation and widget-removal correction needs
-its own passing CI result. Record revision and run in the implementing PR; a
+Home/drawer page separation and widget removal passed in PR #32 (`220afe0f3e27`).
+The gesture editor and Home action sheet need their own passing CI result.
+Record revision and run in the implementing PR; a
 baseline pass is not a final-revision or physical-device acceptance claim.
 
 | Area | Implemented check | Execution still needed |
@@ -39,6 +40,14 @@ navigation, headset, resource and Samsung gesture checks.
 For the navigation/removal correction, verify Home swipes only visit Home/widget
 pages and drawer swipes only visit All apps/category pages, with independent
 selection and settings order. Check restoration, search, rail jumps, deleted
-pages and vertical handoff from a category. Long-press a native widget, cancel
+pages and vertical handoff from a category. Long-press a native widget, choose Edit, cancel
 Remove widget once, then confirm it: placement and owned host ID must disappear.
 A failed save must keep the widget and offer a retry; provider apps stay installed.
+
+For the gesture editor, `WorkspaceWidgetGridTargetTest` checks fixed-top-right
+bottom-left resizing and bounds. `HomeActionsSheetTest` checks the three menu
+routes and selected widget. Native integration must hold-drag the widget body,
+resize left/down from the physical bottom-left, preserve saved geometry, and
+confirm no permanent Add widget/Edit Home or nudge controls remain. Review the
+Home menu and edit-state screenshots in every matrix configuration, particularly
+small widgets, enlarged text and RTL. Record final CI evidence in the PR.

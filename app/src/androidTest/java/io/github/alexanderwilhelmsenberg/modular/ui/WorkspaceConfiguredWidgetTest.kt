@@ -6,12 +6,15 @@ import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.alexanderwilhelmsenberg.modular.MainActivity
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationBatch
@@ -87,8 +90,10 @@ class WorkspaceConfiguredWidgetTest {
     }
 
     private fun addConfiguredFixture() {
-        rule.onNodeWithTag("workspace-home").performScrollToNode(hasTestTag("workspace-add-widget"))
-        rule.onNodeWithTag("workspace-add-widget").performClick()
+        rule.onNodeWithTag("workspace-home").performScrollToIndex(0)
+        rule.onNodeWithTag("workspace-empty-edit-space").performTouchInput { longClick() }
+        rule.onNodeWithTag("workspace-home-menu").assertIsDisplayed()
+        rule.onNodeWithTag("workspace-menu-add-widget").performClick()
         val provider = ComponentName(InstrumentationRegistry.getInstrumentation().context,
             ConfiguredWorkspaceFixtureProvider::class.java).flattenToString()
         val tag = "widget-provider:$provider"

@@ -26,6 +26,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
@@ -655,35 +656,41 @@ class CoreHomeTest {
     }
 
     @Test
-    fun railJumpLeavesBlankSpaceAboveSelectedHeader() {
+    fun railJumpsKeepNormalHeaderHeightAndNoGapAtMiddleOrLastSection() {
         val apps = (0..25).flatMap { letter ->
             (1..5).map { number ->
                 val prefix = ('A'.code + letter).toChar()
                 app("fixture.$letter.$number", "$prefix sample $number")
             }
         }
+        val state = LazyListState()
         composeRule.setContent {
             HomeScreen(
-                catalog = AppCatalog(apps = apps),
+                catalog = AppCatalog(apps = apps), listState = state,
                 onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
                 showMakeDefault = false, showAppIcons = false,
             )
         }
-        val locale = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.locales[0]
-        val alphabet = HomeSectionBuilder(locale).sections(apps).map { it.label }
-        val kIndex = alphabet.indexOf("K")
-        assertTrue(kIndex >= 0)
-        composeRule.onNodeWithTag("alphabet-hit-lane").performTouchInput {
-            val y = height * (kIndex + 0.5f) / alphabet.size
-            down(Offset(width / 2f, y - 14f))
-            moveTo(Offset(width / 2f, y), 120L)
-            up()
-        }
+        val normalHeaderHeight = composeRule.onNodeWithTag("section-container:A")
+            .fetchSemanticsNode().boundsInRoot.height
         val viewport = composeRule.onNodeWithTag("home-list").fetchSemanticsNode().boundsInRoot
-        val header = composeRule.onNodeWithTag("section:K").fetchSemanticsNode().boundsInRoot
-        val relativeTop = (header.top - viewport.top) / viewport.height
-        assertTrue("Selected header should sit near the upper third: $relativeTop", relativeTop in 0.25f..0.47f)
+        listOf("K", "Z", "K").forEach { letter ->
+            tapVisibleRailLetter(letter)
+            val header = composeRule.onNodeWithTag("section-container:$letter")
+                .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertEquals("Letter jump must put the normal header at the list top",
+                viewport.top, header.top, 2f)
+            assertEquals("Navigation must not inflate a letter header",
+                normalHeaderHeight, header.height, 2f)
+        }
         composeRule.onNodeWithText("J sample 5").assertDoesNotExist()
+        // Scrolling back above the selected letter must reveal the preceding row,
+        // not a retained navigation spacer inside the header.
+        composeRule.onNodeWithTag("home-list").performScrollToIndex(state.firstVisibleItemIndex - 1)
+        val previous = composeRule.onNodeWithTag("app-row:${apps.first { it.label == "J sample 5" }.key.stableId}")
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val header = composeRule.onNodeWithTag("section-container:K").fetchSemanticsNode().boundsInRoot
+        assertEquals("The previous app and letter header must stay contiguous", previous.bottom, header.top, 2f)
     }
 
     @Test

@@ -3,6 +3,8 @@ package io.github.alexanderwilhelmsenberg.modular.ui
 import io.github.alexanderwilhelmsenberg.modular.organization.HomePageId
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationSnapshot
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePage
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceSection
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -45,5 +47,36 @@ class WorkspaceSettingsTest {
         assertNotNull(workspacePageNameError("Resume", snapshot, null))
         assertNull(workspacePageNameError("Résumé", snapshot, "notes"))
         assertNull(workspacePageNameError("Reading", snapshot, null))
+    }
+
+    @Test fun homeSectionDraftKeepsLegacyMostUsedSlot() {
+        val stored = listOf(WorkspaceSection.CLOCK, WorkspaceSection.MOST_USED,
+            WorkspaceSection.WIDGETS, WorkspaceSection.LISTENING)
+        val draft = listOf(WorkspaceSection.LISTENING, WorkspaceSection.WIDGETS,
+            WorkspaceSection.CLOCK)
+
+        assertEquals(listOf(WorkspaceSection.LISTENING, WorkspaceSection.MOST_USED,
+            WorkspaceSection.WIDGETS, WorkspaceSection.CLOCK), stored.withHomeSectionOrder(draft))
+        assertEquals(stored, stored.withHomeSectionOrder(listOf(WorkspaceSection.CLOCK)))
+    }
+
+    @Test fun widgetOrderDraftReflowsOnlyItsPageAndKeepsStableIds() {
+        val first = WorkspaceWidget(11, "home", "test/First", heightDp = 96,
+            columnSpan = 2, rowSpan = 2, gridColumn = 0, gridRow = 0)
+        val otherPage = WorkspaceWidget(12, "widget:notes", "test/Other", heightDp = 96,
+            columnSpan = 1, rowSpan = 1, gridColumn = 3, gridRow = 5)
+        val second = WorkspaceWidget(13, "home", "test/Second", heightDp = 96,
+            columnSpan = 1, rowSpan = 1, gridColumn = 2, gridRow = 0)
+        val stored = listOf(first, otherPage, second)
+
+        assertEquals(listOf(13, 11, 12), normalizedWidgetOrderDraft(listOf(13, 11, 99),
+            listOf(11, 12, 13)))
+        val result = stored.withWidgetPageOrder("home", listOf(13, 11))
+        assertEquals(listOf(13, 12, 11), result.map { it.appWidgetId })
+        assertEquals(otherPage, result[1])
+        assertEquals(listOf(-1, -1), listOf(result[0].gridColumn, result[0].gridRow))
+        assertEquals(listOf(-1, -1), listOf(result[2].gridColumn, result[2].gridRow))
+        assertEquals(second.columnSpan, result[0].columnSpan)
+        assertEquals(first.rowSpan, result[2].rowSpan)
     }
 }

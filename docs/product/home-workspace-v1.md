@@ -123,7 +123,13 @@ Proposed initial Home (updated by the later drawer-order decision):
 2. User-added widgets, in saved order.
 3. A contextual Listening section when enabled and a headset is connected.
 
-Users can reorder Home's clock, widget and Listening sections. Most Used and
+Users reorder Home's clock, widget and Listening sections using full-width
+draggable tiles in Home settings. Holding and dragging changes a draft order;
+**Save order** commits it. No visible up/down arrow buttons are used. A failed
+save retains the draft and offers retry. Widget order on each Home page uses the
+same tile interaction, with configuration, sizing and removal still available.
+Saving widget order preserves widget identities and spans and repacks that
+page's grid in the chosen order; other pages keep their placements. Most Used and
 folders are absent from Home. All apps presents Most Used first (when enabled), one Folders section
 containing all visible shortcuts from both saved placements even when Most Used
 is off, then alphabetical apps. Pinned folders retain manual order before

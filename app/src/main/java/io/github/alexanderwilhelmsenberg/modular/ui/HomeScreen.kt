@@ -33,7 +33,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.layout.onSizeChanged
@@ -145,10 +144,8 @@ fun HomeScreen(
             (if (drawerFolders.isNotEmpty()) listOf("◇") else emptyList()) + sections.map { it.label }
     }
     val reachability = rememberSaveable(saver = Saver(save = { it.offsetPx }, restore = { HomeReachabilityState(it) })) { HomeReachabilityState() }
-    val density = LocalDensity.current
     var viewportHeight by remember { mutableIntStateOf(0) }
-    var navigationSpacePx by rememberSaveable { mutableIntStateOf(0) }
-    var jumpHeaderLabel by rememberSaveable { mutableStateOf<String?>(null) }
+    var navigationTailEnabled by rememberSaveable { mutableStateOf(false) }
     var jump by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var jumpSerial by remember { mutableIntStateOf(0) }
     LaunchedEffect(externalJump, externalJumpSerial) {
@@ -158,15 +155,13 @@ fun HomeScreen(
         } else if (externalJumpSerial > 0) {
             jump = null
             reachability.reset()
-            jumpHeaderLabel = null
-            navigationSpacePx = 0
+            navigationTailEnabled = false
         }
     }
     var savedAnchorIndex by rememberSaveable { mutableIntStateOf(-1) }
     var savedAnchorOffset by rememberSaveable { mutableIntStateOf(0) }
     var savedAnchorId by rememberSaveable { mutableStateOf<String?>(null) }
-    var savedJumpHeaderLabel by rememberSaveable { mutableStateOf<String?>(null) }
-    var savedNavigationSpacePx by rememberSaveable { mutableIntStateOf(0) }
+    var savedNavigationTailEnabled by rememberSaveable { mutableStateOf(false) }
     var previousQuery by remember { mutableStateOf(query) }
     var observedResetToken by rememberSaveable { mutableIntStateOf(homeResetToken) }
     val updateQuery: (String) -> Unit = { value ->
@@ -175,8 +170,7 @@ fun HomeScreen(
             savedAnchorIndex = listState.firstVisibleItemIndex
             savedAnchorOffset = listState.firstVisibleItemScrollOffset
             savedAnchorId = anchorableEntries.getOrNull(savedAnchorIndex - 1)?.id
-            savedJumpHeaderLabel = jumpHeaderLabel
-            savedNavigationSpacePx = navigationSpacePx
+            savedNavigationTailEnabled = navigationTailEnabled
         }
         if (value.isNotBlank()) listState.requestScrollToItem(0)
         if (searchQuery == null) localQuery = value else onSearchQueryChange?.invoke(value)
@@ -190,16 +184,13 @@ fun HomeScreen(
                     savedAnchorIndex = listState.firstVisibleItemIndex
                     savedAnchorOffset = listState.firstVisibleItemScrollOffset
                     savedAnchorId = anchorableEntries.getOrNull(savedAnchorIndex - 1)?.id
-                    savedJumpHeaderLabel = jumpHeaderLabel
-                    savedNavigationSpacePx = navigationSpacePx
+                    savedNavigationTailEnabled = navigationTailEnabled
                 }
                 reachability.reset()
-                navigationSpacePx = 0
-                jumpHeaderLabel = null
+                navigationTailEnabled = false
                 listState.requestScrollToItem(0)
             } else if (oldQuery.isNotBlank() && query.isBlank()) {
-                jumpHeaderLabel = savedJumpHeaderLabel?.takeIf { label -> entries.any { it is HomeListEntry.Header && it.navigationKey == label } }
-                navigationSpacePx = if (jumpHeaderLabel != null) savedNavigationSpacePx else 0
+                navigationTailEnabled = savedNavigationTailEnabled
                 androidx.compose.runtime.withFrameNanos { }
                 val currentIndex = entries.indexOfFirst { it.id == savedAnchorId }
                 if (currentIndex >= 0) listState.requestScrollToItem(currentIndex + 1, savedAnchorOffset)
@@ -207,8 +198,7 @@ fun HomeScreen(
                 else listState.requestScrollToItem(0)
                 savedAnchorIndex = -1
                 savedAnchorId = null
-                savedJumpHeaderLabel = null
-                savedNavigationSpacePx = 0
+                savedNavigationTailEnabled = false
             } else if (query.isNotBlank()) listState.requestScrollToItem(0)
         }
     }
@@ -218,12 +208,10 @@ fun HomeScreen(
             updateQuery("")
             savedAnchorIndex = -1
             savedAnchorId = null
-            savedJumpHeaderLabel = null
-            savedNavigationSpacePx = 0
+            savedNavigationTailEnabled = false
             previousQuery = ""
             reachability.reset()
-            navigationSpacePx = 0
-            jumpHeaderLabel = null
+            navigationTailEnabled = false
             listState.scrollToItem(0)
         }
     }
@@ -231,10 +219,9 @@ fun HomeScreen(
         val target = jump ?: return@LaunchedEffect
         val index = headerIndices[target.first] ?: return@LaunchedEffect
         reachability.reset()
-        navigationSpacePx = (viewportHeight / 3 - with(density) { 28.dp.roundToPx() }).coerceAtLeast(0)
-        jumpHeaderLabel = target.first
-        // Let the selected header and trailing space enter layout before targeting a
-        // late section; otherwise a short final section can clamp the jump early.
+        navigationTailEnabled = true
+        // Trailing room lets even the last header reach the top. Header heights
+        // stay unchanged, so navigation never inserts a gap into the app list.
         withFrameNanos { }
         listState.scrollToItem(index)
     }
@@ -254,9 +241,7 @@ fun HomeScreen(
                     entries = entries,
                     listState = listState,
                     reachability = reachability,
-                    navigationSpacePx = navigationSpacePx,
-                    jumpHeaderLabel = jumpHeaderLabel,
-                    viewportHeightPx = viewportHeight,
+                    navigationTailSpacePx = if (navigationTailEnabled) viewportHeight else 0,
                     pausedProfiles = pausedProfiles,
                     showIcons = showAppIcons,
                     wallpaperMode = wallpaperMode,

@@ -62,9 +62,7 @@ internal fun HomeAppList(
     entries: List<HomeListEntry>,
     listState: LazyListState,
     reachability: HomeReachabilityState,
-    navigationSpacePx: Int,
-    jumpHeaderLabel: String?,
-    viewportHeightPx: Int,
+    navigationTailSpacePx: Int,
     pausedProfiles: Set<Long>,
     showIcons: Boolean,
     wallpaperMode: Boolean,
@@ -107,7 +105,7 @@ internal fun HomeAppList(
         items(entries, key = { it.id }) { entry ->
             when (entry) {
                 is HomeListEntry.Header -> {
-                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(54.dp + with(androidx.compose.ui.platform.LocalDensity.current) { (if (entry.navigationKey == jumpHeaderLabel) navigationSpacePx else 0).toDp() }), contentAlignment = AbsoluteAlignment.BottomLeft) {
+                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(54.dp).testTag("section-container:${entry.navigationKey}"), contentAlignment = AbsoluteAlignment.BottomLeft) {
                         val start = (maxWidth * 0.126f).coerceAtLeast(16.dp)
                         Text(if (entry.label == "★") "Most Used" else entry.label,
                             Modifier.absoluteOffset(x = start).padding(bottom = 6.dp).testTag("section:${entry.navigationKey}"), color = foreground, fontSize = 22.sp, fontWeight = FontWeight.Medium, style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default)
@@ -167,6 +165,10 @@ internal fun HomeAppList(
             }
         }
         // Trailing space allows the last section's header to reach the upper third during a rail jump.
-        item(key = "navigation-tail-space") { Spacer(Modifier.height(with(androidx.compose.ui.platform.LocalDensity.current) { (if (navigationSpacePx > 0) viewportHeightPx * 0.67f else 16f).toDp() })) }
+        item(key = "navigation-tail-space") {
+            Spacer(Modifier.height(if (navigationTailSpacePx > 0)
+                with(androidx.compose.ui.platform.LocalDensity.current) { navigationTailSpacePx.toDp() }
+                else 16.dp))
+        }
     }
 }

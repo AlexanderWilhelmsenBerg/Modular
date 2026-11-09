@@ -3,14 +3,14 @@ package io.github.alexanderwilhelmsenberg.modular.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,11 +41,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.widgets.WidgetLayoutLimits
 import io.github.alexanderwilhelmsenberg.modular.workspace.WidgetAreaGeometry
 import io.github.alexanderwilhelmsenberg.modular.workspace.WidgetGridBand
+import io.github.alexanderwilhelmsenberg.modular.workspace.WidgetGridCell
 import io.github.alexanderwilhelmsenberg.modular.workspace.WidgetGridLayout
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePreferences
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
@@ -54,6 +57,33 @@ import io.github.alexanderwilhelmsenberg.modular.workspace.gridSpanHeightDp
 import io.github.alexanderwilhelmsenberg.modular.workspace.gridSpanWidthDp
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+
+/** Destination after moving a widget or dragging its resize grip. */
+internal data class WidgetGridTarget(
+    val column: Int,
+    val row: Int,
+    val columnSpan: Int,
+    val rowSpan: Int,
+)
+
+/** The top-right grid edge stays fixed while the bottom-left grip moves. */
+internal fun bottomLeftResizeTarget(
+    cell: WidgetGridCell,
+    dxDp: Float,
+    dyDp: Float,
+    columnStepDp: Int,
+    rowStepDp: Int,
+    columns: Int,
+): WidgetGridTarget {
+    val right = cell.column + cell.columnSpan
+    val left = (cell.column + (dxDp / columnStepDp.coerceAtLeast(1)).roundToInt())
+        .coerceIn(0, (right - 1).coerceAtLeast(0))
+    val rowDelta = (dyDp / rowStepDp.coerceAtLeast(1)).roundToInt()
+    val height = if (rowDelta == 0) cell.rowSpan else
+        (cell.rowSpan + rowDelta).coerceIn(1, 32)
+    return WidgetGridTarget(left.coerceAtMost(columns - 1), cell.row,
+        (right - left).coerceIn(1, columns), height)
+}
 
 /** One non-scrolling grid band within Home's lazy list. */
 @Composable
@@ -86,17 +116,8 @@ internal fun WorkspaceWidgetGrid(
     var removeError by remember { mutableStateOf<String?>(null) }
     val density = LocalDensity.current
     val hasSelection = band.cells.any { it.widget.appWidgetId == selectedId }
-    val selected = band.cells.firstOrNull { it.widget.appWidgetId == selectedId }
-    val selectedLimit = selected?.widget?.let(limits)
-    val controlCount = 4 + (if (selectedLimit?.canResizeWidth == true) 2 else 0) +
-        (if (selectedLimit?.canResizeHeight == true) 2 else 0)
-    val controlsPerRow = (geometry.widthDp / 44).coerceAtLeast(1)
-    val controlRows = (controlCount + controlsPerRow - 1) / controlsPerRow
-    // A narrow screen can wrap the labeled removal action at larger font scales.
-    val controlHeight = maxOf(48, (48 * density.fontScale).roundToInt())
     val extraHeight = if (editMode && hasSelection)
-        maxOf((rowHeight + rowGap) * 2,
-            controlRows * controlHeight + controlHeight * 2 + rowGap * 2) else 0
+        rowHeight + rowGap else 0
     val totalHeight = (band.heightDp + extraHeight)
         .coerceAtLeast(if (editMode && band.cells.isEmpty() && band.heightDp == 0) rowHeight * 2 else 0)
     val emptyHold = if (editMode) Modifier else Modifier.pointerInput(band, density) {
@@ -146,12 +167,9 @@ internal fun WorkspaceWidgetGrid(
             val targetColumn = (cell.column + (dxDp / columnStep).roundToInt())
                 .coerceIn(0, (columns - cell.columnSpan).coerceAtLeast(0))
             val targetRow = (cell.row + (dyDp / rowStep).roundToInt()).coerceIn(0, 256)
-            val targetWidthSpan = if (resizing) (cell.columnSpan + (dxDp / columnStep).roundToInt())
-                .coerceIn(1, columns - cell.column) else cell.columnSpan
-            val targetHeightSpan = if (resizing) (cell.rowSpan + (dyDp / rowStep).roundToInt())
-                .coerceIn(1, 32) else cell.rowSpan
-            val candidateColumn = if (resizing) cell.column else targetColumn
-            val candidateRow = if (resizing) cell.row else targetRow
+            val candidate = if (resizing) bottomLeftResizeTarget(cell, dxDp, dyDp,
+                columnStep, rowStep, columns) else WidgetGridTarget(targetColumn, targetRow,
+                cell.columnSpan, cell.rowSpan)
             fun valid(column: Int, row: Int, widthSpan: Int, heightSpan: Int): Boolean {
                 val keepLegacyHeight = widget.rowSpan == 0 && heightSpan == cell.rowSpan && heightSpan > 32
                 if (column < 0 || row !in 0..256 || column + widthSpan > columns || widthSpan < 1 ||
@@ -168,7 +186,7 @@ internal fun WorkspaceWidgetGrid(
                     column < other.column + other.columnSpan && column + widthSpan > other.column &&
                     row < other.row + other.rowSpan && row + heightSpan > other.row }
             }
-            val canDrop = valid(candidateColumn, candidateRow, targetWidthSpan, targetHeightSpan)
+            val canDrop = valid(candidate.column, candidate.row, candidate.columnSpan, candidate.rowSpan)
             fun save(column: Int, row: Int, widthSpan: Int, heightSpan: Int) {
                 if (savingId != null || !valid(column, row, widthSpan, heightSpan) ||
                     (column == cell.column && row == cell.row && widthSpan == cell.columnSpan && heightSpan == cell.rowSpan)) return
@@ -191,45 +209,45 @@ internal fun WorkspaceWidgetGrid(
                         .border(if (selected) 2.dp else 1.dp,
                             if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                             RoundedCornerShape(8.dp))
-                        .clickable { onSelect(widget.appWidgetId) })
+                        .clickable { onSelect(widget.appWidgetId) }
+                        .pointerInput(widget.appWidgetId, layout.cells, savingId) {
+                            detectDragGesturesAfterLongPress(onDragStart = {
+                                onSelect(widget.appWidgetId)
+                                drag = Offset.Zero
+                                resizing = false
+                            }, onDragEnd = {
+                                val x = with(density) { drag.x.toDp().value }
+                                val y = with(density) { drag.y.toDp().value }
+                                save((cell.column + (x / columnStep).roundToInt())
+                                    .coerceIn(0, (columns - cell.columnSpan).coerceAtLeast(0)),
+                                    (cell.row + (y / rowStep).roundToInt()).coerceIn(0, 256),
+                                    cell.columnSpan, cell.rowSpan)
+                                drag = Offset.Zero
+                            }, onDragCancel = { drag = Offset.Zero }) { change, amount ->
+                                change.consume()
+                                drag += amount
+                            }
+                        }.testTag("workspace-widget-move:${widget.appWidgetId}"))
                     if (selected) {
                         val color = if (canDrop) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                         if (drag != Offset.Zero) Box(Modifier.absoluteOffset {
-                            IntOffset((candidateColumn - cell.column) * with(density) { columnStep.dp.roundToPx() },
-                                (candidateRow - cell.row) * with(density) { rowStep.dp.roundToPx() })
-                        }.width(gridSpanWidthDp(targetWidthSpan, geometry, preferences).dp)
-                            .height(gridSpanHeightDp(targetHeightSpan, preferences).dp)
+                            IntOffset((candidate.column - cell.column) * with(density) { columnStep.dp.roundToPx() },
+                                (candidate.row - cell.row) * with(density) { rowStep.dp.roundToPx() })
+                        }.width(gridSpanWidthDp(candidate.columnSpan, geometry, preferences).dp)
+                            .height(gridSpanHeightDp(candidate.rowSpan, preferences).dp)
                             .border(2.dp, color, RoundedCornerShape(8.dp))
                             .background(color.copy(alpha = 0.14f)))
-                        Text("Move", Modifier.align(AbsoluteAlignment.TopLeft)
-                            .size(width = 56.dp, height = 48.dp)
-                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp))
-                            .pointerInput(widget.appWidgetId, layout.cells, savingId) {
-                                detectDragGestures(onDragEnd = {
-                                    val x = with(density) { drag.x.toDp().value }
-                                    val y = with(density) { drag.y.toDp().value }
-                                    save((cell.column + (x / columnStep).roundToInt())
-                                        .coerceIn(0, (columns - cell.columnSpan).coerceAtLeast(0)),
-                                        (cell.row + (y / rowStep).roundToInt()).coerceIn(0, 256),
-                                        cell.columnSpan, cell.rowSpan)
-                                    drag = Offset.Zero
-                                }, onDragCancel = { drag = Offset.Zero }) { change, amount ->
-                                    change.consume(); drag += amount
-                                }
-                            }.testTag("workspace-widget-move:${widget.appWidgetId}"),
-                            color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center)
                         val canResize = limit?.canResizeWidth == true || limit?.canResizeHeight == true
-                        if (canResize) Text("↘", Modifier.align(AbsoluteAlignment.BottomRight)
-                            .size(48.dp)
+                        if (canResize) Text("↙", Modifier.align(AbsoluteAlignment.BottomLeft)
+                            .size(32.dp)
                             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp))
                             .pointerInput(widget.appWidgetId, layout.cells, savingId) {
                                 detectDragGestures(onDragStart = { resizing = true }, onDragEnd = {
                                     val x = with(density) { drag.x.toDp().value }
                                     val y = with(density) { drag.y.toDp().value }
-                                    save(cell.column, cell.row,
-                                        (cell.columnSpan + (x / columnStep).roundToInt())
-                                            .coerceIn(1, columns - cell.column),
-                                        (cell.rowSpan + (y / rowStep).roundToInt()).coerceIn(1, 32))
+                                    val target = bottomLeftResizeTarget(cell, x, y,
+                                        columnStep, rowStep, columns)
+                                    save(target.column, target.row, target.columnSpan, target.rowSpan)
                                     drag = Offset.Zero; resizing = false
                                 }, onDragCancel = { drag = Offset.Zero; resizing = false }) { change, amount ->
                                     change.consume()
@@ -238,37 +256,32 @@ internal fun WorkspaceWidgetGrid(
                                 }
                             }.testTag("workspace-widget-resize:${widget.appWidgetId}"),
                             color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center)
+                        val trashColor = MaterialTheme.colorScheme.onSurface
+                        IconButton(onClick = {
+                            removeError = null
+                            confirmRemoveId = widget.appWidgetId
+                        }, enabled = savingId == null,
+                            modifier = Modifier.align(AbsoluteAlignment.TopRight).size(32.dp)
+                                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp))
+                                .testTag("workspace-widget-remove:${widget.appWidgetId}")
+                                .semantics { contentDescription = "Remove widget" }) {
+                            Canvas(Modifier.size(22.dp)) {
+                                val stroke = 2.dp.toPx()
+                                val w = size.width
+                                val h = size.height
+                                drawLine(trashColor, Offset(w * .18f, h * .25f),
+                                    Offset(w * .82f, h * .25f), stroke, cap = StrokeCap.Round)
+                                drawLine(trashColor, Offset(w * .38f, h * .14f),
+                                    Offset(w * .62f, h * .14f), stroke, cap = StrokeCap.Round)
+                                drawLine(trashColor, Offset(w * .26f, h * .34f),
+                                    Offset(w * .31f, h * .88f), stroke, cap = StrokeCap.Round)
+                                drawLine(trashColor, Offset(w * .74f, h * .34f),
+                                    Offset(w * .69f, h * .88f), stroke, cap = StrokeCap.Round)
+                                drawLine(trashColor, Offset(w * .31f, h * .88f),
+                                    Offset(w * .69f, h * .88f), stroke, cap = StrokeCap.Round)
+                            }
+                        }
                     }
-                }
-            }
-            if (editMode && selected) {
-                Column(Modifier.absoluteOffset(x = geometry.leftDp.dp, y = (band.heightDp + rowGap).dp)
-                    .width(geometry.widthDp.dp)) {
-                FlowRow(Modifier.testTag("workspace-widget-controls:${widget.appWidgetId}")) {
-                    GridControl("←", "Move widget left") { save(cell.column - 1, cell.row, cell.columnSpan, cell.rowSpan) }
-                    GridControl("→", "Move widget right") { save(cell.column + 1, cell.row, cell.columnSpan, cell.rowSpan) }
-                    GridControl("↑", "Move widget up") { save(cell.column, cell.row - 1, cell.columnSpan, cell.rowSpan) }
-                    GridControl("↓", "Move widget down") { save(cell.column, cell.row + 1, cell.columnSpan, cell.rowSpan) }
-                    if (limit?.canResizeWidth == true) GridControl("W−", "Make widget narrower") {
-                        save(cell.column, cell.row, (cell.columnSpan - 1).coerceAtLeast(1), cell.rowSpan)
-                    }
-                    if (limit?.canResizeWidth == true) GridControl("W+", "Make widget wider") {
-                        save(cell.column, cell.row, (cell.columnSpan + 1).coerceAtMost(columns - cell.column), cell.rowSpan)
-                    }
-                    if (limit?.canResizeHeight == true) GridControl("H−", "Make widget shorter") {
-                        save(cell.column, cell.row, cell.columnSpan, (cell.rowSpan - 1).coerceAtLeast(1))
-                    }
-                    if (limit?.canResizeHeight == true) GridControl("H+", "Make widget taller") {
-                        save(cell.column, cell.row, cell.columnSpan, cell.rowSpan + 1)
-                    }
-                }
-                TextButton(onClick = {
-                    removeError = null
-                    confirmRemoveId = widget.appWidgetId
-                }, enabled = savingId == null,
-                    modifier = Modifier.testTag("workspace-widget-remove:${widget.appWidgetId}")) {
-                    Text("Remove widget")
-                }
                 }
             }
         }
@@ -309,10 +322,4 @@ internal fun WorkspaceWidgetGrid(
             },
         )
     }
-}
-
-@Composable
-private fun GridControl(label: String, description: String, onClick: () -> Unit) {
-    TextButton(onClick = onClick, contentPadding = PaddingValues(0.dp),
-        modifier = Modifier.width(44.dp).semantics { contentDescription = description }) { Text(label) }
 }

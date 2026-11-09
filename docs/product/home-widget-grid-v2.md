@@ -60,20 +60,24 @@ diamond appears only when at least one folder shortcut is eligible.
   upward drag opens All apps from below. The reverse boundary handoff uses the
   same downward drag. Widget taps, scrolling and other provider gestures remain
   available outside edit mode.
-- Long press empty Home space to open a menu with **Add widget**, **Edit** and
+- Long press empty Home space or a widget to open the app-action-style bottom
+  sheet titled **Home screen**, with **Add widget**, **Edit** and
   **Advanced**. Edit enters the on-Home layout editor; Advanced opens the
   **Home grid** submenu directly. The settings route is Settings > Productivity
   > Home screens (page title **Home**) > Home grid. Back from Home grid returns
-  Home. Long pressing a native widget selects it and enters the layout editor.
-- In edit mode, select a widget, drag it between valid cells, or use its resize
-  handle to change column and row spans. Reject overlaps and sizes unsupported
-  by the provider; show an error when a save fails. On-Home controls provide
-  Move, Resize, **Remove widget** and Done. Remove widget asks for confirmation;
+  Home. Choosing Edit after holding a widget selects that widget. Home has no
+  permanent Add widget or Edit Home footer buttons.
+- In edit mode, hold and drag the widget body between valid cells. Drag its
+  physical bottom-left grip to resize column and row spans, keeping the top-right
+  corner fixed, including in RTL. Reject overlaps and sizes unsupported by the
+  provider; show an error when a save fails. There are no move arrows or size
+  increment buttons. The selected widget has a compact top-right **Remove widget**
+  icon, and the editor retains Done. Remove widget asks for confirmation;
   cancellation keeps the widget. A successful removal persists the change and
   releases its owned Android widget binding. A failed save keeps the widget and
   shows a retryable error. The provider app stays installed. Home screens settings provide provider configuration,
-  page moves, size/padding edits and Remove. Empty-space long press and widget
-  long press have distinct targets.
+  page moves, size/padding edits and Remove. Widget gestures outside edit mode
+  remain available to the provider; a launcher hold opens the Home screen sheet.
 - Android widget binding, consent, configuration, host lifecycle and recovery
   continue to follow Home workspace v1. The launcher reports measured content
   size to Android after layout changes.

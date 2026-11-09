@@ -117,17 +117,14 @@ class WidgetGridIntegrationTest {
     @Test fun widgetLongPressAndEmptySpaceExposeGridEditingActions() = withFixture { fixture ->
         fixture.withBlankHome {
             rule.onNodeWithTag("workspace-home").performScrollToIndex(0)
-            rule.waitUntil(15_000) {
-                runCatching { rule.onNodeWithTag("workspace-add-widget").assertIsDisplayed() }.isSuccess
-            }
+            rule.onNodeWithTag("workspace-add-widget").assertDoesNotExist()
+            rule.onNodeWithTag("workspace-edit").assertDoesNotExist()
             val home = rule.onNodeWithTag("workspace-home").fetchSemanticsNode().boundsInRoot
-            val actions = rule.onNodeWithTag("workspace-add-widget")
-                .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             val apps = rule.onNodeWithTag("workspace-apps-action")
                 .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-            val blankTop = actions.bottom + 12f * fixture.density
+            val blankTop = home.top + 156f * fixture.density
             val blankBottom = minOf(home.bottom, apps.top) - 12f * fixture.density
-            assertTrue("Short Home must leave wallpaper below its actions", blankBottom > blankTop)
+            assertTrue("Short Home must leave empty wallpaper", blankBottom > blankTop)
             val point = Offset(home.width * 0.4f, (blankTop + blankBottom) / 2f - home.top)
             rule.onNodeWithTag("workspace-home").performTouchInput { longClick(point) }
             rule.onNodeWithTag("workspace-home-menu").assertIsDisplayed()
@@ -137,8 +134,10 @@ class WidgetGridIntegrationTest {
         val widget = fixture.add(GridFixtureSmallProvider::class.java)
         fixture.placeAtStart(listOf(widget))
         nativeLongPress(widget.appWidgetId)
-        rule.onNodeWithTag("workspace-home-menu").assertIsNotDisplayed()
-        rule.onNodeWithTag("workspace-widget-controls:${widget.appWidgetId}").assertIsDisplayed()
+        rule.onNodeWithTag("workspace-home-menu").assertIsDisplayed()
+        rule.onNodeWithText("Home screen").assertIsDisplayed()
+        rule.onNodeWithTag("workspace-menu-edit").performClick()
+        rule.onNodeWithTag("workspace-widget-controls:${widget.appWidgetId}").assertDoesNotExist()
         rule.onNodeWithTag("workspace-widget-move:${widget.appWidgetId}").assertIsDisplayed()
         rule.onNodeWithTag("workspace-widget-resize:${widget.appWidgetId}").assertIsDisplayed()
         capture("edit")
@@ -146,7 +145,7 @@ class WidgetGridIntegrationTest {
         val originalCell = fixture.cell(widget.appWidgetId)
         val columnStep = originalCell.width + 8f * fixture.density
         val rowStep = 104f * fixture.density
-        drag("workspace-widget-move:${widget.appWidgetId}", columnStep, rowStep)
+        drag("workspace-widget-move:${widget.appWidgetId}", columnStep, rowStep, hold = true)
         rule.waitUntil(15_000) {
             fixture.snapshot().widgets.any {
                 it.appWidgetId == widget.appWidgetId && it.gridColumn == 1 && it.gridRow == 1
@@ -157,17 +156,22 @@ class WidgetGridIntegrationTest {
             columnStep / fixture.density)
         fixture.assertNear("moved one row", movedCell.top - originalCell.top, 104f)
 
-        drag("workspace-widget-resize:${widget.appWidgetId}", columnStep, rowStep)
+        val grip = rule.onNodeWithTag("workspace-widget-resize:${widget.appWidgetId}")
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue("Resize grip must be at the physical bottom-left", grip.center.x < movedCell.center.x &&
+            grip.center.y > movedCell.center.y)
+        drag("workspace-widget-resize:${widget.appWidgetId}", -columnStep, rowStep)
         rule.waitUntil(15_000) {
             fixture.snapshot().widgets.any {
                 it.appWidgetId == widget.appWidgetId && it.columnSpan == 2 && it.rowSpan == 2 &&
-                    it.gridColumn == 1 && it.gridRow == 1
+                    it.gridColumn == 0 && it.gridRow == 1
             }
         }
         val resizedCell = fixture.cell(widget.appWidgetId)
         fixture.assertNear("two-row resized cell", resizedCell.height, 2 * 96f + 8f)
         fixture.assertNear("two-column resized cell", resizedCell.width,
             (2 * originalCell.width + 8f * fixture.density) / fixture.density)
+        fixture.assertNear("bottom-left resize keeps right edge fixed", resizedCell.right - movedCell.right, 0f)
         val grid = gridContaining(resizedCell)
         assertTrue("Resized widget must remain inside its grid", resizedCell.right <= grid.right)
         fixture.snapshot().widgets.filter { it.pageId == "home" && it.appWidgetId != widget.appWidgetId }
@@ -201,6 +205,7 @@ class WidgetGridIntegrationTest {
         val widget = fixture.add(GridFixtureSmallProvider::class.java)
         fixture.placeAtStart(listOf(widget))
         nativeLongPress(widget.appWidgetId)
+        rule.onNodeWithTag("workspace-menu-edit").performClick()
         rule.onNodeWithTag("workspace-widget-remove:${widget.appWidgetId}").assertIsDisplayed().performClick()
         rule.onNodeWithTag("workspace-widget-remove-confirm").assertIsDisplayed()
         rule.onNodeWithText("Cancel").performClick()
@@ -240,14 +245,15 @@ class WidgetGridIntegrationTest {
         Thread.sleep(ViewConfiguration.getLongPressTimeout() + 200L)
         inject(MotionEvent.ACTION_UP)
         rule.waitUntil(15_000) {
-            rule.onAllNodesWithTag("workspace-widget-controls:$id").fetchSemanticsNodes().isNotEmpty()
+            rule.onAllNodesWithTag("workspace-home-menu").fetchSemanticsNodes().isNotEmpty()
         }
     }
 
-    private fun drag(tag: String, deltaX: Float, deltaY: Float) {
+    private fun drag(tag: String, deltaX: Float, deltaY: Float, hold: Boolean = false) {
         rule.onNodeWithTag(tag).performTouchInput {
             val start = center
             down(start)
+            if (hold) advanceEventTime(ViewConfiguration.getLongPressTimeout() + 100L)
             for (step in 1..10) {
                 moveTo(start + Offset(deltaX * step / 10f, deltaY * step / 10f), 20L)
             }
@@ -376,9 +382,7 @@ class WidgetGridIntegrationTest {
                 rule.onNodeWithTag("workspace-home").performScrollToIndex(0)
                 rule.waitUntil(15_000) {
                     homeWidgets.all { rule.onAllNodesWithTag("workspace-widget-cell:${it.appWidgetId}")
-                        .fetchSemanticsNodes().isEmpty() } &&
-                        runCatching { rule.onNodeWithTag("workspace-add-widget")
-                            .assertIsDisplayed() }.isSuccess
+                        .fetchSemanticsNodes().isEmpty() }
                 }
                 block()
             } finally {
@@ -421,8 +425,9 @@ class WidgetGridIntegrationTest {
             val provider = ComponentName(test, providerClass).flattenToString()
             val before = snapshot().widgets.map { it.appWidgetId }.toSet()
             val tag = "widget-provider:$provider"
-            rule.onNodeWithTag("workspace-home").performScrollToNode(hasTestTag("workspace-add-widget"))
-            rule.onNodeWithTag("workspace-add-widget").performClick()
+            rule.onNodeWithTag("workspace-home").performScrollToIndex(0)
+            rule.onNodeWithTag("workspace-empty-edit-space").performTouchInput { longClick() }
+            rule.onNodeWithTag("workspace-menu-add-widget").performClick()
             rule.onNodeWithTag("widget-provider-list").performScrollToNode(hasTestTag(tag))
             rule.onNodeWithTag(tag).performClick()
             rule.waitUntil(15_000) {

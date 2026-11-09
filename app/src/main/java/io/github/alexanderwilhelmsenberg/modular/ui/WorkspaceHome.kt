@@ -19,19 +19,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -111,10 +107,17 @@ internal fun WorkspaceHome(
     val pageWidgets = remember(widgets, pageId) { widgets.filter { it.pageId == pageId } }
     var editMode by rememberSaveable(pageId) { mutableStateOf(false) }
     var selectedWidgetId by rememberSaveable(pageId) { mutableStateOf<Int?>(null) }
-    var menuOpen by remember { mutableStateOf(false) }
+    var sheetOpen by remember { mutableStateOf(false) }
+    var pendingWidgetId by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(pageWidgets, selectedWidgetId) {
         if (selectedWidgetId != null && pageWidgets.none { it.appWidgetId == selectedWidgetId })
             selectedWidgetId = null
+    }
+    LaunchedEffect(pageWidgets, pendingWidgetId) {
+        if (pendingWidgetId != null && pageWidgets.none { it.appWidgetId == pendingWidgetId }) {
+            pendingWidgetId = null
+            sheetOpen = false
+        }
     }
     DisposableEffect(pageId, pageActive, editMode) {
         if (pageActive) onEditingChange(editMode)
@@ -122,10 +125,15 @@ internal fun WorkspaceHome(
     }
     BackHandler(editMode) { editMode = false; selectedWidgetId = null; onEditingChange(false) }
     fun startEditing(id: Int? = null) {
-        menuOpen = false
+        sheetOpen = false
+        pendingWidgetId = null
         selectedWidgetId = id
         editMode = true
         onEditingChange(true)
+    }
+    fun openSheet(id: Int? = null) {
+        pendingWidgetId = id
+        sheetOpen = true
     }
     val sectionOrder = if (mainHome) preferences.sectionOrder.distinct().let { order ->
         if (editMode && WorkspaceSection.WIDGETS !in order) listOf(WorkspaceSection.WIDGETS) + order else order
@@ -172,7 +180,7 @@ internal fun WorkspaceHome(
                 } else {
                     awaitLongPressOrCancellation(down.id)?.let { held ->
                         held.consume()
-                        menuOpen = true
+                        openSheet()
                     }
                 }
             }
@@ -181,7 +189,7 @@ internal fun WorkspaceHome(
     ) {
         item(key = "workspace-empty-top") {
             Box(Modifier.fillMaxWidth().height(52.dp)
-                .combinedClickable(onClick = {}, onLongClick = { menuOpen = true })
+                .combinedClickable(onClick = {}, onLongClick = { openSheet() })
                 .testTag("workspace-empty-edit-space"))
         }
         if (pageTitle != null) item(key = "page-heading") {
@@ -192,7 +200,7 @@ internal fun WorkspaceHome(
             when (section) {
                 WorkspaceSection.CLOCK -> if (preferences.showClock || preferences.showDate || preferences.showBattery) {
                     item(key = "workspace-clock") {
-                        Box(Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { menuOpen = true })) {
+                        Box(Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { openSheet() })) {
                             WorkspaceClock(preferences, foreground, clockActive)
                         }
                     }
@@ -214,8 +222,8 @@ internal fun WorkspaceHome(
                     items(widgetBands, key = { "widget-band:${it.topDp}:${it.cells.firstOrNull()?.widget?.appWidgetId}" }) { band ->
                         WorkspaceWidgetGrid(gridLayout, band, preferences, geometry, editMode,
                             selectedWidgetId, onSelect = { selectedWidgetId = it },
-                            onLongPress = { startEditing(it) }, limits = widgetLayoutLimits,
-                            onEmptyLongPress = { menuOpen = true },
+                            onLongPress = { openSheet(it) }, limits = widgetLayoutLimits,
+                            onEmptyLongPress = { openSheet() },
                             onSave = onSaveWidgetGrid, onRemoveWidget = onRemoveWidget,
                             onRemoved = { if (selectedWidgetId == it) selectedWidgetId = null },
                             widgetContent = widgetContent)
@@ -239,28 +247,13 @@ internal fun WorkspaceHome(
                 }
             }
         }
-        item(key = "workspace-actions") {
-            Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 52.dp, top = 18.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onAddWidget, modifier = Modifier.testTag("workspace-add-widget")) { Text("Add widget") }
-                    TextButton(onClick = { startEditing() }, modifier = Modifier.testTag("workspace-edit")) { Text("Edit Home") }
-                }
-            }
-        }
     }
-    Box(Modifier.absoluteOffset(x = 16.dp, y = 96.dp)) {
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false },
-            modifier = Modifier.testTag("workspace-home-menu")) {
-            DropdownMenuItem(text = { Text("Add widget") }, onClick = {
-                menuOpen = false; onAddWidget()
-            }, modifier = Modifier.testTag("workspace-menu-add-widget"))
-            DropdownMenuItem(text = { Text("Edit") }, onClick = { startEditing() },
-                modifier = Modifier.testTag("workspace-menu-edit"))
-            DropdownMenuItem(text = { Text("Advanced") }, onClick = {
-                menuOpen = false; onOpenWorkspaceAdvanced()
-            }, modifier = Modifier.testTag("workspace-menu-advanced"))
-        }
-    }
+    if (sheetOpen) HomeActionsSheet(
+        onDismiss = { sheetOpen = false; pendingWidgetId = null },
+        onAddWidget = { sheetOpen = false; pendingWidgetId = null; onAddWidget() },
+        onEdit = { startEditing(pendingWidgetId) },
+        onAdvanced = { sheetOpen = false; pendingWidgetId = null; onOpenWorkspaceAdvanced() },
+    )
     }
 }
 

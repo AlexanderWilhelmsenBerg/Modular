@@ -115,10 +115,11 @@ are retained. Wallpaper stays off until chosen.
   show `#` only when numeric/symbol apps are present. Refresh the rail when apps
   are installed, removed, renamed, hidden, restored, or the locale changes.
   The optional provider's `★` destination remains available for its setup state.
-- Tap a letter to bring its header into view. During press-and-slide navigation,
-  target the selected header near the upper third of the usable list viewport,
-  matching the selected-K reference state; allow leading/trailing navigation
-  space at list boundaries so edge sections remain reachable. Retain that section
+- Tap a letter or press-and-slide to bring its normal-height header to the top
+  of the usable list viewport. Navigation must not insert blank space above a
+  letter or inflate the header, including after scrolling back to earlier apps.
+  Trailing room may be added below the list so the final section can reach the
+  same position as a middle section. Retain that section
   anchor on release. Press-and-slide continuously to navigate. Use absolute finger position in the fixed rail lane for hit mapping;
   visual displacement must not cause feedback loops or change the touched bucket.
 - During drag, letters nearest the finger bow inward to the left; displacement

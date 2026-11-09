@@ -56,3 +56,11 @@ For drawer entry, reopen from a scrolled letter and from a category using a long
 upward Home swipe. Central All apps must land at offset zero with Most Used
 visible when enabled; remaining opening travel cannot skip it. Verify a fresh
 drawer gesture and alphabet navigation still scroll normally.
+
+For section navigation, verify middle and final letters land at the list top
+with their normal header height, and that scrolling back reveals the preceding
+app without an inserted gap. Manual pull-down reachability remains independent.
+For Home settings ordering, verify full-width tile dragging creates a draft,
+Save order persists it, a failed save retains it, and widget IDs/spans and
+unrelated page placements survive per-page reordering. Capture section and
+widget ordering controls across the workspace screenshot matrix.

@@ -11,10 +11,14 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.alexanderwilhelmsenberg.modular.MainActivity
@@ -52,6 +56,45 @@ class WorkspaceScreenshotTest {
                 runCatching { rule.onNodeWithTag("workspace-all-apps").assertIsDisplayed() }.isSuccess
             }
             capture("all-apps")
+
+            val store = OrganizationStore(InstrumentationRegistry.getInstrumentation().targetContext)
+            val originalPreferences = runBlocking { store.currentSnapshot().workspacePreferences }
+            try {
+                runBlocking {
+                    val snapshot = store.currentSnapshot()
+                    store.update(OrganizationBatch(listOf(OrganizationEdit.SetWorkspacePreferences(
+                        originalPreferences.copy(sectionOrder = listOf(WorkspaceSection.CLOCK,
+                            WorkspaceSection.WIDGETS, WorkspaceSection.MOST_USED,
+                            WorkspaceSection.LISTENING)))), snapshot.revision)).getOrThrow()
+                }
+                rule.onNodeWithTag("workspace-home-action").performClick()
+                openHomeSettings()
+                rule.onNodeWithTag("workspace-section-tile:CLOCK")
+                    .performScrollTo().assertIsDisplayed()
+                capture("section-order-tiles")
+                rule.onNodeWithTag("workspace-section-tile-options:CLOCK").performClick()
+                rule.onNodeWithText("Move down").performClick()
+                rule.onNodeWithTag("workspace-section-order-save")
+                    .performScrollTo().assertIsDisplayed().assertIsEnabled()
+                capture("section-order-draft")
+                rule.onNodeWithTag("workspace-section-order-save").performClick()
+                rule.waitUntil(15_000) {
+                    runBlocking { store.currentSnapshot().workspacePreferences.sectionOrder }
+                        .filter { it != WorkspaceSection.MOST_USED } == listOf(
+                            WorkspaceSection.WIDGETS, WorkspaceSection.CLOCK,
+                            WorkspaceSection.LISTENING) && runCatching {
+                        rule.onNodeWithTag("workspace-section-order-save").assertIsNotEnabled()
+                    }.isSuccess
+                }
+                capture("section-order-saved")
+            } finally {
+                runBlocking {
+                    val snapshot = store.currentSnapshot()
+                    store.update(OrganizationBatch(listOf(
+                        OrganizationEdit.SetWorkspacePreferences(originalPreferences)),
+                        snapshot.revision)).getOrThrow()
+                }
+            }
         }
     }
 
@@ -237,6 +280,24 @@ class WorkspaceScreenshotTest {
                 assertNear("recreated paired widget top edges", recreatedPair[0].top, recreatedPair[1].top)
                 assertTrue("Recreated widgets must still share a row",
                     recreatedPair[0].right < recreatedPair[1].left)
+
+                openHomeSettings()
+                rule.onNodeWithTag("workspace-widget-order-tile:${ids[1]}")
+                    .performScrollTo().assertIsDisplayed()
+                capture("widget-order-tiles")
+                rule.onNodeWithTag("workspace-widget-order-tile-options:${ids[1]}").performClick()
+                rule.onNodeWithText("Move down").performClick()
+                rule.onNodeWithTag("workspace-widget-order-save")
+                    .performScrollTo().assertIsDisplayed().assertIsEnabled()
+                capture("widget-order-draft")
+                rule.onNodeWithTag("workspace-widget-order-save").performClick()
+                rule.waitUntil(15_000) {
+                    runBlocking { store.currentSnapshot().widgets.take(3).map { it.appWidgetId } } ==
+                        listOf(ids[2], ids[1], ids[0]) && runCatching {
+                        rule.onNodeWithTag("workspace-widget-order-save").assertIsNotEnabled()
+                    }.isSuccess
+                }
+                capture("widget-order-saved")
             } finally {
                 try {
                     runBlocking {
@@ -258,6 +319,12 @@ class WorkspaceScreenshotTest {
             rule.onAllNodesWithTag("workspace-home").fetchSemanticsNodes().isNotEmpty()
         }
         rule.onNodeWithTag("workspace-home").assertIsDisplayed()
+    }
+
+    private fun openHomeSettings() {
+        rule.onNodeWithTag("home-settings").performClick()
+        rule.onNodeWithTag("settings-open-productivity").performClick()
+        rule.onNodeWithTag("settings-open-home").performClick()
     }
 
     private fun withRequestedTheme(block: () -> Unit) {
@@ -287,9 +354,10 @@ class WorkspaceScreenshotTest {
         val file = File(requireNotNull(context.getExternalFilesDir("workspace-screenshots")),
             "workspace-$scene-${width}dp-$theme-font$font-$direction.png")
         FileOutputStream(file).use { out ->
-            // The drawer is pure Compose; capture its settled drawn surface rather
+            // The drawer and settings are pure Compose; capture their settled drawn surface rather
             // than a previous Home frame still held by the window compositor.
-            val bitmap = if (scene == "all-apps") rule.onRoot().captureToImage().asAndroidBitmap()
+            val bitmap = if (scene == "all-apps" || scene.startsWith("section-order") ||
+                scene.startsWith("widget-order")) rule.onRoot().captureToImage().asAndroidBitmap()
                 else {
                     instrumentation.waitForIdleSync()
                     SystemClock.sleep(200) // Let native widget views reach the compositor.

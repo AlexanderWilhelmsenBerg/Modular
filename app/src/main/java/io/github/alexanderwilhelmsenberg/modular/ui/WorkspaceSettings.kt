@@ -95,6 +95,19 @@ fun WorkspaceSettingsUi(
     var editWidgetId by remember { mutableStateOf<Int?>(null) }
     var editWidgetArea by remember { mutableStateOf(false) }
     var selectedPageId by rememberSaveable { mutableStateOf(WorkspacePageId.HOME) }
+    var sectionDraft by remember { mutableStateOf<List<WorkspaceSection>?>(null) }
+    var sectionOrderError by remember { mutableStateOf<String?>(null) }
+    var widgetDrafts by remember { mutableStateOf<Map<String, List<Int>>>(emptyMap()) }
+    var widgetOrderErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(snapshot.workspacePreferences.sectionOrder) {
+        if (sectionDraft == snapshot.workspacePreferences.sectionOrder.filter {
+                it != WorkspaceSection.MOST_USED }) sectionDraft = null
+    }
+    LaunchedEffect(snapshot.widgets) {
+        widgetDrafts = widgetDrafts.filterNot { (page, draft) ->
+            draft == snapshot.widgets.filter { it.pageId == page }.map { it.appWidgetId }
+        }
+    }
     LaunchedEffect(initialOpenRequest) {
         if (initialOpenRequest > 0) {
             selectedPageId = initialPageId
@@ -104,7 +117,7 @@ fun WorkspaceSettingsUi(
     }
     LaunchedEffect(error) { if (error != null) dialogScroll.animateScrollTo(0) }
 
-    fun save(edit: OrganizationEdit, afterSuccess: () -> Unit = {}) {
+    fun save(edit: OrganizationEdit, onFailure: ((String) -> Unit)? = null, afterSuccess: () -> Unit = {}) {
         if (busy) return
         busy = true
         error = null
@@ -114,7 +127,8 @@ fun WorkspaceSettingsUi(
             }.getOrElse { Result.failure(it) }
             busy = false
             result.onSuccess { afterSuccess() }.onFailure {
-                error = it.message ?: "Could not save Home screens. Try again."
+                val message = it.message ?: "Could not save Home screens. Try again."
+                if (onFailure == null) error = message else onFailure(message)
             }
         }
     }
@@ -194,20 +208,28 @@ fun WorkspaceSettingsUi(
                 Text("Home section order", style = MaterialTheme.typography.titleSmall)
                 Text("When enabled, Most Used appears at the top of App drawer. Folders follow, above the alphabetical app list.",
                     style = MaterialTheme.typography.bodySmall)
-                val homeSections = prefs.sectionOrder.filter { it != WorkspaceSection.MOST_USED }
-                homeSections.forEachIndexed { index, section ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(section.label(), Modifier.weight(1f).padding(top = 12.dp), maxLines = 1)
-                        TextButton(enabled = !busy && index > 0, onClick = {
-                            save(OrganizationEdit.SetWorkspacePreferences(prefs.copy(
-                                sectionOrder = prefs.sectionOrder.swappedHomeSections(section, homeSections[index - 1]))))
-                        }) { Text("↑") }
-                        TextButton(enabled = !busy && index < homeSections.lastIndex, onClick = {
-                            save(OrganizationEdit.SetWorkspacePreferences(prefs.copy(
-                                sectionOrder = prefs.sectionOrder.swappedHomeSections(section, homeSections[index + 1]))))
-                        }) { Text("↓") }
-                    }
+                val savedHomeSections = prefs.sectionOrder.filter { it != WorkspaceSection.MOST_USED }
+                val homeSections = sectionDraft?.takeIf { it.toSet() == savedHomeSections.toSet() }
+                    ?: savedHomeSections
+                DragOrderTiles(homeSections, identity = { it.name }, label = { it.label() },
+                    tagPrefix = "workspace-section-tile", enabled = !busy,
+                    onMove = { from, to ->
+                        sectionDraft = homeSections.moved(from, to)
+                        sectionOrderError = null
+                    })
+                Button(onClick = {
+                    val updated = prefs.copy(sectionOrder =
+                        prefs.sectionOrder.withHomeSectionOrder(homeSections))
+                    save(OrganizationEdit.SetWorkspacePreferences(updated),
+                        afterSuccess = { sectionOrderError = null },
+                        onFailure = { sectionOrderError = it })
+                }, enabled = !busy && homeSections != savedHomeSections,
+                    modifier = Modifier.fillMaxWidth().testTag("workspace-section-order-save")) {
+                    Text("Save order")
                 }
+                sectionOrderError?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("workspace-section-order-error")) }
                 Text("Widgets", style = MaterialTheme.typography.titleMedium)
                 val widgetPages = listOf(WorkspacePageId.HOME to "Home") +
                     snapshot.workspacePages.map { WorkspacePageId.widget(it.id) to it.name }
@@ -223,23 +245,25 @@ fun WorkspaceSettingsUi(
                     OutlinedButton(onClick = { add(selectedPage.first) }, enabled = !busy,
                         modifier = Modifier.fillMaxWidth().testTag("workspace-add-widget")) { Text("Add widget to ${selectedPage.second}") }
                 }
-                val widgets = snapshot.widgets.filter { it.pageId == selectedPage.first }
+                val savedWidgets = snapshot.widgets.filter { it.pageId == selectedPage.first }
+                val savedIds = savedWidgets.map { it.appWidgetId }
+                val draftIds = widgetDrafts[selectedPage.first]?.let {
+                    normalizedWidgetOrderDraft(it, savedIds)
+                } ?: savedIds
+                val widgetsById = savedWidgets.associateBy { it.appWidgetId }
+                val widgets = draftIds.mapNotNull(widgetsById::get)
                 if (widgets.isEmpty()) Text("No widgets on this screen.", style = MaterialTheme.typography.bodySmall)
-                widgets.forEachIndexed { index, widget ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Text(widgetLabel(widget).ifBlank { "Unavailable widget" },
-                            style = MaterialTheme.typography.bodyMedium)
-                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            TextButton(enabled = !busy && index > 0, onClick = {
-                                if (onMoveWidgetBy != null) onMoveWidgetBy(widget.appWidgetId, -1)
-                                else save(OrganizationEdit.SetWidgets(snapshot.widgets.swapped(
-                                    widget.appWidgetId, widgets[index - 1].appWidgetId)))
-                            }) { Text("↑") }
-                            TextButton(enabled = !busy && index < widgets.lastIndex, onClick = {
-                                if (onMoveWidgetBy != null) onMoveWidgetBy(widget.appWidgetId, 1)
-                                else save(OrganizationEdit.SetWidgets(snapshot.widgets.swapped(
-                                    widget.appWidgetId, widgets[index + 1].appWidgetId)))
-                            }) { Text("↓") }
+                if (widgets.isNotEmpty()) Text("Hold and drag widgets to change their order on this screen.",
+                    style = MaterialTheme.typography.bodySmall)
+                DragOrderTiles(widgets, identity = { it.appWidgetId.toString() },
+                    label = { widgetLabel(it).ifBlank { "Unavailable widget" } },
+                    tagPrefix = "workspace-widget-order-tile", enabled = !busy,
+                    onMove = { from, to ->
+                        widgetDrafts = widgetDrafts + (selectedPage.first to draftIds.moved(from, to))
+                        widgetOrderErrors = widgetOrderErrors - selectedPage.first
+                    }, afterItem = { widget ->
+                        FlowRow(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             widgetPages.filter { it.first != widget.pageId }.forEach { (id, name) ->
                                 TextButton(enabled = !busy, onClick = {
                                     if (onMoveWidget != null) onMoveWidget(widget.appWidgetId, id)
@@ -267,7 +291,23 @@ fun WorkspaceSettingsUi(
                                 TextButton(enabled = !busy, onClick = { remove(widget.appWidgetId) }) { Text("Remove") }
                             }
                         }
+                    })
+                if (widgets.isNotEmpty()) {
+                    Button(onClick = {
+                        val reordered = snapshot.widgets.withWidgetPageOrder(selectedPage.first, draftIds)
+                        save(OrganizationEdit.SetWidgets(reordered),
+                            afterSuccess = { widgetOrderErrors = widgetOrderErrors - selectedPage.first },
+                            onFailure = {
+                            widgetOrderErrors = widgetOrderErrors + (selectedPage.first to it)
+                        })
+                    }, enabled = !busy && draftIds != savedIds,
+                        modifier = Modifier.fillMaxWidth().testTag("workspace-widget-order-save")) {
+                        Text("Save widget order")
                     }
+                    widgetOrderErrors[selectedPage.first]?.let { Text(it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag("workspace-widget-order-error")) }
                 }
             }
         }
@@ -313,7 +353,7 @@ fun WorkspaceSettingsUi(
         error = error,
         onDismiss = { editWidgetArea = false },
         onSave = { preferences, onSuccess ->
-            save(OrganizationEdit.SetWorkspacePreferences(preferences), onSuccess)
+            save(OrganizationEdit.SetWorkspacePreferences(preferences), afterSuccess = onSuccess)
         },
     )
     snapshot.widgets.firstOrNull { it.appWidgetId == editWidgetId }?.let { widget ->
@@ -333,6 +373,34 @@ fun WorkspaceSettingsUi(
 internal fun <T> List<T>.moved(from: Int, to: Int): List<T> =
     if (from !in indices || to !in indices || from == to) this
     else toMutableList().apply { add(to, removeAt(from)) }
+
+/** Keep the legacy Most Used entry in its stored slot while ordering visible Home sections. */
+internal fun List<WorkspaceSection>.withHomeSectionOrder(
+    draft: List<WorkspaceSection>,
+): List<WorkspaceSection> {
+    val visible = filter { it != WorkspaceSection.MOST_USED }
+    if (draft.size != visible.size || draft.toSet() != visible.toSet()) return this
+    val reordered = draft.iterator()
+    return map { if (it == WorkspaceSection.MOST_USED) it else reordered.next() }
+}
+
+internal fun normalizedWidgetOrderDraft(draft: List<Int>, current: List<Int>): List<Int> =
+    draft.filter { it in current }.distinct() + current.filter { it !in draft }
+
+/** Match the existing move-by behavior: order within this page, then first-fit its grid cells. */
+internal fun List<WorkspaceWidget>.withWidgetPageOrder(pageId: String, draft: List<Int>): List<WorkspaceWidget> {
+    val current = filter { it.pageId == pageId }
+    val currentIds = current.map { it.appWidgetId }
+    val normalized = normalizedWidgetOrderDraft(draft, currentIds)
+    if (normalized == currentIds) return this
+    val byId = current.associateBy { it.appWidgetId }
+    val reordered = normalized.map { byId.getValue(it) }
+    var next = 0
+    return map { widget ->
+        if (widget.pageId == pageId) reordered[next++].copy(gridColumn = -1, gridRow = -1)
+        else widget
+    }
+}
 
 /** Reorder visible Home sections while keeping the legacy Most Used slot in storage. */
 internal fun List<WorkspaceSection>.swappedHomeSections(

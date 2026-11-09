@@ -86,6 +86,11 @@ diamond appears only when at least one folder shortcut is eligible.
 - Android widget binding, consent, configuration, host lifecycle and recovery
   continue to follow Home workspace v1. The launcher reports measured content
   size to Android after layout changes.
+- Home settings uses wide hold-and-drag tiles for section order and per-page
+  widget order, followed by an explicit Save order action. Dragging updates only
+  the draft. Widget-order saves repack that page while retaining IDs, spans,
+  padding and other pages' placements; failed writes leave the draft available
+  for retry. Widget configure, size/layout and remove actions remain available.
 
 ## Storage and limits
 

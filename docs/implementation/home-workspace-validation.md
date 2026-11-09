@@ -31,6 +31,15 @@ Activity recreation. The existing capture matrix includes these widget layouts.
 Run results and screenshot review are recorded in the implementing pull request;
 these test descriptions alone are not a claim that device acceptance is complete.
 
+The later [Home widget grid v2](../product/home-widget-grid-v2.md) supersedes
+the paired-row behavior. Its added model, storage and native test inventory,
+plus unexecuted device checks, are in the
+[grid validation record](home-widget-grid-v2-validation.md).
+The latest drawer-order decision puts Most Used, one combined Folders section,
+then alphabetical apps in All apps. Home contains no Most Used or folders.
+Check both rail destinations and confirm visible Pinned folders remain in the
+drawer when Most Used is disabled; the grid validation record tracks final CI.
+
 ## Device acceptance still required
 
 - On a Samsung device with gesture navigation, drag a scrollable widget and a

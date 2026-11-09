@@ -6,6 +6,7 @@ The authorized [Home workspace v1](home-workspace-v1.md) update introduces a
 landing Home above All apps, stacked Android widgets, custom left/right pages
 and Listening apps. It supersedes the earlier default-Home-is-the-app-list and
 All-apps pull-down reachability wording below; category-list reachability stays.
+The current widget placement contract is [Home widget grid v2](home-widget-grid-v2.md).
 Implementation and acceptance are tracked in
 [the workspace acceptance record](../implementation/home-workspace-validation.md).
 
@@ -321,7 +322,7 @@ default source under [ADR-0007](../decisions/ADR-0007-local-most-used-learning.m
 - Core renders the validated descriptor's flat settings as ordinary controls: switches,
   bounded number fields, text fields, and enumerated choices. Normal setup requires no
   JSON, manual instance creation, capability identifiers, or context creation.
-- A sort helper's **Use on Home** action validates and saves its settings and selects its
+- A sort helper's **Use in App drawer** action validates and saves its settings and selects its
   ordering atomically. **Save settings** updates active settings without manual deactivation.
   Failed changes preserve the previous working configuration. **Use alphabetical order**
   restores the built-in order. Advanced instance/context tools remain optional.
@@ -427,7 +428,7 @@ retroactively claim implementation or acceptance. Delivery slices are in the
 
 ## 22. Home workspace, widgets and Listening apps
 
-Core provides a configurable landing Home with a vertical widget stack above
+Core provides a configurable landing Home with a vertically scrolling widget grid above
 All apps. Upward dragging scrolls Home content first, then brings All apps from
 below at the bottom boundary. Downward dragging scrolls All apps to its top,
 then brings Home from above. The visible populated alphabet opens a selected
@@ -436,9 +437,13 @@ platform consent/configuration and Core-hosted views; they do not require
 Modular add-on APKs or Usage Access.
 
 The unified page organizer retains category order and adds custom widget pages
-on either side of the permanent Home. Most Used and its folders move to Home;
-app-list folders remain at the bottom of All apps. Listening apps are selected
-and ordered by the user and appear on a matching headset output connection.
+on either side of the permanent Home. Home contains clock, widgets and contextual
+Listening. All apps shows Most Used at the top, then one Folders section combining
+all visible shortcuts regardless of the Most Used toggle, then alphabetical apps.
+Pinned folders retain manual order before alphabetically sorted folders; saved
+placement values remain compatible and there is no Show on Home folder option.
+The Home star opens drawer Most Used; the diamond opens drawer Folders. Listening
+apps are selected and ordered by the user and appear on a matching headset output connection.
 Core shares foreground audio signals with smart folders; no scanning, automatic
 playback or background service is introduced. Future add-on page rendering is
 reserved architecture, not an implemented capability.

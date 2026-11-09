@@ -2,6 +2,28 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <receiver
+            android:name="io.github.alexanderwilhelmsenberg.modular.ui.GridFixtureLargeProvider"
+            android:exported="true"
+            android:label="Large grid fixture">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/grid_fixture_large_widget" />
+        </receiver>
+        <receiver
+            android:name="io.github.alexanderwilhelmsenberg.modular.ui.GridFixtureSmallProvider"
+            android:exported="true"
+            android:label="Small grid fixture">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/grid_fixture_small_widget" />
+        </receiver>
+        <receiver
             android:name="io.github.alexanderwilhelmsenberg.modular.ui.WorkspaceFixtureProvider"
             android:exported="true"
             android:label="Workspace fixture widget">

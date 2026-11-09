@@ -76,6 +76,9 @@ fun WorkspaceSettingsUi(
     widgetLayoutLimits: (WorkspaceWidget) -> WidgetLayoutLimits? = { null },
     canFitHalfWidget: (WorkspaceWidget, Int) -> Boolean = { _, _ -> false },
     onSaveWidgetLayout: (suspend (Int, Int, Int, Int) -> Result<Unit>)? = null,
+    onSaveWidgetGridLayout: (suspend (Int, Int, Int, Int, Int, Int) -> Result<Unit>)? = null,
+    onOpenGridSettings: (() -> Unit)? = null,
+    inline: Boolean = false,
     initialOpenRequest: Int = 0,
     initialPageId: String = WorkspacePageId.HOME,
     onOpenRequestConsumed: () -> Unit = {},
@@ -124,13 +127,11 @@ fun WorkspaceSettingsUi(
         onClick = { open = true },
     )
 
-    if (open) AlertDialog(
-        onDismissRequest = { if (!busy) open = false },
-        title = { Text("Home screens") },
-        text = {
+    if (open || inline) {
+        @Composable fun WorkspaceContent() {
             Column(
-                Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(dialogScroll)
-                    .testTag("workspace-dialog-scroll"),
+                Modifier.fillMaxWidth().then(if (inline) Modifier else Modifier.heightIn(max = 560.dp).verticalScroll(dialogScroll))
+                    .testTag(if (inline) "workspace-settings-content" else "workspace-dialog-scroll"),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -174,21 +175,31 @@ fun WorkspaceSettingsUi(
                 WorkspaceToggle("Battery percentage", prefs.showBattery, !busy) {
                     save(OrganizationEdit.SetWorkspacePreferences(prefs.copy(showBattery = it)))
                 }
-                OutlinedButton(onClick = { error = null; editWidgetArea = true }, enabled = !busy,
-                    modifier = Modifier.fillMaxWidth().testTag("workspace-widget-area")) {
-                    Text("Widget area: ${prefs.widgetAreaWidthPercent}% width · ${prefs.widgetMarginDp} dp edge · ${prefs.widgetGapDp} dp gap")
+                if (onOpenGridSettings != null) {
+                    OutlinedButton(onClick = onOpenGridSettings, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().testTag("workspace-open-grid-settings")) {
+                        Text("Home grid · ${prefs.gridColumnCount} columns · ${prefs.gridRowHeightDp} dp rows")
+                    }
+                } else {
+                    OutlinedButton(onClick = { error = null; editWidgetArea = true }, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().testTag("workspace-widget-area")) {
+                        Text("Widget area: ${prefs.widgetAreaWidthPercent}% width · ${prefs.widgetMarginDp} dp edge · ${prefs.widgetGapDp} dp gap")
+                    }
                 }
-                Text("Section order", style = MaterialTheme.typography.titleSmall)
-                prefs.sectionOrder.forEachIndexed { index, section ->
+                Text("Home section order", style = MaterialTheme.typography.titleSmall)
+                Text("When enabled, Most Used appears at the top of App drawer. Folders follow, above the alphabetical app list.",
+                    style = MaterialTheme.typography.bodySmall)
+                val homeSections = prefs.sectionOrder.filter { it != WorkspaceSection.MOST_USED }
+                homeSections.forEachIndexed { index, section ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(section.label(), Modifier.weight(1f).padding(top = 12.dp), maxLines = 1)
                         TextButton(enabled = !busy && index > 0, onClick = {
                             save(OrganizationEdit.SetWorkspacePreferences(prefs.copy(
-                                sectionOrder = prefs.sectionOrder.moved(index, index - 1))))
+                                sectionOrder = prefs.sectionOrder.swappedHomeSections(section, homeSections[index - 1]))))
                         }) { Text("↑") }
-                        TextButton(enabled = !busy && index < prefs.sectionOrder.lastIndex, onClick = {
+                        TextButton(enabled = !busy && index < homeSections.lastIndex, onClick = {
                             save(OrganizationEdit.SetWorkspacePreferences(prefs.copy(
-                                sectionOrder = prefs.sectionOrder.moved(index, index + 1))))
+                                sectionOrder = prefs.sectionOrder.swappedHomeSections(section, homeSections[index + 1]))))
                         }) { Text("↓") }
                     }
                 }
@@ -233,7 +244,7 @@ fun WorkspaceSettingsUi(
                                 }) { Text("Move to $name", modifier = Modifier.widthIn(max = 220.dp),
                                     maxLines = 1, overflow = TextOverflow.Ellipsis) }
                             }
-                            if (onSaveWidgetLayout != null && widgetLayoutLimits(widget) != null) {
+                            if ((onSaveWidgetGridLayout != null || onSaveWidgetLayout != null) && widgetLayoutLimits(widget) != null) {
                                 TextButton(enabled = !busy, onClick = { editWidgetId = widget.appWidgetId },
                                     modifier = Modifier.testTag("workspace-widget-layout:${widget.appWidgetId}")) {
                                     Text("Size and layout")
@@ -254,9 +265,14 @@ fun WorkspaceSettingsUi(
                     }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = { open = false }, enabled = !busy) { Text("Done") } },
-    )
+        }
+        if (inline) WorkspaceContent() else AlertDialog(
+            onDismissRequest = { if (!busy) open = false },
+            title = { Text("Home screens") },
+            text = { WorkspaceContent() },
+            confirmButton = { TextButton(onClick = { open = false }, enabled = !busy) { Text("Done") } },
+        )
+    }
 
     if (addPage) WorkspacePageEditor(
         page = null, snapshot = snapshot, busy = busy, error = error,
@@ -297,14 +313,13 @@ fun WorkspaceSettingsUi(
     )
     snapshot.widgets.firstOrNull { it.appWidgetId == editWidgetId }?.let { widget ->
         val limits = widgetLayoutLimits(widget)
-        val saveLayout = onSaveWidgetLayout
-        if (limits != null && saveLayout != null) WidgetSizeEditor(
+        val saveGrid = onSaveWidgetGridLayout
+        if (limits != null && saveGrid != null) WidgetSizeEditor(
             widget = widget,
             preferences = snapshot.workspacePreferences,
             limits = limits,
-            canFitHalf = canFitHalfWidget,
             onDismiss = { editWidgetId = null },
-            onSave = saveLayout,
+            onSave = saveGrid,
             onSaved = { editWidgetId = null },
         )
     }
@@ -313,6 +328,20 @@ fun WorkspaceSettingsUi(
 internal fun <T> List<T>.moved(from: Int, to: Int): List<T> =
     if (from !in indices || to !in indices || from == to) this
     else toMutableList().apply { add(to, removeAt(from)) }
+
+/** Reorder visible Home sections while keeping the legacy Most Used slot in storage. */
+internal fun List<WorkspaceSection>.swappedHomeSections(
+    first: WorkspaceSection, second: WorkspaceSection,
+): List<WorkspaceSection> {
+    val firstIndex = indexOf(first)
+    val secondIndex = indexOf(second)
+    if (firstIndex < 0 || secondIndex < 0 || first == WorkspaceSection.MOST_USED ||
+        second == WorkspaceSection.MOST_USED) return this
+    return toMutableList().apply {
+        this[firstIndex] = second
+        this[secondIndex] = first
+    }
+}
 
 private fun List<WorkspaceWidget>.swapped(
     firstId: Int, secondId: Int,

@@ -12,26 +12,61 @@ class FolderSectionsTest {
     private val suggested = LaunchableApp(AppKey("suggested", "Main", 0), "Suggested", 0, true, null)
     private val one = FolderDefinition("one", "One")
     private val two = FolderDefinition("two", "Two")
+    private val three = FolderDefinition("three", "Three")
 
-    @Test fun mixedSavedPinsRenderFoldersAfterSuggestionsAndStatus() {
-        val entries = featuredHomeEntries(listOf(pinned, suggested), listOf(one, two),
+    @Test fun mixedSavedPinsOrderMostUsedAppsWithoutFolderRows() {
+        val entries = featuredHomeEntries(listOf(suggested, pinned),
             listOf(HomePinRef.Folder("two"), HomePinRef.App(pinned.key), HomePinRef.Folder("one")), true)
         assertEquals(listOf(HomeListEntry.Header("★"), HomeListEntry.App(pinned, true),
-            HomeListEntry.App(suggested, true), HomeListEntry.FeaturedStatus,
-            HomeListEntry.Header("Folders", "featured-folders"), HomeListEntry.Folder(two), HomeListEntry.Folder(one)), entries)
-        assertNotEquals(HomeListEntry.Header("Folders").id, entries[4].id)
+            HomeListEntry.App(suggested, true), HomeListEntry.FeaturedStatus), entries)
     }
 
-    @Test fun onlyFoldersStillHasNamedSectionAndMissingPinsAreIgnored() {
-        val entries = featuredHomeEntries(emptyList(), listOf(one),
-            listOf(HomePinRef.Folder("removed"), HomePinRef.Folder("one")), false)
-        assertEquals(listOf(HomeListEntry.Header("★"), HomeListEntry.Header("Folders", "featured-folders"),
-            HomeListEntry.Folder(one)), entries)
+    @Test fun externalSuggestionsKeepProviderOrderWhileFolderPinsRemainOrdered() {
+        val saved = listOf(HomePinRef.App(pinned.key), HomePinRef.Folder("two"), HomePinRef.Folder("one"))
+        val active = drawerPinOrder(saved, coreMostUsedEnabled = false)
+        val folders = mergedDrawerFolders(listOf(one, two), emptyList(), active)
+        val entries = drawerSectionEntries(listOf(suggested, pinned), folders, active, false, emptyList())
+        assertEquals(listOf(HomeListEntry.Header("★"), HomeListEntry.App(suggested, true),
+            HomeListEntry.App(pinned, true), HomeListEntry.Header("Folders"),
+            HomeListEntry.Folder(two), HomeListEntry.Folder(one)), entries)
+        assertEquals(saved, drawerPinOrder(saved, coreMostUsedEnabled = true))
+    }
+
+    @Test fun emptyFeaturedAppsShowPinPrompt() {
+        assertEquals(listOf(HomeListEntry.Header("★"), HomeListEntry.FeaturedEmpty),
+            featuredHomeEntries(emptyList(), listOf(HomePinRef.Folder("one")), false))
     }
 
     @Test fun emptyFolderGroupHasNoHeader() {
         assertEquals(listOf(HomeListEntry.Header("★"), HomeListEntry.App(pinned, true)),
-            featuredHomeEntries(listOf(pinned), emptyList(), emptyList(), false))
-        assertTrue(featuredHomeEntries(null, emptyList(), emptyList(), false).isEmpty())
+            featuredHomeEntries(listOf(pinned), emptyList(), false))
+        assertTrue(featuredHomeEntries(null, emptyList(), false).isEmpty())
+    }
+
+    @Test fun drawerPlacesOneDeduplicatedFoldersSectionBetweenMostUsedAndAlphabet() {
+        val pins = listOf(HomePinRef.Folder("two"), HomePinRef.App(pinned.key), HomePinRef.Folder("one"))
+        val folders = mergedDrawerFolders(listOf(one, two), listOf(one, three), pins)
+        val entries = drawerSectionEntries(listOf(pinned, suggested), folders, pins, true,
+            listOf(HomeSection("P", listOf(pinned)), HomeSection("S", listOf(suggested))))
+
+        assertEquals(listOf(two, one, three), folders)
+        assertEquals(listOf(
+            HomeListEntry.Header("★"), HomeListEntry.App(pinned, true),
+            HomeListEntry.App(suggested, true), HomeListEntry.FeaturedStatus,
+            HomeListEntry.Header("Folders"), HomeListEntry.Folder(two),
+            HomeListEntry.Folder(one), HomeListEntry.Folder(three),
+            HomeListEntry.Header("P"), HomeListEntry.App(pinned),
+            HomeListEntry.Header("S"), HomeListEntry.App(suggested),
+        ), entries)
+        assertEquals(1, entries.count { it == HomeListEntry.Header("Folders") })
+    }
+
+    @Test fun foldersRemainBeforeAlphabetWhenMostUsedAppsAreUnavailable() {
+        val folders = mergedDrawerFolders(listOf(two), listOf(one), emptyList())
+        val entries = drawerSectionEntries(null, folders, emptyList(), false,
+            listOf(HomeSection("P", listOf(pinned))))
+        assertEquals(listOf(HomeListEntry.Header("Folders"), HomeListEntry.Folder(two),
+            HomeListEntry.Folder(one), HomeListEntry.Header("P"), HomeListEntry.App(pinned)), entries)
+        assertFalse(entries.any { it == HomeListEntry.Header("★") })
     }
 }

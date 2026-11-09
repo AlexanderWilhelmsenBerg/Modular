@@ -85,6 +85,7 @@ import io.github.alexanderwilhelmsenberg.modular.ui.ModuleSettingsDialog
 import io.github.alexanderwilhelmsenberg.modular.ui.ModularApp
 import io.github.alexanderwilhelmsenberg.modular.ui.SettingsPage
 import io.github.alexanderwilhelmsenberg.modular.ui.WorkspaceSettingsUi
+import io.github.alexanderwilhelmsenberg.modular.ui.HomeGridSettingsUi
 import io.github.alexanderwilhelmsenberg.modular.ui.ListeningAppsSettings
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePageId
 import io.github.alexanderwilhelmsenberg.modular.workspace.ListeningAppsProjector
@@ -296,6 +297,7 @@ class MainActivity : ComponentActivity() {
                 var mostUsedConfigureRequest by rememberSaveable { mutableStateOf(0) }
                 var workspaceConfigureRequest by rememberSaveable { mutableStateOf(0) }
                 var workspacePageToEdit by rememberSaveable { mutableStateOf(WorkspacePageId.HOME) }
+                var workspaceAdvancedRequested by rememberSaveable { mutableStateOf(false) }
                 var migrationError by remember { mutableStateOf<String?>(null) }
                 var migrationRetry by remember { mutableStateOf(0) }
                 var renameTarget by remember { mutableStateOf<LaunchableApp?>(null) }
@@ -397,11 +399,22 @@ class MainActivity : ComponentActivity() {
                                 workspaceMode = true,
                                 onWidgetSurfaceVisible = { widgetSurfaceVisible = it },
                                 listeningApps = listening.visibleApps,
-                                widgetContent = { widget -> WorkspaceWidgetTile(widgetController, widget, editMode = false) },
+                                widgetContent = { widget, onLongPress ->
+                                    WorkspaceWidgetTile(widgetController, widget, editMode = false, onLongPress = onLongPress)
+                                },
                                 canFitHalfWidget = widgetController::canFitHalf,
+                                widgetLayoutLimits = widgetController::layoutLimits,
+                                onSaveWidgetGrid = widgetController::saveWidgetGrid,
                                 onAddWidget = widgetController::addWidget,
                                 onEditWorkspace = { pageId ->
                                     workspacePageToEdit = pageId
+                                    workspaceAdvancedRequested = false
+                                    workspaceConfigureRequest += 1
+                                    settingsVisible = true
+                                },
+                                onOpenWorkspaceAdvanced = { pageId ->
+                                    workspacePageToEdit = pageId
+                                    workspaceAdvancedRequested = true
                                     workspaceConfigureRequest += 1
                                     settingsVisible = true
                                 },
@@ -510,15 +523,19 @@ class MainActivity : ComponentActivity() {
                         // closing an add-on dialog must not reset the page being viewed.
                         val settingsEntryPage = rememberSaveable {
                             when {
-                                mostUsedConfigureRequest > 0 || workspaceConfigureRequest > 0 -> SettingsPage.PRODUCTIVITY
+                                workspaceConfigureRequest > 0 -> if (workspaceAdvancedRequested) SettingsPage.HOME_GRID else SettingsPage.HOME
+                                mostUsedConfigureRequest > 0 -> SettingsPage.PRODUCTIVITY
                                 selectedModuleComponent != null -> SettingsPage.ADDONS
                                 else -> SettingsPage.ROOT
                             }
                         }
                         ModularApp(
                             initialPage = settingsEntryPage,
-                            coreFeaturesContent = {
+                            homeSettingsContent = { openGridSettings ->
                                 WorkspaceSettingsUi(
+                                    inline = true,
+                                    showEntry = false,
+                                    onOpenGridSettings = openGridSettings,
                                     snapshot = organizationSnapshot,
                                     onUpdate = organization.runtime::update,
                                     onAddWidget = widgetController::addWidget,
@@ -526,7 +543,7 @@ class MainActivity : ComponentActivity() {
                                     onResizeWidget = widgetController::resizeWidget,
                                     widgetLayoutLimits = widgetController::layoutLimits,
                                     canFitHalfWidget = widgetController::canFitHalf,
-                                    onSaveWidgetLayout = widgetController::saveWidgetLayout,
+                                    onSaveWidgetGridLayout = widgetController::saveWidgetGridLayout,
                                     onRemoveWidget = widgetController::removeWidget,
                                     onMoveWidget = widgetController::moveWidget,
                                     onMoveWidgetBy = widgetController::moveWidgetBy,
@@ -541,6 +558,11 @@ class MainActivity : ComponentActivity() {
                                     initialPageId = workspacePageToEdit,
                                     onOpenRequestConsumed = { workspaceConfigureRequest = 0 },
                                 )
+                            },
+                            homeGridSettingsContent = {
+                                HomeGridSettingsUi(organizationSnapshot, organization.runtime::update)
+                            },
+                            coreFeaturesContent = { openHomeSettings ->
                                 ListeningAppsSettings(
                                     snapshot = organizationSnapshot,
                                     catalog = appCatalog,
@@ -578,6 +600,7 @@ class MainActivity : ComponentActivity() {
                                     usingLocalFallback = mostUsedState.usingLocalFallback,
                                 )
                                 OrganizationSettingsHost(
+                                    onOpenHomeSettings = openHomeSettings,
                                     snapshot = organizationSnapshot,
                                     catalog = visibleCatalog.apps,
                                     runtime = organization.runtime,

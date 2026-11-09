@@ -109,7 +109,8 @@ internal fun HomeAppList(
                 is HomeListEntry.Header -> {
                     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(54.dp + with(androidx.compose.ui.platform.LocalDensity.current) { (if (entry.navigationKey == jumpHeaderLabel) navigationSpacePx else 0).toDp() }), contentAlignment = AbsoluteAlignment.BottomLeft) {
                         val start = (maxWidth * 0.126f).coerceAtLeast(16.dp)
-                        Text(entry.label, Modifier.absoluteOffset(x = start).padding(bottom = 6.dp).testTag("section:${entry.navigationKey}"), color = foreground, fontSize = 22.sp, fontWeight = FontWeight.Medium, style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default)
+                        Text(if (entry.label == "★") "Most Used" else entry.label,
+                            Modifier.absoluteOffset(x = start).padding(bottom = 6.dp).testTag("section:${entry.navigationKey}"), color = foreground, fontSize = 22.sp, fontWeight = FontWeight.Medium, style = if (wallpaperMode) TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)) else TextStyle.Default)
                     }
                 }
                 is HomeListEntry.App -> {

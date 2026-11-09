@@ -6,6 +6,10 @@ import android.content.ComponentName
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -201,16 +205,16 @@ class WorkspaceScreenshotTest {
                         narrowed.right < edgeToRail.right - 24f * density)
                 capture("widget-narrow-area")
 
-                val tallerPadded = full.copy(heightDp = 168, paddingDp = 8)
+                val tallerPadded = full.copy(heightDp = 272, rowSpan = 3, paddingDp = 8)
                 place(listOf(tallerPadded, firstHalf, secondHalf),
                     fixturePreferences.copy(widgetMarginDp = 0, widgetGapDp = 0), listOf(ids[0]))
-                rule.waitUntil(15_000) { bounds(ids[0]).height > edgeToRail.height + 56f * density }
+                rule.waitUntil(15_000) { bounds(ids[0]).height > edgeToRail.height + 90f * density }
                 val tallerBounds = bounds(ids[0])
                 assertNear("Widget height resize", tallerBounds.height - edgeToRail.height,
-                    64f * density)
+                    96f * density)
                 rule.waitUntil(15_000) {
                     manager.getAppWidgetOptions(ids[0])
-                        .getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) >= 164
+                        .getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) >= 268
                 }
                 val fullOptions = manager.getAppWidgetOptions(ids[0])
                 assertNear("Padded provider width option",
@@ -218,7 +222,7 @@ class WorkspaceScreenshotTest {
                     tallerBounds.width / density - 16f)
                 assertNear("Padded provider height option",
                     fullOptions.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT).toFloat(),
-                    168f)
+                    272f)
                 capture("widget-padded-resized")
 
                 place(listOf(firstHalf, secondHalf, full), fixturePreferences, ids.drop(1))
@@ -283,7 +287,14 @@ class WorkspaceScreenshotTest {
         val file = File(requireNotNull(context.getExternalFilesDir("workspace-screenshots")),
             "workspace-$scene-${width}dp-$theme-font$font-$direction.png")
         FileOutputStream(file).use { out ->
-            val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            // The drawer is pure Compose; capture its settled drawn surface rather
+            // than a previous Home frame still held by the window compositor.
+            val bitmap = if (scene == "all-apps") rule.onRoot().captureToImage().asAndroidBitmap()
+                else {
+                    instrumentation.waitForIdleSync()
+                    SystemClock.sleep(200) // Let native widget views reach the compositor.
+                    requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                }
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
             bitmap.recycle()
         }

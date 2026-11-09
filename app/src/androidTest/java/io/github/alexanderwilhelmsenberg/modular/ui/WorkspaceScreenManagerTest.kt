@@ -1,7 +1,6 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -31,8 +30,12 @@ class WorkspaceScreenManagerTest {
             rule.waitUntil(15_000) { rule.onAllNodesWithTag("home-settings").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithTag("home-settings").performClick()
             rule.onNodeWithTag("settings-open-productivity").performClick()
-            rule.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("settings-home-screens"))
-            rule.onNodeWithTag("settings-home-screens").performClick()
+            rule.onNodeWithTag("settings-open-home").performClick()
+            rule.onNodeWithTag("workspace-settings-content").assertIsDisplayed()
+            rule.onNodeWithTag("workspace-open-grid-settings").performScrollTo().performClick()
+            rule.onNodeWithTag("home-grid-columns").assertIsDisplayed()
+            rule.onNodeWithTag("settings-back").performClick()
+            rule.onNodeWithTag("workspace-settings-content").assertIsDisplayed()
             rule.onNodeWithTag("workspace-tile:home").assertIsDisplayed()
             rule.onNodeWithTag("workspace-add-page").performScrollTo().assertIsDisplayed().performClick()
             rule.onNodeWithTag("workspace-page-name").performTextInput(name)

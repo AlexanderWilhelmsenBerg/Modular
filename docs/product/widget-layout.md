@@ -1,6 +1,10 @@
 # Widget layout
 
 Requested November 9, 2026. Extends [Home workspace](home-workspace-v1.md).
+This records the earlier two-column row layout. The current widget contract is
+[Home widget grid v2](home-widget-grid-v2.md), which supersedes its row packing,
+Full/Half sizing and row-height rules. Area width, margins, spacing, padding and
+the physical alphabet-rail reservation continue to apply.
 
 Settings > Productivity > Home screens controls the widget layout. Home and
 custom widget pages share area settings; each widget keeps its own size.

@@ -128,7 +128,7 @@ class CoreNavigationTest {
                 composeRule.onAllNodesWithTag("module-setting-days").fetchSemanticsNodes().isNotEmpty()
             }
             composeRule.onNodeWithTag("module-setting-days").assertIsDisplayed()
-            composeRule.onNodeWithText("Use on Home").assertIsDisplayed()
+            composeRule.onNodeWithText("Use in App drawer").assertIsDisplayed()
             composeRule.runOnIdle { composeRule.activity.intent = originalIntent }
             composeRule.activityRule.scenario.recreate()
             composeRule.waitUntil(15_000) {

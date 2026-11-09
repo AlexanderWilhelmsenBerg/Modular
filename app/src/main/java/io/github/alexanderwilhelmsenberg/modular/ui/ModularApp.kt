@@ -68,7 +68,7 @@ import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.CapabilityId
 import io.github.alexanderwilhelmsenberg.modular.security.ModuleSecurityStatus
 
-enum class SettingsPage { ROOT, PRODUCTIVITY, APPEARANCE, ADDONS, ADVANCED }
+enum class SettingsPage { ROOT, PRODUCTIVITY, HOME, HOME_GRID, APPEARANCE, ADDONS, ADVANCED }
 
 @Composable
 fun ModularApp(
@@ -103,14 +103,23 @@ fun ModularApp(
     onClearModuleEvents: () -> Unit = {},
     compositionContent: @Composable () -> Unit = {},
     appearanceContent: @Composable () -> Unit = {},
-    coreFeaturesContent: @Composable () -> Unit = {},
+    coreFeaturesContent: @Composable (() -> Unit) -> Unit = {},
+    homeSettingsContent: @Composable (() -> Unit) -> Unit = {},
+    homeGridSettingsContent: @Composable () -> Unit = {},
     corePackageName: String = "io.github.alexanderwilhelmsenberg.modular",
     initialPage: SettingsPage = SettingsPage.ROOT,
     pageRequest: Int = 0,
 ) {
     var currentPage by rememberSaveable(initialPage, pageRequest) { mutableStateOf(initialPage) }
     val context = LocalContext.current
-    val goBack = { if (currentPage == SettingsPage.ROOT) onBack() else currentPage = SettingsPage.ROOT }
+    val goBack = {
+        currentPage = when (currentPage) {
+            SettingsPage.ROOT -> { onBack(); SettingsPage.ROOT }
+            SettingsPage.HOME_GRID -> SettingsPage.HOME
+            SettingsPage.HOME -> SettingsPage.PRODUCTIVITY
+            else -> SettingsPage.ROOT
+        }
+    }
     BackHandler(onBack = goBack)
 
     BoxWithConstraints(
@@ -184,7 +193,27 @@ fun ModularApp(
                 }
                 SettingsPage.PRODUCTIVITY -> {
                     item(key = "productivity-label") { SettingsSectionLabel("Home setup") }
-                    item(key = "core-features") { Column(Modifier.fillMaxWidth()) { coreFeaturesContent() } }
+                    item(key = "open-home") {
+                        SettingsRow("Home", "Screens, widgets, and layout", SettingsIcon.HOME,
+                            Modifier.testTag("settings-open-home"), onClick = { currentPage = SettingsPage.HOME })
+                    }
+                    item(key = "core-features") {
+                        Column(Modifier.fillMaxWidth()) {
+                            coreFeaturesContent { currentPage = SettingsPage.HOME }
+                        }
+                    }
+                }
+                SettingsPage.HOME -> {
+                    item(key = "home-settings") {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                            homeSettingsContent { currentPage = SettingsPage.HOME_GRID }
+                        }
+                    }
+                }
+                SettingsPage.HOME_GRID -> {
+                    item(key = "home-grid-settings") {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) { homeGridSettingsContent() }
+                    }
                 }
                 SettingsPage.APPEARANCE -> {
                     item(key = "appearance-label") { SettingsSectionLabel("Theme") }
@@ -292,6 +321,8 @@ private val SettingsPage.title: String
     get() = when (this) {
         SettingsPage.ROOT -> "Settings"
         SettingsPage.PRODUCTIVITY -> "Productivity"
+        SettingsPage.HOME -> "Home"
+        SettingsPage.HOME_GRID -> "Home grid"
         SettingsPage.APPEARANCE -> "Appearance"
         SettingsPage.ADDONS -> "Add-ons"
         SettingsPage.ADVANCED -> "Advanced"

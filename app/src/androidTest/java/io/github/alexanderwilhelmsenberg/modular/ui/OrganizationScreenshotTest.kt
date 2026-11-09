@@ -63,7 +63,7 @@ class OrganizationScreenshotTest {
         LaunchableApp(AppKey("fixture.maps", "Maps", 0), "Maps", 1, true, null),
     )
 
-    @Test fun folderSectionsFollowEachAppList() {
+    @Test fun foldersShareOneSectionBeforeAlphabet() {
         val featuredFolder = FolderDefinition("featured", "Media", iconId = "music")
         val appListFolder = FolderDefinition("library", "Library", iconId = "books")
         rule.setContent {
@@ -75,7 +75,7 @@ class OrganizationScreenshotTest {
                     folders = listOf(appListFolder), iconForApp = { null })
             }
         }
-        rule.onNodeWithTag("section:featured-folders").assertIsDisplayed()
+        rule.onNodeWithTag("section:Folders").assertIsDisplayed()
         rule.onNodeWithTag("folder-row:featured").assertIsDisplayed()
         capture("folders-most-used")
         rule.onNodeWithTag("home-list").performScrollToNode(hasTestTag("folder-row:library"))

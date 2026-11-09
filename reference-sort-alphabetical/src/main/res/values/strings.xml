@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Modular Alphabetical Sort</string>
     <string name="sort_settings_title">Alphabetical Sort</string>
-    <string name="sort_settings_explanation">Sort apps by name. Open Modular settings below to choose normal or reverse order, then select Use on Home.</string>
+    <string name="sort_settings_explanation">Sort apps by name. Open Modular settings below to choose normal or reverse order, then select Use in App drawer.</string>
     <string name="sort_settings_button">Configure in Modular</string>
     <string name="sort_settings_unavailable">Modular settings could not be opened. Check that the matching Modular app is installed.</string>
 </resources>

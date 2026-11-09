@@ -7,6 +7,11 @@ Baseline: settings/identity PR #28, merged as `fff68d16de7aa615f9725cefd48b7c8c9
 This draft adds a configurable landing Home above the existing app list. It
 builds on [Home v2](home-presentation-v2.md),
 [organization](categories-folders-mega-sorter.md), and Core Most Used.
+The later [Home widget grid v2](home-widget-grid-v2.md) supersedes this version's
+stacked widget-row placement and widget editing details. Home-to-All apps
+navigation, widget host lifecycle and page behavior remain specified here.
+The later drawer-order decision also supersedes this version's Most Used and
+folder placement: see [Home widget grid v2](home-widget-grid-v2.md#home-and-all-apps-content).
 Release evidence is tracked in the [acceptance record](../implementation/home-workspace-validation.md).
 Requirements explicitly
 requested by the user are distinguished from proposed defaults below.
@@ -89,8 +94,9 @@ button or menu required to reveal the alphabet.
 Home/widget-page rail letters derive from the actual All apps projection, with
 only populated locale buckets. Category-page letters continue to navigate that
 category's own list. Use explicit page identity/title to keep this scope clear.
-When Most Used is enabled, the star returns to its section on main Home.
-Folders retain their existing section destinations. No empty letter targets.
+When Most Used is enabled, the star on Home opens its section at the top of All
+apps. The diamond opens the drawer's single Folders section when populated.
+No empty letter or folder targets.
 
 Reuse the regular rail's selection feedback, inward curve, selected-letter
 bubble, continuous drag targeting and release/settle behavior. A tap opens All
@@ -107,23 +113,23 @@ Retain Modular's themes, typography, icons and settings language. The screenshot
 does not specify exact font identity or animation behavior. Its wallpaper and
 promotional/setup cards are not assets or required Home content.
 
-Proposed initial Home:
+Proposed initial Home (updated by the later drawer-order decision):
 
 1. Optional built-in clock/date block; battery percentage separately toggleable.
 2. User-added widgets, in saved order.
-3. Most Used/pinned apps when already enabled.
-4. Folders belonging to Most Used, under their existing Folders section.
-5. A contextual Listening section when enabled and a headset is connected.
+3. A contextual Listening section when enabled and a headset is connected.
 
-Users can reorder whole content sections. The Folders subsection stays at the
-bottom of its owning Most Used section, as previously requested. Folder shortcuts
-assigned to the app list remain at its bottom, under Folders. A folder is not
-silently moved between placements when this Home is introduced.
+Users can reorder Home's clock, widget and Listening sections. Most Used and
+folders are absent from Home. All apps presents Most Used first (when enabled), one Folders section
+containing all visible shortcuts from both saved placements even when Most Used
+is off, then alphabetical apps. Pinned folders retain manual order before
+alphabetically sorted folders. A folder's saved placement, pins, order and smart
+visibility remain intact; the display change does not silently move or duplicate
+its stored shortcut.
 
-Most Used would move from the app-list header to Home by default, retaining
-toggle, pins, order, source and local learning. The alphabetical list still
-contains eligible individual app entries. Disabling Most Used retains its saved
-state and follows the existing behavior for folders placed there.
+Most Used retains its toggle, pins, order, source and local learning. The
+alphabetical list still contains eligible individual app entries. Disabling
+Most Used retains its saved state and does not hide visible folder shortcuts.
 
 No sample apps, fabricated weather/calendar content, account requirement, or
 automatic permission prompt. A fresh Home remains useful with clock/date and
@@ -231,7 +237,8 @@ Listening, folders, widgets chosen by Core, or suggestions; third-party widgets
 control their own contents and cannot inherit this guarantee automatically.
 
 Custom pages initially host widgets and the same optional built-in sections;
-Most Used has a single presentation on main Home to avoid competing pin orders.
+Most Used has a single presentation at the top of All apps to avoid competing
+pin orders.
 Category pages remain app-list pages in v1; arbitrary widget/list mixing on them
 is not part of this proposal. Deleting a page never deletes category memberships,
 uninstalls apps, or deletes reusable folders.

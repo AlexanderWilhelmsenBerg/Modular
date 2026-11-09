@@ -1,25 +1,46 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
 import android.content.Intent
+import android.content.res.Configuration
+import android.os.ParcelFileDescriptor
+import android.view.View
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.alexanderwilhelmsenberg.modular.MainActivity
+import io.github.alexanderwilhelmsenberg.modular.apps.AndroidAppRepository
+import io.github.alexanderwilhelmsenberg.modular.apps.AppCustomizationStore
+import io.github.alexanderwilhelmsenberg.modular.organization.FolderDefinition
+import io.github.alexanderwilhelmsenberg.modular.organization.FolderPlacement
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationBatch
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationEdit
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationStore
+import io.github.alexanderwilhelmsenberg.modular.mostused.MostUsedSettingsStore
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
+import java.io.File
+import java.io.FileOutputStream
+import java.util.Locale
+import java.util.UUID
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -39,6 +60,163 @@ class WorkspaceNavigationTest {
         rule.runOnIdle { rule.activity.onBackPressedDispatcher.onBackPressed() }
         waitForHome()
         rule.onNodeWithTag("workspace-all-apps").assertIsNotDisplayed()
+    }
+
+    @Test fun drawerOrdersMostUsedFoldersThenAlphabetAndKeepsSearchGlobal() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val organization = OrganizationStore(context)
+        val mostUsed = MostUsedSettingsStore(context)
+        val appRepository = AndroidAppRepository(context)
+        val original = runBlocking { organization.currentSnapshot() }
+        val customizations = runBlocking { AppCustomizationStore(context).currentCustomizations() }
+        @Suppress("UNCHECKED_CAST")
+        val preferences = MostUsedSettingsStore::class.java.getDeclaredField("dataStore")
+            .apply { isAccessible = true }.get(mostUsed) as DataStore<Preferences>
+        val settingsKey = stringPreferencesKey("settings_json_v1")
+        val originalSettings = runBlocking { preferences.data.first()[settingsKey] }
+        val pinnedFolderId = UUID.randomUUID().toString()
+        val alphabetFolderId = UUID.randomUUID().toString()
+        var foldersCreated = false
+        try {
+            rule.waitUntil(15_000) { appRepository.catalog.value.apps.isNotEmpty() &&
+                !appRepository.catalog.value.isRefreshing }
+            val catalog = appRepository.catalog.value
+            val available = customizations.visibleApps(catalog.apps).filter { it.enabled }
+            val homeKeys = io.github.alexanderwilhelmsenberg.modular.organization.OrganizationProjector
+                .project(catalog.copy(apps = available), customizations, original)
+                .homeApps.mapTo(HashSet()) { it.key }
+            val app = available.firstOrNull { it.key in homeKeys }
+                ?: error("No visible Home app available for drawer fixture")
+            val fixtureFolders = listOf(
+                FolderDefinition(pinnedFolderId, "Grid pinned ${pinnedFolderId.take(8)}",
+                    members = listOf(app.key), placement = FolderPlacement.MOST_USED),
+                FolderDefinition(alphabetFolderId, "Grid alphabet ${alphabetFolderId.take(8)}",
+                    members = listOf(app.key), placement = FolderPlacement.APP_LIST),
+            )
+            runBlocking {
+                val current = organization.currentSnapshot()
+                organization.update(OrganizationBatch(fixtureFolders.map(OrganizationEdit::CreateFolder),
+                    current.revision)).getOrThrow()
+            }
+            foldersCreated = true
+            runBlocking {
+                mostUsed.setSuggestedCount(0).getOrThrow()
+                mostUsed.setEnabled(true).getOrThrow()
+                mostUsed.setPinned(app.key, true, catalog.apps.mapTo(HashSet()) { it.key }).getOrThrow()
+            }
+            waitForHome()
+            rule.onNodeWithTag("section:★").assertIsNotDisplayed()
+            rule.onNodeWithTag("folder-row:$pinnedFolderId").assertIsNotDisplayed()
+            rule.onNodeWithTag("folder-row:$alphabetFolderId").assertIsNotDisplayed()
+
+            rule.waitUntil(15_000) {
+                rule.onAllNodesWithTag("rail:★").fetchSemanticsNodes().isNotEmpty()
+            }
+            tapRail("★")
+            waitForAllApps()
+            rule.waitUntil(15_000) {
+                runCatching { rule.onNodeWithTag("section:★").assertIsDisplayed() }.isSuccess
+            }
+            captureDrawer()
+            val firstAlpha = rule.onAllNodes(SemanticsMatcher("alphabet rail letter") { node ->
+                node.config.getOrNull(SemanticsProperties.TestTag)?.let {
+                    it.startsWith("rail:") && it != "rail:★" && it != "rail:◇"
+                } == true
+            }).fetchSemanticsNodes().first().config[SemanticsProperties.TestTag].removePrefix("rail:")
+            val indexForKey = rule.onNodeWithTag("home-list").fetchSemanticsNode()
+                .config[SemanticsProperties.IndexForKey]
+            val headerIndex = indexForKey("header:★")
+            val appIndex = indexForKey("featured:${app.key.stableId}")
+            val foldersIndex = indexForKey("header:Folders")
+            val pinnedIndex = indexForKey("folder:$pinnedFolderId")
+            val alphabetFolderIndex = indexForKey("folder:$alphabetFolderId")
+            val alphaIndex = indexForKey("header:$firstAlpha")
+            assertTrue("Drawer fixture entries must all be indexed",
+                listOf(headerIndex, appIndex, foldersIndex, pinnedIndex,
+                    alphabetFolderIndex, alphaIndex).all { it >= 0 })
+            assertTrue("Most Used app must follow its header", headerIndex < appIndex)
+            assertTrue("Folders must follow Most Used apps", appIndex < foldersIndex)
+            assertTrue("Pinned folders precede alphabetical folders",
+                foldersIndex < pinnedIndex && pinnedIndex < alphabetFolderIndex)
+            assertTrue("Alphabet starts after Folders", alphabetFolderIndex < alphaIndex)
+
+            tapRail("◇")
+            rule.waitUntil(15_000) {
+                runCatching { rule.onNodeWithTag("section:Folders").assertIsDisplayed() }.isSuccess
+            }
+            rule.onNodeWithTag("home-search-field").performTextInput(app.label)
+            rule.waitUntil(15_000) {
+                rule.onAllNodesWithTag("app-row:${app.key.stableId}")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            rule.onNodeWithTag("home-search-clear").performClick()
+
+            runBlocking { mostUsed.setEnabled(false).getOrThrow() }
+            rule.waitUntil(15_000) {
+                rule.onNodeWithTag("home-list").fetchSemanticsNode()
+                    .config[SemanticsProperties.IndexForKey]("header:★") < 0
+            }
+            rule.onNodeWithTag("home-list").performScrollToNode(hasTestTag("section:Folders"))
+            rule.onNodeWithTag("section:Folders").assertIsDisplayed()
+            rule.onNodeWithTag("home-list").performScrollToNode(hasTestTag("folder-row:$pinnedFolderId"))
+            rule.onNodeWithTag("folder-row:$pinnedFolderId").assertIsDisplayed()
+            rule.onNodeWithTag("home-list").performScrollToNode(hasTestTag("folder-row:$alphabetFolderId"))
+            rule.onNodeWithTag("folder-row:$alphabetFolderId").assertIsDisplayed()
+        } finally {
+            try {
+                if (foldersCreated) runBlocking {
+                    val current = organization.currentSnapshot()
+                    organization.update(OrganizationBatch(listOf(
+                        OrganizationEdit.DeleteFolder(pinnedFolderId),
+                        OrganizationEdit.DeleteFolder(alphabetFolderId),
+                    ), current.revision)).getOrThrow()
+                }
+            } finally {
+                runBlocking {
+                    preferences.edit { saved ->
+                        if (originalSettings == null) saved.remove(settingsKey)
+                        else saved[settingsKey] = originalSettings
+                    }
+                }
+                appRepository.close()
+            }
+        }
+    }
+
+    private fun tapRail(label: String) {
+        val glyph = rule.onNodeWithTag("rail:$label").fetchSemanticsNode().boundsInRoot
+        val lane = rule.onNodeWithTag("alphabet-hit-lane")
+        val bounds = lane.fetchSemanticsNode().boundsInRoot
+        lane.performTouchInput {
+            down(Offset(width / 2f, glyph.center.y - bounds.top))
+            up()
+        }
+    }
+
+    private fun captureDrawer() {
+        rule.waitForIdle()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val config = context.resources.configuration
+        val theme = if (config.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
+            "dark" else "light"
+        val font = String.format(Locale.ROOT, "%.1f", config.fontScale)
+        val direction = if (config.layoutDirection == View.LAYOUT_DIRECTION_RTL) "rtl" else "ltr"
+        val file = File(requireNotNull(context.getExternalFilesDir("workspace-screenshots")),
+            "drawer-most-used-folders-${config.screenWidthDp}dp-$theme-font$font-$direction.png")
+        FileOutputStream(file).use { output ->
+            val bitmap = rule.onRoot().captureToImage().asAndroidBitmap()
+            assertTrue(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
+        }
+        val destination = "/sdcard/Pictures/ModularWorkspace/${file.name}"
+        fun shell(command: String): String = ParcelFileDescriptor.AutoCloseInputStream(
+            instrumentation.uiAutomation.executeShellCommand(command)
+        ).bufferedReader().use { it.readText().trim() }
+        shell("mkdir -p /sdcard/Pictures/ModularWorkspace")
+        shell("cp ${file.absolutePath} $destination")
+        check(shell("stat -c %s $destination").toLongOrNull() == file.length()) {
+            "Could not preserve drawer screenshot"
+        }
     }
 
     @Test fun populatedHomeRailOpensTheRequestedAllAppsSection() {

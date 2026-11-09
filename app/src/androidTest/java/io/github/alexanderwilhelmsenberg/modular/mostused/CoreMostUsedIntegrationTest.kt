@@ -11,10 +11,13 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
@@ -46,11 +49,13 @@ class CoreMostUsedIntegrationTest {
             waitToggle(ToggleableState.On)
             rule.onNodeWithTag("settings-back").performClick()
             rule.onNodeWithTag("settings-back").performClick()
-            rule.waitUntil(10_000) { rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Most Used").assertIsDisplayed()
+            rule.onNodeWithTag("workspace-apps-action").performClick()
+            jumpToMostUsed()
+            rule.waitUntil(10_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithTag("section:★").assertIsDisplayed()
             rule.activityRule.scenario.recreate()
-            rule.waitUntil(15_000) { rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Most Used").assertIsDisplayed()
+            rule.waitUntil(15_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithTag("section:★").assertIsDisplayed()
             rule.onNodeWithTag("home-settings").performClick()
             rule.onNodeWithTag("settings-open-productivity").performClick()
             waitToggle(ToggleableState.On)
@@ -83,10 +88,12 @@ class CoreMostUsedIntegrationTest {
             store.setSource(MostUsedSource.LOCAL).getOrThrow()
             store.setSuggestedCount(1).getOrThrow()
             store.setEnabled(true).getOrThrow()
-            // Most Used now lives in the workspace stack above All apps.
+            // Most Used is at the top of the Apps drawer.
             rule.waitUntil(15_000) { rule.onAllNodesWithTag("workspace-home").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithTag("workspace-home").performScrollToIndex(0)
-            rule.waitUntil(15_000) { rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithTag("workspace-apps-action").performClick()
+            jumpToMostUsed()
+            rule.waitUntil(15_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithTag("featured-permission").assertDoesNotExist()
             rule.onNodeWithTag("home-search-field").performTextInput(fixture.packageName)
             rule.waitUntil(10_000) { rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty() }
@@ -101,15 +108,23 @@ class CoreMostUsedIntegrationTest {
             context.startActivity(Intent(originalIntent).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             rule.waitUntil(15_000) { rule.activityRule.scenario.state == Lifecycle.State.RESUMED }
             rule.onNodeWithTag("home-search-field").performTextClearance()
+            rule.onNodeWithTag("home-search-field").performImeAction()
+            jumpToMostUsed()
             rule.waitUntil(15_000) {
-                rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() &&
+                rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() &&
                     rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty()
             }
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("featured-permission").assertDoesNotExist()
             rule.activityRule.scenario.recreate()
-            rule.waitUntil(15_000) { rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Most Used").assertIsDisplayed()
+            jumpToMostUsed()
+            rule.waitUntil(15_000) {
+                val list = rule.onNodeWithTag("home-list").fetchSemanticsNode()
+                list.config[SemanticsProperties.IndexForKey]("featured:${fixture.stableId}") >= 0 &&
+                    runCatching { rule.onNodeWithTag("section:★").assertIsDisplayed() }.isSuccess &&
+                    runCatching { rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed() }.isSuccess
+            }
+            rule.onNodeWithTag("section:★").assertIsDisplayed()
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("home-settings").performClick()
             rule.onNodeWithTag("settings-open-productivity").performClick()
@@ -125,6 +140,17 @@ class CoreMostUsedIntegrationTest {
             store.setSource(original.source).getOrThrow()
             store.setSuggestedCount(original.suggestedCount).getOrThrow()
             store.setEnabled(original.enabled).getOrThrow()
+        }
+    }
+
+    private fun jumpToMostUsed() {
+        rule.waitUntil(15_000) { rule.onAllNodesWithTag("rail:★").fetchSemanticsNodes().isNotEmpty() }
+        val glyph = rule.onNodeWithTag("rail:★").fetchSemanticsNode().boundsInRoot
+        val lane = rule.onNodeWithTag("alphabet-hit-lane")
+        val bounds = lane.fetchSemanticsNode().boundsInRoot
+        lane.performTouchInput {
+            down(Offset(width / 2f, glyph.center.y - bounds.top))
+            up()
         }
     }
 

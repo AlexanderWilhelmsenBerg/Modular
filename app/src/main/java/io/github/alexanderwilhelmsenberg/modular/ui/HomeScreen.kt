@@ -114,37 +114,35 @@ fun HomeScreen(
     val safeFeatured = remember(featuredApps, currentByKey) {
         featuredApps?.mapNotNull { currentByKey[it.key] }?.distinctBy { it.key }
     }
+    val drawerFolders = remember(folders, featuredFolders, featuredPinOrder) {
+        mergedDrawerFolders(featuredFolders, folders, featuredPinOrder)
+    }
     val useSections = alphabeticalSections && !searching
     val sections = remember(visibleApps, sectionBuilder, useSections) {
         if (useSections) sectionBuilder.sections(visibleApps) else emptyList()
     }
-    val entries = remember(sections, visibleApps, safeFeatured, featuredMessage, featuredNeedsPermission, searching, useSections, hasPausedProfileApps, catalog.isRefreshing, catalog.lastError, showMakeDefault, folders, featuredFolders, featuredPinOrder, pageTitle) {
+    val entries = remember(sections, visibleApps, safeFeatured, featuredMessage, featuredNeedsPermission, searching, useSections, hasPausedProfileApps, catalog.isRefreshing, catalog.lastError, showMakeDefault, drawerFolders, featuredPinOrder, pageTitle) {
         buildList {
             if (!searching && pageTitle != null) add(HomeListEntry.PageTitle(pageTitle))
             if (hasPausedProfileApps) add(HomeListEntry.Notice("paused-profile-notice", "Some apps are unavailable while a profile is paused."))
             if (catalog.lastError != null) add(HomeListEntry.Error)
             if (catalog.isRefreshing && normalApps.isEmpty() && catalog.lastError == null) add(HomeListEntry.Loading)
-            else if (!searching && normalApps.isEmpty() && catalog.lastError == null) add(HomeListEntry.Empty)
+            else if (!searching && normalApps.isEmpty() && safeFeatured == null &&
+                drawerFolders.isEmpty() && catalog.lastError == null) add(HomeListEntry.Empty)
             else if (visibleApps.isEmpty() && searching && catalog.lastError == null) add(HomeListEntry.NoResults)
-            if (!searching) addAll(featuredHomeEntries(safeFeatured, featuredFolders, featuredPinOrder,
-                showStatus = !featuredMessage.isNullOrBlank() || featuredNeedsPermission))
-            if (useSections) sections.forEach { section ->
-                add(HomeListEntry.Header(section.label))
-                section.apps.forEach { add(HomeListEntry.App(it)) }
-            } else visibleApps.forEach { add(HomeListEntry.App(it)) }
-            if (!searching && folders.isNotEmpty()) {
-                add(HomeListEntry.Header("Folders"))
-                folders.forEach { add(HomeListEntry.Folder(it)) }
-            }
+            if (!searching) addAll(drawerSectionEntries(safeFeatured, drawerFolders, featuredPinOrder,
+                showStatus = !featuredMessage.isNullOrBlank() || featuredNeedsPermission,
+                sections = sections, unsectionedApps = if (useSections) emptyList() else visibleApps))
+            else visibleApps.forEach { add(HomeListEntry.App(it)) }
             add(HomeListEntry.Actions)
         }
     }
     var anchorableEntries by remember { mutableStateOf(entries) }
     SideEffect { if (!searching) anchorableEntries = entries }
     val headerIndices = remember(entries) { entries.mapIndexedNotNull { i, entry -> (entry as? HomeListEntry.Header)?.let { it.navigationKey to i + 1 } }.toMap() }
-    val alphabet = remember(sections, safeFeatured, featuredFolders, folders) {
-        (if (safeFeatured != null || featuredFolders.isNotEmpty()) listOf("★") else emptyList()) + sections.map { it.label } +
-            (if (folders.isNotEmpty()) listOf("◇") else emptyList())
+    val alphabet = remember(sections, safeFeatured, drawerFolders) {
+        (if (safeFeatured != null) listOf("★") else emptyList()) +
+            (if (drawerFolders.isNotEmpty()) listOf("◇") else emptyList()) + sections.map { it.label }
     }
     val reachability = rememberSaveable(saver = Saver(save = { it.offsetPx }, restore = { HomeReachabilityState(it) })) { HomeReachabilityState() }
     val density = LocalDensity.current

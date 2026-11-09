@@ -44,9 +44,12 @@ fun WorkspaceWidgetTile(
     widget: WorkspaceWidget,
     editMode: Boolean,
     modifier: Modifier = Modifier,
+    onLongPress: (() -> Unit)? = null,
 ) {
     val info = controller.providerInfo(widget)
-    val maxContentWidthDp = controller.layoutLimits(widget)?.maxContentWidthDp ?: Int.MAX_VALUE
+    val limits = controller.layoutLimits(widget)
+    val maxContentWidthDp = limits?.maxContentWidthDp ?: Int.MAX_VALUE
+    val contentHeightDp = minOf(widget.heightDp, limits?.maxContentHeightDp ?: Int.MAX_VALUE)
     Column(modifier.fillMaxWidth().testTag("workspace-widget:${widget.appWidgetId}")) {
         if (info == null) {
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -67,10 +70,12 @@ fun WorkspaceWidgetTile(
                             // Launcher padding belongs to the allocated cell. Android's
                             // AppWidgetHostView can otherwise add a second provider inset.
                             if (this is AppWidgetHostView) setPadding(0, 0, 0, 0)
+                            if (this is EditableWidgetHostView) onEditRequested = onLongPress
                         } },
-                        modifier = Modifier.width(contentWidth).height(widget.heightDp.dp)
+                        modifier = Modifier.width(contentWidth).height(contentHeightDp.dp)
                             .onSizeChanged { hostSize = it },
                         update = { view ->
+                            if (view is EditableWidgetHostView) view.onEditRequested = onLongPress
                             if (view is AppWidgetHostView && hostSize.width > 0 && hostSize.height > 0) runCatching {
                                 val widthDp = (hostSize.width / density).roundToInt().coerceAtLeast(1)
                                 val heightDp = (hostSize.height / density).roundToInt().coerceAtLeast(1)

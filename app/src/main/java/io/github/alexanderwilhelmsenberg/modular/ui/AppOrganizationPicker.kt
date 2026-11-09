@@ -272,18 +272,19 @@ internal fun CreateOrganizationDestinationDialog(
                 if (name.isNotBlank() && invalid) Text("Use a unique name (up to ${OrganizationLimits.MAX_NAME_CODE_POINTS} characters).",
                     color = MaterialTheme.colorScheme.error)
                 if (type == "folder") {
-                    OrganizationChoiceRow("App list", placement == FolderPlacement.APP_LIST, tag = "folder-placement:list") {
+                    OrganizationChoiceRow("Alphabetical", placement == FolderPlacement.APP_LIST, tag = "folder-placement:list") {
                         if (it) placement = FolderPlacement.APP_LIST
                     }
-                    OrganizationChoiceRow("Most Used", placement == FolderPlacement.MOST_USED,
-                        enabled = mostUsedEnabled, tag = "folder-placement:most-used") {
+                    OrganizationChoiceRow("Pinned (manual order)", placement == FolderPlacement.MOST_USED,
+                        tag = "folder-placement:most-used") {
                         if (it) placement = FolderPlacement.MOST_USED
                     }
-                    if (!mostUsedEnabled) Text("Turn on Most Used in Settings to place a folder there.",
+                    Text(if (mostUsedEnabled) "Both appear in the App drawer Folders section, below Most Used."
+                        else "Both appear in the App drawer Folders section, above alphabetical apps.",
                         style = MaterialTheme.typography.bodySmall)
                 } else {
                     OrganizationChoiceRow("Enable page", enabled, tag = "category-create-enabled") { enabled = it }
-                    OrganizationChoiceRow("Show member apps on Home", showOnHome, tag = "category-create-home") { showOnHome = it }
+                    OrganizationChoiceRow("Show member apps in App drawer", showOnHome, tag = "category-create-home") { showOnHome = it }
                     Text("New page goes immediately right of Home. You can move it in Settings.",
                         style = MaterialTheme.typography.bodySmall)
                 }

@@ -56,6 +56,12 @@ object OrganizationLimits {
     const val MAX_WIDGET_MARGIN_DP = 48
     const val MAX_WIDGET_GAP_DP = 48
     const val MAX_WIDGET_PADDING_DP = 32
+    const val MIN_GRID_COLUMNS = 1
+    const val MAX_GRID_COLUMNS = 12
+    const val MIN_GRID_ROW_HEIGHT_DP = 32
+    const val MAX_GRID_ROW_HEIGHT_DP = 256
+    const val MAX_WIDGET_GRID_ROW_SPAN = 32
+    const val MAX_WIDGET_GRID_ROW = 256
 }
 
 /** Shares the single core_most_used DataStore with MostUsedSettingsStore. */
@@ -148,9 +154,6 @@ class OrganizationStore internal constructor(private val dataStore: DataStore<Pr
                 val changed = transform(before)
                 val next = if (changed == before) before else changed.copy(revision = before.revision + 1)
                 val settings = decodeMostUsedSettings(preferences[mostUsedSettingsKey])
-                if (next.pins.any { it is HomePinRef.Folder && it !in before.pins }) {
-                    require(settings.enabled) { "Turn on Most Used before placing a folder there" }
-                }
                 validate(next)
                 val encoded = encodeOrganization(next)
                 require(encoded.toByteArray(Charsets.UTF_8).size <= OrganizationLimits.MAX_DOCUMENT_BYTES) {
@@ -356,7 +359,11 @@ private fun validate(snapshot: OrganizationSnapshot) {
     require(snapshot.workspacePreferences.widgetAreaWidthPercent in
         OrganizationLimits.MIN_WIDGET_AREA_WIDTH_PERCENT..OrganizationLimits.MAX_WIDGET_AREA_WIDTH_PERCENT &&
         snapshot.workspacePreferences.widgetMarginDp in 0..OrganizationLimits.MAX_WIDGET_MARGIN_DP &&
-        snapshot.workspacePreferences.widgetGapDp in 0..OrganizationLimits.MAX_WIDGET_GAP_DP) {
+        snapshot.workspacePreferences.widgetGapDp in 0..OrganizationLimits.MAX_WIDGET_GAP_DP &&
+        snapshot.workspacePreferences.gridColumnCount in
+            OrganizationLimits.MIN_GRID_COLUMNS..OrganizationLimits.MAX_GRID_COLUMNS &&
+        snapshot.workspacePreferences.gridRowHeightDp in
+            OrganizationLimits.MIN_GRID_ROW_HEIGHT_DP..OrganizationLimits.MAX_GRID_ROW_HEIGHT_DP) {
         "Invalid widget area settings"
     }
     val validWidgetPages = workspaceIds.mapTo(HashSet()) { WorkspacePageId.widget(it) }
@@ -369,7 +376,11 @@ private fun validate(snapshot: OrganizationSnapshot) {
             widget.provider.none { it.isISOControl() } &&
             widget.hostToken.length <= 128 && widget.hostToken.none { it.isISOControl() } &&
             widget.heightDp in OrganizationLimits.MIN_WIDGET_HEIGHT_DP..OrganizationLimits.MAX_WIDGET_HEIGHT_DP &&
-            widget.span in 1..2 && widget.paddingDp in 0..OrganizationLimits.MAX_WIDGET_PADDING_DP
+            widget.span in 1..2 && widget.paddingDp in 0..OrganizationLimits.MAX_WIDGET_PADDING_DP &&
+            widget.columnSpan in 0..OrganizationLimits.MAX_GRID_COLUMNS &&
+            widget.rowSpan in 0..OrganizationLimits.MAX_WIDGET_GRID_ROW_SPAN &&
+            widget.gridColumn in -1..(OrganizationLimits.MAX_GRID_COLUMNS - 1) &&
+            widget.gridRow in -1..OrganizationLimits.MAX_WIDGET_GRID_ROW
         }) { "Invalid widget placement" }
     require(snapshot.listeningPreferences.apps.size <= OrganizationLimits.MAX_LISTENING_APPS &&
         snapshot.listeningPreferences.apps.distinct().size == snapshot.listeningPreferences.apps.size &&
@@ -461,20 +472,27 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
     val widgetAreaWidthPercent: Int = 100,
     val widgetMarginDp: Int = 16,
     val widgetGapDp: Int = 12,
+    val gridColumnCount: Int = 4,
+    val gridRowHeightDp: Int = 96,
 ) {
     fun public() = WorkspacePreferences(showClock, showDate, showBattery, sectionOrder,
-        widgetAreaWidthPercent, widgetMarginDp, widgetGapDp)
+        widgetAreaWidthPercent, widgetMarginDp, widgetGapDp, gridColumnCount, gridRowHeightDp)
     companion object { fun from(preferences: WorkspacePreferences) = SavedWorkspacePreferences(
         preferences.showClock, preferences.showDate, preferences.showBattery, preferences.sectionOrder,
-        preferences.widgetAreaWidthPercent, preferences.widgetMarginDp, preferences.widgetGapDp) }
+        preferences.widgetAreaWidthPercent, preferences.widgetMarginDp, preferences.widgetGapDp,
+        preferences.gridColumnCount, preferences.gridRowHeightDp) }
 }
 @Serializable private data class SavedWidget(val appWidgetId: Int, val pageId: String,
     val provider: String, val heightDp: Int, val hostToken: String = "",
-    val span: Int = 2, val paddingDp: Int = 0) {
-    fun public() = WorkspaceWidget(appWidgetId, pageId, provider, heightDp, hostToken, span, paddingDp)
+    val span: Int = 2, val paddingDp: Int = 0,
+    val columnSpan: Int = 0, val rowSpan: Int = 0,
+    val gridColumn: Int = -1, val gridRow: Int = -1) {
+    fun public() = WorkspaceWidget(appWidgetId, pageId, provider, heightDp, hostToken, span,
+        paddingDp, columnSpan, rowSpan, gridColumn, gridRow)
     companion object { fun from(widget: WorkspaceWidget) = SavedWidget(widget.appWidgetId,
         widget.pageId, widget.provider, widget.heightDp, widget.hostToken,
-        widget.span, widget.paddingDp) }
+        widget.span, widget.paddingDp, widget.columnSpan, widget.rowSpan,
+        widget.gridColumn, widget.gridRow) }
 }
 @Serializable private data class SavedListeningPreferences(
     val enabled: Boolean = false,

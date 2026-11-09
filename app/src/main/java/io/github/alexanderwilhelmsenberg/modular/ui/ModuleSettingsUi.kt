@@ -153,8 +153,8 @@ fun ModuleSettingsDialog(
                         )
                     }
                     if (isSortModule) Text(
-                        if (isUsedForAppOrder) "This module currently contributes apps on Home."
-                        else "Home currently uses another app order.",
+                        if (isUsedForAppOrder) "This module currently contributes apps to App drawer."
+                        else "App drawer currently uses another app order.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (isUsedForAppOrder && editable) featuredSettingsContent?.invoke()
@@ -174,7 +174,7 @@ fun ModuleSettingsDialog(
                 onClick = { submit(isSortModule) },
                 enabled = canSave,
                 modifier = Modifier.testTag("module-settings-save"),
-            ) { Text(if (saving) "Saving…" else if (isSortModule && !isUsedForAppOrder) "Use on Home" else "Save settings") }
+            ) { Text(if (saving) "Saving…" else if (isSortModule && !isUsedForAppOrder) "Use in App drawer" else "Save settings") }
         },
         dismissButton = {
             Column {

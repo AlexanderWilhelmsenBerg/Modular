@@ -7,7 +7,9 @@ Baseline: `b1b133b3723dd092e4ab083f22ade975098facc8` (Core local Most Used).
 This is the next Core feature specification after Most Used. It does not claim
 that category pages, folders, or swipe sorting are in an available APK. See the
 [implementation plan](../implementation/categories-folders-mega-sorter-plan.md)
-and [ADR-0008](../decisions/ADR-0008-core-app-organization.md).
+and [ADR-0008](../decisions/ADR-0008-core-app-organization.md). The later
+[drawer-order update](home-widget-grid-v2.md#home-and-all-apps-content)
+supersedes the original two separate Folders sections.
 
 Implementation was authorized on 2026-11-08. The branch now contains category
 pages/settings, popup folders, smart visibility and Mega Sorter. Proposed defaults
@@ -23,8 +25,9 @@ The user requested three connected Core functions:
   categories are Games, Media, Social, Productivity, Work, and Finance. Each has
   an enable switch and a switch controlling whether its apps also appear on Home.
   Users can create custom categories and order pages using small settings tiles.
-- **Folders:** popup app collections, placed in the Most Used section or the main
-  app list. Putting an app in a folder does not remove its standalone app entry.
+- **Folders:** popup app collections shown in one drawer Folders section, with
+  Pinned/manual folders before Alphabetical folders. Putting an app in a folder
+  does not remove its standalone app entry.
   Each folder has its own settings and optional smart visibility: headset
   connection, time schedules, selected Wi-Fi networks, or areas defined on a map.
   Hidden folders remain listed and editable in Settings.
@@ -54,7 +57,7 @@ They are **proposals in this draft**, not additional confirmed requests:
 | Screen direction | Tiles represent physical page positions; normal finger-left swipe reveals the page on the right |
 | Multiple-category visibility | Any enabled member category with Show on Home off suppresses direct Home entries |
 | Pinned apps and visibility | The same Home suppression applies to pins and suggestions; saved pins are retained |
-| Folder placement | One shortcut per folder, in either Most Used or the app-list Folders section |
+| Folder placement | One visible shortcut per folder in a combined drawer Folders section; Pinned/manual order before Alphabetical/name order |
 | Folder independence | Folders work when category pages are disabled |
 | Folder contents | Manual ordered list, new members appended; no nested folders in this version |
 | Smart-folder evaluation | Refresh while the launcher is visible; no background tracking by default |
@@ -294,17 +297,18 @@ multiple folders. Deleting a folder only removes that collection/shortcut.
 
 Placement choices:
 
-- **App list:** a Folders section follows alphabetical apps, as in the supplied
-  reference. Shortcuts sort by folder display name with stable-ID tie-breaking.
-  A labeled folder rail destination appears only when this section is nonempty.
-- **Most Used:** a named **Folders** section follows all pinned apps, suggestions,
-  and Most Used status content. Folder shortcuts never interleave with apps.
-  Saved folder order is retained; Move up/down reorders only folder shortcuts.
-  Folders are not usage-ranked. Existing
-  app pins retain their order on migration; the existing 50-pin limit counts app
-  and folder shortcuts together. This placement requires Most Used to be on;
-  explain that requirement instead of silently enabling it. Turning Most Used
-  off retains these folders, editable in Manage folders.
+- **Alphabetical:** uses the existing saved `APP_LIST` value. Visible shortcuts
+  sort by folder name after the Pinned group.
+- **Pinned:** uses the existing saved `MOST_USED` value and manual folder order.
+  Visible shortcuts appear first in the same drawer Folders section, regardless
+  of the Most Used toggle. They do not interleave with Most Used apps or gain a
+  usage rank. Existing app pins retain their order on migration; the existing
+  50-pin limit counts app and folder shortcuts together.
+
+The diamond rail destination opens that combined Folders section only when it
+contains a visible shortcut. Smart visibility still applies to each folder;
+combining the display does not change stored pins, folder order or membership.
+There is no Show on Home folder option.
 
 Each folder has a selectable icon. Folder settings include a populated, labeled
 grid of bundled vector icons with a selection indicator and live preview. Choosing
@@ -312,8 +316,8 @@ an icon changes the editor draft; Save persists it and Cancel leaves the saved i
 unchanged. The picker works offline without an icon-pack APK. Missing or unknown
 saved icon IDs display the default folder icon without discarding organization data.
 The chosen icon appears on the folder shortcut in either placement and follows the
-current light/dark/wallpaper presentation. This revises the earlier mixed starred
-shortcut ordering: both placements now end with a distinct Folders section.
+current light/dark/wallpaper presentation. The one combined drawer Folders
+section supersedes the earlier separate sections for the two placements.
 
 A folder has one shortcut placement in v1. Moving it changes the placement, not
 its identity or membership. Its contents remain directly available elsewhere
@@ -339,8 +343,8 @@ rendered as deceptively launchable entries.
 ### 6.1 Per-folder settings and smart visibility — ORG-09
 
 **Manage folders always lists every saved folder**, even if its shortcut is
-manually hidden, its rules do not match, it has no available members, or its
-Most Used placement is disabled. Each row shows placement, current visibility,
+manually hidden, its rules do not match, or it has no available members. Each
+row shows placement, current visibility,
 and the reason; it opens that folder's settings and a preview of its contents.
 The same settings are reachable from folder shortcut actions and the popup.
 Never require the condition to match before allowing a folder to be edited.
@@ -396,10 +400,10 @@ until known, while Settings still provides access. Do not present this as secure
 app concealment or force warning badges into the ordinary app list.
 
 Rules affect only the shortcut's eligibility, never saved contents, app hiding,
-pin order, category membership, or local usage history. Normal placement gates
-still apply: Always show does not enable Most Used, and a hidden folder keeps its
-saved pin slot and counts toward the existing pin limit. When every app-list
-folder is ineligible, omit the empty Folders section/rail target. Global search
+pin order, category membership, or local usage history. The Most Used toggle
+does not gate folder visibility. A hidden folder keeps its saved pin slot and
+counts toward the existing pin limit. When every folder from both placements
+is ineligible, omit the empty Folders section/rail target. Global search
 continues to search apps, not conditionally hidden folder shortcuts.
 
 Do not remove a shortcut under an active press/drag or close an open popup when
@@ -510,8 +514,8 @@ Create category / Create folder actions.
   validation fails without partial writes and lets the user revise the selection.
 - If category pages are disabled, explain that assignment is saved and pages
   can be enabled in Settings; assignment itself does not switch pages on.
-- Folder creation asks for placement. If Most Used is off, App list remains
-  available and the Most Used option explains how to enable it.
+- Folder creation asks for Pinned or Alphabetical placement; both remain
+  available when Most Used is off.
 - Expose the same picker from Home, search, category pages, starred app rows,
   and folder contents. Dismiss the old sheet before opening an editor.
 - Persistence failures keep the picker open with selections intact and Retry;
@@ -628,7 +632,7 @@ References: user screenshots **25634** (closed folder shortcuts) and **25636**
 (open popup), attributed by the user to Niagara Launcher. They are reference
 material, not app assets, and must not be bundled with Modular.
 
-- **Closed state:** a named Folders section below the app alphabet; ordinary
+- **Closed state:** one named Folders section between Most Used and the app alphabet; ordinary
   icon/name shortcut rows continue the existing column alignment.
 - **Open state:** a compact rounded dark panel overlays the list, with one
   folder title and a roomy single-column icon/name list. The surrounding Home
@@ -663,7 +667,7 @@ specified by the user's description, not observed in these static screenshots.
 | ORG-A06 | Tile reordering across Home changes physical sides and distance; page state survives Settings/recreation; no wrapping; HOME resets to Home; disabled/deleted current page recovers |
 | ORG-A07 | Sparse category rail includes only populated locale letters; category empty state works; vertical scroll, reachability and page gestures do not steal one another |
 | ORG-A08 | Folder popup opens from both placements, stays within safe bounds, scrolls independently, launches the correct app, closes on outside tap/Back, and preserves the underlying anchor |
-| ORG-A09 | Folder membership never removes standalone entries; folder move/rename/reorder/delete works; Most Used-off placement is explained; app-pin migration preserves exact order and identity |
+| ORG-A09 | Folder membership never removes standalone entries; folder move/rename/reorder/delete works; both placements remain visible when Most Used is off; app-pin migration preserves exact order and identity |
 | ORG-A10 | Long-press picker works on every app surface; multi-select, create category/folder, Cancel, failed save and Retry preserve consistent state without orphan collections |
 | ORG-A11 | One/two-target sorter handles unused direction, existing/both memberships, duplicate swipes, manual/auto precedence, X/Back and durable accepted writes |
 | ORG-A12 | While row A animates, swipe row B and scroll vertically; slot bounds/neighbor positions remain unchanged by animation; offscreen/recycled rows show the correct final state |
@@ -671,7 +675,7 @@ specified by the user's description, not observed in these static screenshots.
 | ORG-A14 | Rotation/process death, app uninstall/update, explicit hiding, and category deletion during a session have deterministic recovery without invalid launches |
 | ORG-A15 | Native captures at 320/375/414/768dp, Light/Dark/AMOLED, wallpaper on/off, enlarged text, RTL and reduced motion; controls reachable, readable labels beyond color, basic non-swipe assignment/reorder actions |
 | ORG-A16 | Existing Home/search/Most Used/hidden-app/rename/package-cache/module-failure tests still pass; category/page/learning state never depends on external add-ons |
-| ORG-A17 | Every folder remains editable/previewable in Settings when manually hidden, unmatched, empty, permission-blocked, or placed in disabled Most Used; visibility never changes members, stored pin order, or app search |
+| ORG-A17 | Every folder remains editable/previewable in Settings when manually hidden, unmatched, empty, permission-blocked, or placed in Pinned with Most Used disabled; visibility never changes members, stored pin order, or app search |
 | ORG-A18 | Headset connect/disconnect, overnight/weekday/DST schedules, connected Wi-Fi without internet, and saved map areas produce correct conditions; Any is default, All works, Unknown truth tables and fallback are covered |
 | ORG-A19 | Denied/revoked permissions, Location off, unknown SSID, no provider, timeout, stale/inaccurate/boundary fixes and map failure preserve definitions and provide recovery; no automatic permission launch or false arrival/exit claim |
 | ORG-A20 | Shared coordinator respects configured freshness/timeout/rate bounds for many folders; leaving launcher/screen-off cancels requests/listeners; no Wi-Fi scans, background tracking, exact alarms, or per-folder polling; validate on Samsung and without GMS |

@@ -29,6 +29,9 @@ import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePreferences
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
 import io.github.alexanderwilhelmsenberg.modular.workspace.WIDGET_RAIL_INSET_DP
 import io.github.alexanderwilhelmsenberg.modular.workspace.calculateWidgetAreaGeometry
+import io.github.alexanderwilhelmsenberg.modular.workspace.gridSpanHeightDp
+import io.github.alexanderwilhelmsenberg.modular.workspace.gridSpanWidthDp
+import io.github.alexanderwilhelmsenberg.modular.workspace.resolveWidgetGridSpan
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -64,7 +67,7 @@ internal fun WidgetAreaEditor(
                     "workspace-widget-gap", { gap = it }, enabled = !busy)
                 Text("Set the edge margin to 0 dp to place widgets against the available edges. The alphabet rail keeps its touch space.",
                     style = MaterialTheme.typography.bodySmall)
-                Text("Half-width widgets that need more space appear on full-width rows.",
+                Text("Widgets that need more space use wider grid spans when possible.",
                     style = MaterialTheme.typography.bodySmall)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
@@ -77,33 +80,40 @@ internal fun WidgetAreaEditor(
     )
 }
 
-/** Provider-aware widget dimensions; only the Save action writes to storage. */
+/** Provider-aware grid dimensions; only Save writes the size and padding together. */
 @Composable
 internal fun WidgetSizeEditor(
     widget: WorkspaceWidget,
     preferences: WorkspacePreferences,
     limits: WidgetLayoutLimits,
-    canFitHalf: (WorkspaceWidget, Int) -> Boolean,
     onDismiss: () -> Unit,
-    onSave: suspend (Int, Int, Int, Int) -> Result<Unit>,
+    onSave: suspend (Int, Int, Int, Int, Int, Int) -> Result<Unit>,
     onSaved: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var span by remember(widget.appWidgetId) { mutableStateOf(widget.span) }
-    var height by remember(widget.appWidgetId) { mutableStateOf(widget.heightDp) }
+    val screenWidth = LocalConfiguration.current.screenWidthDp
+    val geometry = calculateWidgetAreaGeometry(screenWidth, preferences)
+    val initial = resolveWidgetGridSpan(widget, preferences, geometry,
+        limits.minContentWidthDp, limits.minContentHeightDp)
+    val gridColumns = preferences.gridColumnCount.coerceIn(1, 12)
+    var columnSpan by remember(widget.appWidgetId) { mutableStateOf(initial.columnSpan) }
+    var rowSpan by remember(widget.appWidgetId) { mutableStateOf(initial.rowSpan) }
     var padding by remember(widget.appWidgetId) { mutableStateOf(widget.paddingDp) }
     var saving by remember(widget.appWidgetId) { mutableStateOf(false) }
     var error by remember(widget.appWidgetId) { mutableStateOf<String?>(null) }
-    val minHeight = limits.minContentHeightDp
-        .coerceIn(OrganizationLimits.MIN_WIDGET_HEIGHT_DP, OrganizationLimits.MAX_WIDGET_HEIGHT_DP)
-    val maxHeight = limits.maxContentHeightDp
-        .coerceIn(minHeight, OrganizationLimits.MAX_WIDGET_HEIGHT_DP)
-    val validHeight = height in minHeight..maxHeight
-    // Use the app window width, including in multi-window mode, for the fit hint.
-    val screenWidth = LocalConfiguration.current.screenWidthDp
-    val halfWidth = calculateWidgetAreaGeometry(screenWidth, preferences).halfCellWidthDp
-    val fitsHalf = canFitHalf(widget.copy(span = 1, paddingDp = padding), halfWidth)
-    val changed = span != widget.span || height != widget.heightDp || padding != widget.paddingDp
+    val width = gridSpanWidthDp(columnSpan, geometry, preferences)
+    val height = gridSpanHeightDp(rowSpan, preferences)
+    val contentWidth = width - 2 * padding
+    val contentHeight = height - 2 * padding
+    val validWidth = contentWidth > 0 &&
+        (contentWidth >= limits.minContentWidthDp || columnSpan == gridColumns) &&
+        contentWidth <= limits.maxContentWidthDp
+    val validHeight = contentHeight >= limits.minContentHeightDp &&
+        contentHeight <= limits.maxContentHeightDp
+    val validRowSpan = rowSpan <= OrganizationLimits.MAX_WIDGET_GRID_ROW_SPAN ||
+        (widget.rowSpan == 0 && rowSpan == initial.rowSpan)
+    val changed = columnSpan != initial.columnSpan || rowSpan != initial.rowSpan ||
+        padding != widget.paddingDp
 
     AlertDialog(
         onDismissRequest = { if (!saving) onDismiss() },
@@ -111,64 +121,51 @@ internal fun WidgetSizeEditor(
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Width", style = MaterialTheme.typography.titleSmall)
-                if (limits.maxContentWidthDp != Int.MAX_VALUE) Text(
-                    "This provider limits its content width to ${limits.maxContentWidthDp} dp.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Row {
-                    TextButton(enabled = !saving, onClick = { span = 2 },
-                        modifier = Modifier.testTag("workspace-widget-span-full")) {
-                        Text(if (span == 2) "✓ Full width" else "Full width")
-                    }
-                    TextButton(enabled = !saving, onClick = { span = 1 },
-                        modifier = Modifier.testTag("workspace-widget-span-half")) {
-                        Text(if (span == 1) "✓ Half width" else "Half width")
-                    }
-                }
-                if (span == 1 && !fitsHalf) Text(
-                    "This widget needs at least ${limits.minContentWidthDp + 2 * padding} dp; the half-width cell has $halfWidth dp. It will use a full-width row until more space is available.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                if (span == 1 && fitsHalf) Text("Adjacent half-width widgets can share a row.",
+                Text("The Home grid has $gridColumns columns and ${preferences.gridRowHeightDp} dp rows. A 4 × 4 widget spans four columns and four rows.",
                     style = MaterialTheme.typography.bodySmall)
-                Text("Widget height: $height dp", style = MaterialTheme.typography.titleSmall)
-                if (limits.canResizeHeight && maxHeight > minHeight) Slider(
-                    value = height.coerceIn(minHeight, maxHeight).toFloat(),
-                    onValueChange = { height = it.roundToInt() },
-                    valueRange = minHeight.toFloat()..maxHeight.toFloat(),
-                    enabled = !saving,
-                    modifier = Modifier.fillMaxWidth().testTag("workspace-widget-height"),
-                ) else Text(if (limits.canResizeHeight) "This widget's allowed height is fixed."
-                    else "This widget provider does not allow height resizing.",
+                Text("Size: $columnSpan × $rowSpan cells", style = MaterialTheme.typography.titleSmall)
+                if (limits.canResizeWidth && gridColumns > 1) {
+                    LayoutValueSlider("Columns", "$columnSpan of $gridColumns", columnSpan,
+                        1..gridColumns, "workspace-widget-columns", { columnSpan = it }, enabled = !saving)
+                } else Text(if (gridColumns == 1) "This grid has one column."
+                    else "This widget provider does not allow width resizing. It uses $columnSpan columns.",
                     style = MaterialTheme.typography.bodySmall)
-                if (limits.canResizeHeight && maxHeight > minHeight) Row {
-                    TextButton(enabled = !saving && height > minHeight,
-                        onClick = { height = (height - 16).coerceAtLeast(minHeight) },
-                        modifier = Modifier.testTag("workspace-widget-height-shorter")) { Text("−16 dp") }
-                    TextButton(enabled = !saving && height < maxHeight,
-                        onClick = { height = (height + 16).coerceAtMost(maxHeight) },
-                        modifier = Modifier.testTag("workspace-widget-height-taller")) { Text("+16 dp") }
-                }
-                Text("Provider height: $minHeight–$maxHeight dp. With inner padding, the row uses ${height + 2 * padding} dp.",
+                if (limits.canResizeHeight) {
+                    LayoutValueSlider("Rows", "$rowSpan", rowSpan,
+                        1..maxOf(initial.rowSpan, OrganizationLimits.MAX_WIDGET_GRID_ROW_SPAN),
+                        "workspace-widget-rows", { rowSpan = it }, enabled = !saving)
+                } else Text("This widget provider does not allow height resizing. It uses $rowSpan rows.",
+                    style = MaterialTheme.typography.bodySmall)
+                Text("Allocated size: $width × $height dp. Content after padding: $contentWidth × $contentHeight dp.",
+                    style = MaterialTheme.typography.bodySmall)
+                Text("Provider content limits: at least ${limits.minContentWidthDp} × ${limits.minContentHeightDp} dp" +
+                    (if (limits.maxContentWidthDp < Int.MAX_VALUE) ", width at most ${limits.maxContentWidthDp} dp" else "") +
+                    (if (limits.maxContentHeightDp < Int.MAX_VALUE) ", height at most ${limits.maxContentHeightDp} dp" else "") + ".",
                     style = MaterialTheme.typography.bodySmall)
                 LayoutValueSlider("Inner padding", "$padding dp", padding,
                     0..OrganizationLimits.MAX_WIDGET_PADDING_DP, "workspace-widget-padding",
                     { padding = it }, enabled = !saving)
-                Text("Inner padding adds space around the widget. Some providers draw their own padding too.",
+                Text("Inner padding reduces the space available to the provider. Some providers draw their own padding too.",
                     style = MaterialTheme.typography.bodySmall)
-                if (!validHeight) Text("Choose a height within the provider's allowed range.",
+                if (!validWidth) Text("Choose a column span that fits this provider's allowed width.",
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                if (!validHeight) Text("Choose a row span that fits this provider's allowed height.",
+                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (!validRowSpan) Text("New widget sizes can use at most ${OrganizationLimits.MAX_WIDGET_GRID_ROW_SPAN} rows. The original legacy height can be kept.",
+                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall) }
             }
         },
         confirmButton = {
-            Button(enabled = !saving && validHeight && changed, onClick = {
+            Button(enabled = !saving && validWidth && validHeight && validRowSpan && changed, onClick = {
                 saving = true
                 error = null
                 scope.launch {
-                    val result = runCatching { onSave(widget.appWidgetId, height, span, padding) }
-                        .getOrElse { Result.failure(it) }
+                    val result = runCatching {
+                        onSave(widget.appWidgetId, columnSpan, rowSpan,
+                            widget.gridColumn, widget.gridRow, padding)
+                    }.getOrElse { Result.failure(it) }
                     saving = false
                     result.onSuccess { onSaved() }.onFailure {
                         error = it.message ?: "Could not save widget layout. Try again."
@@ -181,7 +178,7 @@ internal fun WidgetSizeEditor(
 }
 
 @Composable
-private fun LayoutValueSlider(
+internal fun LayoutValueSlider(
     label: String,
     valueLabel: String,
     value: Int,

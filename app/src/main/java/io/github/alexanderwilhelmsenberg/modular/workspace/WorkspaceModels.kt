@@ -26,6 +26,10 @@ data class WorkspaceWidget(
     val heightDp: Int,
     /** Identity of this device-local AppWidgetHost; empty for older placements. */
     val hostToken: String = "",
+    /** Horizontal grid span: one half-width cell or both cells. */
+    val span: Int = 2,
+    /** Space inside this widget's allocated cell. */
+    val paddingDp: Int = 0,
 )
 
 enum class WorkspaceSection { CLOCK, WIDGETS, MOST_USED, LISTENING }
@@ -35,6 +39,9 @@ data class WorkspacePreferences(
     val showDate: Boolean = true,
     val showBattery: Boolean = false,
     val sectionOrder: List<WorkspaceSection> = WorkspaceSection.entries.toList(),
+    val widgetAreaWidthPercent: Int = 100,
+    val widgetMarginDp: Int = 16,
+    val widgetGapDp: Int = 12,
 )
 
 data class ListeningPreferences(

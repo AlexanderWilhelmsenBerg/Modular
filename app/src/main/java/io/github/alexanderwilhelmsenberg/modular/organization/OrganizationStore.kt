@@ -51,6 +51,11 @@ object OrganizationLimits {
     const val MAX_LISTENING_APPS = 64
     const val MIN_WIDGET_HEIGHT_DP = 48
     const val MAX_WIDGET_HEIGHT_DP = 2_048
+    const val MIN_WIDGET_AREA_WIDTH_PERCENT = 50
+    const val MAX_WIDGET_AREA_WIDTH_PERCENT = 100
+    const val MAX_WIDGET_MARGIN_DP = 48
+    const val MAX_WIDGET_GAP_DP = 48
+    const val MAX_WIDGET_PADDING_DP = 32
 }
 
 /** Shares the single core_most_used DataStore with MostUsedSettingsStore. */
@@ -348,6 +353,12 @@ private fun validate(snapshot: OrganizationSnapshot) {
         snapshot.workspacePreferences.sectionOrder.toSet() == WorkspaceSection.entries.toSet()) {
         "Invalid workspace section order"
     }
+    require(snapshot.workspacePreferences.widgetAreaWidthPercent in
+        OrganizationLimits.MIN_WIDGET_AREA_WIDTH_PERCENT..OrganizationLimits.MAX_WIDGET_AREA_WIDTH_PERCENT &&
+        snapshot.workspacePreferences.widgetMarginDp in 0..OrganizationLimits.MAX_WIDGET_MARGIN_DP &&
+        snapshot.workspacePreferences.widgetGapDp in 0..OrganizationLimits.MAX_WIDGET_GAP_DP) {
+        "Invalid widget area settings"
+    }
     val validWidgetPages = workspaceIds.mapTo(HashSet()) { WorkspacePageId.widget(it) }
     validWidgetPages.add(WorkspacePageId.HOME)
     require(snapshot.widgets.size <= OrganizationLimits.MAX_WIDGETS &&
@@ -357,7 +368,8 @@ private fun validate(snapshot: OrganizationSnapshot) {
             widget.provider.length in 3..512 && widget.provider.contains('/') &&
             widget.provider.none { it.isISOControl() } &&
             widget.hostToken.length <= 128 && widget.hostToken.none { it.isISOControl() } &&
-            widget.heightDp in OrganizationLimits.MIN_WIDGET_HEIGHT_DP..OrganizationLimits.MAX_WIDGET_HEIGHT_DP
+            widget.heightDp in OrganizationLimits.MIN_WIDGET_HEIGHT_DP..OrganizationLimits.MAX_WIDGET_HEIGHT_DP &&
+            widget.span in 1..2 && widget.paddingDp in 0..OrganizationLimits.MAX_WIDGET_PADDING_DP
         }) { "Invalid widget placement" }
     require(snapshot.listeningPreferences.apps.size <= OrganizationLimits.MAX_LISTENING_APPS &&
         snapshot.listeningPreferences.apps.distinct().size == snapshot.listeningPreferences.apps.size &&
@@ -446,16 +458,23 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
     val showDate: Boolean = true,
     val showBattery: Boolean = false,
     val sectionOrder: List<WorkspaceSection> = WorkspaceSection.entries.toList(),
+    val widgetAreaWidthPercent: Int = 100,
+    val widgetMarginDp: Int = 16,
+    val widgetGapDp: Int = 12,
 ) {
-    fun public() = WorkspacePreferences(showClock, showDate, showBattery, sectionOrder)
+    fun public() = WorkspacePreferences(showClock, showDate, showBattery, sectionOrder,
+        widgetAreaWidthPercent, widgetMarginDp, widgetGapDp)
     companion object { fun from(preferences: WorkspacePreferences) = SavedWorkspacePreferences(
-        preferences.showClock, preferences.showDate, preferences.showBattery, preferences.sectionOrder) }
+        preferences.showClock, preferences.showDate, preferences.showBattery, preferences.sectionOrder,
+        preferences.widgetAreaWidthPercent, preferences.widgetMarginDp, preferences.widgetGapDp) }
 }
 @Serializable private data class SavedWidget(val appWidgetId: Int, val pageId: String,
-    val provider: String, val heightDp: Int, val hostToken: String = "") {
-    fun public() = WorkspaceWidget(appWidgetId, pageId, provider, heightDp, hostToken)
+    val provider: String, val heightDp: Int, val hostToken: String = "",
+    val span: Int = 2, val paddingDp: Int = 0) {
+    fun public() = WorkspaceWidget(appWidgetId, pageId, provider, heightDp, hostToken, span, paddingDp)
     companion object { fun from(widget: WorkspaceWidget) = SavedWidget(widget.appWidgetId,
-        widget.pageId, widget.provider, widget.heightDp, widget.hostToken) }
+        widget.pageId, widget.provider, widget.heightDp, widget.hostToken,
+        widget.span, widget.paddingDp) }
 }
 @Serializable private data class SavedListeningPreferences(
     val enabled: Boolean = false,

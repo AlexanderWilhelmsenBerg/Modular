@@ -76,6 +76,7 @@ fun OrganizationHomeScreen(
     homeResetToken: Int = 0,
     workspaceMode: Boolean = false,
     widgetContent: @Composable (WorkspaceWidget) -> Unit = {},
+    canFitHalfWidget: (WorkspaceWidget, Int) -> Boolean = { _, _ -> true },
     onWidgetSurfaceVisible: (Boolean) -> Unit = {},
     onAddWidget: (String) -> Unit = {},
     onEditWorkspace: (String) -> Unit = {},
@@ -326,8 +327,11 @@ fun OrganizationHomeScreen(
                         pageTitle = widgetPage?.name,
                         preferences = snapshot.workspacePreferences,
                         widgets = snapshot.widgets,
+                        canFitHalfWidget = canFitHalfWidget,
                         widgetContent = { widget ->
-                            var slotHeightDp by rememberSaveable(widget.appWidgetId, widget.heightDp) { mutableIntStateOf(widget.heightDp) }
+                            var slotHeightDp by rememberSaveable(widget.appWidgetId, widget.heightDp, widget.paddingDp) {
+                                mutableIntStateOf(widget.heightDp + widget.paddingDp * 2)
+                            }
                             if (widgetSurfaceVisible && pageName == pageKey) {
                                 Box(Modifier.fillMaxWidth().onSizeChanged { size ->
                                     if (size.height > 0) slotHeightDp = with(density) { size.height.toDp().value.roundToInt() }
@@ -472,8 +476,9 @@ fun OrganizationHomeScreen(
                 verticalAlignment = Alignment.CenterVertically) {
                 TextButton(
                     onClick = { settle(vertical.progress < 1f) },
+                    contentPadding = PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.width(72.dp).testTag(if (vertical.progress < 1f) "workspace-apps-action" else "workspace-home-action"),
-                ) { Text(if (vertical.progress < 1f) "Apps" else "Home") }
+                ) { Text(if (vertical.progress < 1f) "Apps" else "Home", maxLines = 1) }
                 Box(Modifier.weight(1f)) {
                     HomeBottomControls(
                         query = searchQuery,

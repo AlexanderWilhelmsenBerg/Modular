@@ -19,6 +19,18 @@ assertions. Do not mark a gate complete from a screenshot alone.
 | WS-A09 | `scripts/capture-workspace.py` captures a 320/375/414/768dp matrix, enlarged font, light/dark/AMOLED, RTL and a real fixture widget where supported by the emulator. Files are uploaded by Android CI for visual review. |
 | WS-A10 | Android CI runs the full unit, lint, assemble and connected test suites. Legacy `HomeScreen` fixtures intentionally continue to exercise the isolated list component. |
 
+## Widget layout extension
+
+Contract: [Widget layout](../product/widget-layout.md). `WidgetLayoutTest` covers
+ordered row packing, full-row interruption, narrow fallback and edge geometry.
+Organization store tests cover old-record defaults, round trips and validation.
+`WorkspaceScreenshotTest` binds real providers, checks paired cell bounds and
+reported dimensions, zero-margin edge-to-rail layout, narrower area settings and
+Activity recreation. The existing capture matrix includes these widget layouts.
+`WidgetLayoutEditorTest` covers explicit-save and failure behavior in the editors.
+Run results and screenshot review are recorded in the implementing pull request;
+these test descriptions alone are not a claim that device acceptance is complete.
+
 ## Device acceptance still required
 
 - On a Samsung device with gesture navigation, drag a scrollable widget and a

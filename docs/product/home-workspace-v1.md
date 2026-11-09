@@ -24,7 +24,8 @@ Confirmed requests:
 
 Confirmed by the user's follow-up:
 
-1. Widgets use a **vertical stack**, not a free-positioned grid.
+1. Widgets use a **vertical stack of rows**, not a free-positioned grid. The
+   November 9 layout extension allows two half-width widgets in one row.
 2. The alphabet remains visible. Tapping a letter opens All apps at that letter,
    using the same navigation animation as the existing alphabet rail.
 3. An upward swipe scrolls the Home stack first. At its bottom, continued upward
@@ -189,10 +190,11 @@ extension mechanisms with separate lifecycle/security boundaries.
 - Add the widget only after successful binding/configuration. Cancellation,
   denied binding, missing provider and interrupted configuration clean up staged
   widget IDs and preserve the existing layout.
-- Confirmed stack layout: full available content width, provider-compatible
-  initial height, ordered vertical slots. Resize only along supported axes and
-  within provider/platform bounds; communicate supported sizes to the host view.
-  Free-positioned grid placement is outside this version.
+- Stack layout defaults to full available content width and provider-compatible
+  initial height. The [widget layout extension](widget-layout.md) adds half-width
+  slots, configurable area width/margins/gaps, and per-widget height/padding.
+  Resize within provider/platform bounds and communicate actual sizes to the
+  host view. Free-positioned grid placement is outside this version.
 - Edit mode supports reorder, supported resize, move to another widget page,
   provider reconfiguration when available, and Remove widget. Removing a widget
   releases its host binding; it never uninstalls its provider app.

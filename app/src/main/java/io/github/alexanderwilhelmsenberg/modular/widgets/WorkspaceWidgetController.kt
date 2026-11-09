@@ -32,9 +32,20 @@ import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.ceil
+import kotlin.math.min
 
 internal const val HOST_ID = 0x4d4f44
 private const val STAGE_EXPIRY_MS = 24L * 60 * 60 * 1000
+
+/** Provider content limits in dp; saved widget padding is outside these bounds. */
+data class WidgetLayoutLimits(
+    val minContentWidthDp: Int,
+    val minContentHeightDp: Int,
+    val maxContentHeightDp: Int,
+    val canResizeWidth: Boolean,
+    val canResizeHeight: Boolean,
+    val maxContentWidthDp: Int = Int.MAX_VALUE,
+)
 
 /** One instance per visible launcher Activity. Keep it mounted across workspace page changes. */
 class WorkspaceWidgetController internal constructor(
@@ -122,6 +133,38 @@ class WorkspaceWidgetController internal constructor(
             currentHostToken.isNotEmpty() && widget.hostToken == currentHostToken &&
             it.provider.flattenToString() == widget.provider
         }
+
+    fun layoutLimits(widget: WorkspaceWidget): WidgetLayoutLimits? =
+        providerInfo(widget)?.let(::layoutLimits)
+
+    private fun layoutLimits(info: AppWidgetProviderInfo): WidgetLayoutLimits {
+        val horizontal = info.resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL != 0
+        val vertical = info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0
+        val minWidthPx = if (horizontal && info.minResizeWidth > 0) info.minResizeWidth else info.minWidth
+        val minHeightPx = if (vertical && info.minResizeHeight > 0) info.minResizeHeight else info.minHeight
+        val minimumHeight = pxToDp(minHeightPx.coerceAtLeast(0))
+        val minimumWidth = pxToDp(minWidthPx.coerceAtLeast(0))
+        val maxResizePx = if (vertical && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            info.maxResizeHeight else 0
+        val maxResizeWidthPx = if (horizontal && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            info.maxResizeWidth else 0
+        return WidgetLayoutLimits(
+            minContentWidthDp = minimumWidth,
+            minContentHeightDp = minimumHeight,
+            maxContentHeightDp = (if (maxResizePx > 0) pxToDp(maxResizePx)
+                else OrganizationLimits.MAX_WIDGET_HEIGHT_DP).coerceAtLeast(minimumHeight),
+            canResizeWidth = horizontal,
+            canResizeHeight = vertical,
+            maxContentWidthDp = if (maxResizeWidthPx > 0) pxToDp(maxResizeWidthPx)
+                .coerceAtLeast(minimumWidth) else Int.MAX_VALUE,
+        )
+    }
+
+    /** A saved half span falls back to full width when the current cell is too narrow. */
+    fun canFitHalf(widget: WorkspaceWidget, cellWidthDp: Int): Boolean {
+        val limits = layoutLimits(widget) ?: return false
+        return cellWidthDp - 2 * widget.paddingDp >= limits.minContentWidthDp
+    }
 
     internal fun providers(): List<AppWidgetProviderInfo> =
         runCatching { manager.installedProviders.orEmpty() }.getOrDefault(emptyList())
@@ -271,11 +314,10 @@ class WorkspaceWidgetController internal constructor(
         finishingNewId = id
         scope.launch {
             try {
-                val platformMax = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && info.maxResizeHeight > 0)
-                    pxToDp(info.maxResizeHeight) else OrganizationLimits.MAX_WIDGET_HEIGHT_DP
-                val initialHeight = maxOf(pxToDp(info.minHeight), 96).coerceIn(
+                val limits = layoutLimits(info)
+                val initialHeight = maxOf(pxToDp(info.minHeight), limits.minContentHeightDp, 96).coerceIn(
                     OrganizationLimits.MIN_WIDGET_HEIGHT_DP,
-                    platformMax.coerceIn(OrganizationLimits.MIN_WIDGET_HEIGHT_DP,
+                    limits.maxContentHeightDp.coerceIn(OrganizationLimits.MIN_WIDGET_HEIGHT_DP,
                         OrganizationLimits.MAX_WIDGET_HEIGHT_DP))
                 val result = edit { current ->
                     if (!resultMatchesStage(id, journal.read()) || current.any { it.appWidgetId == id }) current
@@ -357,18 +399,56 @@ class WorkspaceWidgetController internal constructor(
 
     fun resizeWidget(id: Int, deltaDp: Int) {
         val widget = placements.firstOrNull { it.appWidgetId == id && it.hostToken == currentHostToken } ?: return
-        val info = providerInfo(widget) ?: return
-        if (info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL == 0) return
-        val min = pxToDp(info.minResizeHeight).coerceIn(
+        val limits = layoutLimits(widget) ?: return
+        if (!limits.canResizeHeight) return
+        val min = limits.minContentHeightDp.coerceIn(
             OrganizationLimits.MIN_WIDGET_HEIGHT_DP, OrganizationLimits.MAX_WIDGET_HEIGHT_DP)
-        val maxResizePx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) info.maxResizeHeight else 0
-        val max = (if (maxResizePx > 0) pxToDp(maxResizePx) else OrganizationLimits.MAX_WIDGET_HEIGHT_DP)
-            .coerceIn(min, OrganizationLimits.MAX_WIDGET_HEIGHT_DP)
+        val max = min(OrganizationLimits.MAX_WIDGET_HEIGHT_DP,
+            limits.maxContentHeightDp).coerceAtLeast(min)
         val height = (widget.heightDp + deltaDp).coerceIn(min, max)
         scope.launch {
-            if (!edit { widgets -> widgets.map { if (it.appWidgetId == id) it.copy(heightDp = height) else it } })
-                message("Could not resize widget")
+            saveWidgetLayout(id, height, widget.span, widget.paddingDp).onFailure {
+                message("Could not resize widget: ${it.message.orEmpty()}")
+            }
         }
+    }
+
+    /** Save all widget layout fields together against the latest persisted revision. */
+    suspend fun saveWidgetLayout(id: Int, heightDp: Int, span: Int, paddingDp: Int): Result<Unit> {
+        if (span !in 1..2 || paddingDp !in 0..OrganizationLimits.MAX_WIDGET_PADDING_DP ||
+            heightDp !in OrganizationLimits.MIN_WIDGET_HEIGHT_DP..OrganizationLimits.MAX_WIDGET_HEIGHT_DP)
+            return Result.failure(IllegalArgumentException("Widget layout is outside the supported range"))
+        var lastFailure: Throwable = IllegalStateException("Could not save widget layout")
+        repeat(3) {
+            val snapshot = store.currentSnapshot()
+            val current = snapshot.widgets.firstOrNull { it.appWidgetId == id }
+                ?: return Result.failure(IllegalArgumentException("Widget no longer exists"))
+            if (current.hostToken != currentHostToken)
+                return Result.failure(IllegalStateException("Widget belongs to another host"))
+            val limits = layoutLimits(current)
+                ?: return Result.failure(IllegalStateException("Widget provider is unavailable"))
+            if (heightDp < limits.minContentHeightDp ||
+                heightDp > limits.maxContentHeightDp)
+                return Result.failure(IllegalArgumentException("Widget content height is outside provider limits"))
+            if (!limits.canResizeHeight && heightDp != current.heightDp)
+                return Result.failure(IllegalArgumentException("Widget provider does not support height resizing"))
+            // A half-span preference can be saved on a narrow screen. The Home
+            // layout gives the provider a full row until a half cell can fit it.
+            if (current.heightDp == heightDp && current.span == span && current.paddingDp == paddingDp)
+                return Result.success(Unit)
+            val updated = snapshot.widgets.map { widget ->
+                if (widget.appWidgetId == id) widget.copy(heightDp = heightDp, span = span, paddingDp = paddingDp)
+                else widget
+            }
+            val result = store.update(OrganizationBatch(
+                listOf(OrganizationEdit.SetWidgets(updated)), snapshot.revision))
+            if (result.isSuccess) {
+                placements = result.getOrThrow().widgets
+                return Result.success(Unit)
+            }
+            lastFailure = result.exceptionOrNull() ?: lastFailure
+        }
+        return Result.failure(lastFailure)
     }
 
     private suspend fun edit(transform: (List<WorkspaceWidget>) -> List<WorkspaceWidget>): Boolean {

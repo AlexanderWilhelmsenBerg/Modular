@@ -313,6 +313,72 @@ class OrganizationStoreTest {
         assertEquals(boundaryPreferences, restored.workspacePreferences)
     }
 
+    @Test fun gridSizesAndPositionsRoundTripAndLegacyRecordsUseDefaults() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        val preferences = WorkspacePreferences(gridColumnCount = 6, gridRowHeightDp = 80)
+        val widgets = listOf(
+            WorkspaceWidget(1, WorkspacePageId.HOME, "example.home/.Widget", 300,
+                columnSpan = 4, rowSpan = 4, gridColumn = 1, gridRow = 2),
+            WorkspaceWidget(2, WorkspacePageId.HOME, "example.home/.Widget", 80,
+                columnSpan = 1, rowSpan = 1, gridColumn = 5, gridRow = 2),
+        )
+        store.update(OrganizationBatch(listOf(
+            OrganizationEdit.SetWorkspacePreferences(preferences),
+            OrganizationEdit.SetWidgets(widgets),
+        ), expectedRevision = store.currentSnapshot().revision)).getOrThrow()
+        assertEquals(widgets, OrganizationStore(memory).currentSnapshot().widgets)
+        assertEquals(preferences, OrganizationStore(memory).currentSnapshot().workspacePreferences)
+
+        val root = Json.parseToJsonElement(requireNotNull(memory.raw("organization_json_v1"))).jsonObject
+        val oldPreferences = JsonObject(root.getValue("workspacePreferences").jsonObject.filterKeys {
+            it !in setOf("gridColumnCount", "gridRowHeightDp")
+        })
+        val oldWidgets = JsonArray((root.getValue("widgets") as JsonArray).map { saved ->
+            JsonObject(saved.jsonObject.filterKeys {
+                it !in setOf("columnSpan", "rowSpan", "gridColumn", "gridRow")
+            })
+        })
+        memory.setRaw("organization_json_v1", JsonObject(root + mapOf(
+            "workspacePreferences" to oldPreferences, "widgets" to oldWidgets)).toString())
+        val migrated = OrganizationStore(memory).currentSnapshot()
+        assertEquals(4, migrated.workspacePreferences.gridColumnCount)
+        assertEquals(96, migrated.workspacePreferences.gridRowHeightDp)
+        assertTrue(migrated.widgets.all { it.columnSpan == 0 && it.rowSpan == 0 &&
+            it.gridColumn == -1 && it.gridRow == -1 })
+    }
+
+    @Test fun invalidGridFieldsAreRejectedAtomicallyButColumnCountCanShrink() = runBlocking {
+        val store = OrganizationStore(MemoryPreferences())
+        val original = store.currentSnapshot()
+        val widget = WorkspaceWidget(1, WorkspacePageId.HOME, "example.home/.Widget", 180,
+            columnSpan = 4, rowSpan = 4, gridColumn = 3, gridRow = 0)
+        listOf(
+            WorkspacePreferences(gridColumnCount = 0),
+            WorkspacePreferences(gridColumnCount = 13),
+            WorkspacePreferences(gridRowHeightDp = 31),
+            WorkspacePreferences(gridRowHeightDp = 257),
+        ).forEach { invalid ->
+            assertTrue(store.update(OrganizationBatch(listOf(
+                OrganizationEdit.SetWorkspacePreferences(invalid)))).isFailure)
+            assertEquals(original, store.currentSnapshot())
+        }
+        listOf(widget.copy(columnSpan = -1), widget.copy(columnSpan = 13),
+            widget.copy(rowSpan = -1), widget.copy(rowSpan = 33),
+            widget.copy(gridColumn = -2), widget.copy(gridColumn = 12),
+            widget.copy(gridRow = -2), widget.copy(gridRow = 257)).forEach { invalid ->
+            assertTrue(store.update(OrganizationBatch(listOf(
+                OrganizationEdit.SetWidgets(listOf(invalid))),
+                expectedRevision = original.revision)).isFailure)
+            assertEquals(original, store.currentSnapshot())
+        }
+        store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(listOf(widget))),
+            expectedRevision = original.revision)).getOrThrow()
+        store.update(OrganizationBatch(listOf(OrganizationEdit.SetWorkspacePreferences(
+            WorkspacePreferences(gridColumnCount = 2))))).getOrThrow()
+        assertEquals(listOf(widget), store.currentSnapshot().widgets)
+    }
+
     @Test fun invalidWidgetUpdateIsAtomicAndExistingPlacementsRemain() = runBlocking {
         val store = OrganizationStore(MemoryPreferences())
         val good = WorkspaceWidget(1, WorkspacePageId.HOME, "example.home/.Widget", 180)

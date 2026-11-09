@@ -22,7 +22,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -55,6 +54,7 @@ fun CategorySettingsUi(
     onUpdate: suspend (OrganizationBatch) -> Result<OrganizationSnapshot>,
     onManageFolders: () -> Unit,
     onStartMegaSorter: () -> Unit,
+    onOpenHomeSettings: () -> Unit = {},
     showEntry: Boolean = true,
     openDetailsRequest: Int = 0,
 ) {
@@ -65,7 +65,6 @@ fun CategorySettingsUi(
     var memberId by remember { mutableStateOf<String?>(null) }
     var deleteId by remember { mutableStateOf<String?>(null) }
     var confirmSuppression by remember { mutableStateOf<String?>(null) }
-    var workspaceRequest by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(openDetailsRequest) {
@@ -148,7 +147,7 @@ fun CategorySettingsUi(
                     }
                 }
                 OutlinedButton(onClick = { creating = true }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("category-create")) { Text("Create category") }
-                OutlinedButton(onClick = { detailsOpen = false; workspaceRequest++ }, enabled = !busy,
+                OutlinedButton(onClick = { detailsOpen = false; onOpenHomeSettings() }, enabled = !busy,
                     modifier = Modifier.fillMaxWidth().testTag("categories-manage-screens")) {
                     Text("Arrange all Home screens")
                 }
@@ -223,8 +222,6 @@ fun CategorySettingsUi(
             dismissButton = { TextButton(onClick = { confirmSuppression = null }) { Text("Cancel") } },
         )
     }
-    WorkspaceSettingsUi(snapshot, onUpdate, initialOpenRequest = workspaceRequest,
-        onOpenRequestConsumed = { workspaceRequest = 0 }, showEntry = false)
 }
 
 @Composable

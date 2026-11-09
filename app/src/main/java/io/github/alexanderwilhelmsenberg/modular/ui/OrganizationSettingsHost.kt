@@ -29,6 +29,7 @@ fun OrganizationSettingsHost(
     runtime: OrganizationRuntime,
     mostUsedEnabled: Boolean,
     onStartSorter: (String?, String?) -> Unit,
+    onOpenHomeSettings: () -> Unit = {},
 ) {
     var foldersOpen by remember { mutableStateOf(false) }
     var sorterSetup by remember { mutableStateOf(false) }
@@ -85,6 +86,7 @@ fun OrganizationSettingsHost(
             onClick = { sorterSetup = true },
         )
         CategorySettingsUi(snapshot, catalog, runtime::update,
+            onOpenHomeSettings = onOpenHomeSettings,
             onManageFolders = { foldersOpen = true }, onStartMegaSorter = { sorterSetup = true },
             showEntry = false, openDetailsRequest = categoriesRequest)
         categoriesError?.let { Text(it, color = MaterialTheme.colorScheme.error) }

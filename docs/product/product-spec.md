@@ -6,6 +6,7 @@ The authorized [Home workspace v1](home-workspace-v1.md) update introduces a
 landing Home above All apps, stacked Android widgets, custom left/right pages
 and Listening apps. It supersedes the earlier default-Home-is-the-app-list and
 All-apps pull-down reachability wording below; category-list reachability stays.
+The current widget placement contract is [Home widget grid v2](home-widget-grid-v2.md).
 Implementation and acceptance are tracked in
 [the workspace acceptance record](../implementation/home-workspace-validation.md).
 
@@ -427,7 +428,7 @@ retroactively claim implementation or acceptance. Delivery slices are in the
 
 ## 22. Home workspace, widgets and Listening apps
 
-Core provides a configurable landing Home with a vertical widget stack above
+Core provides a configurable landing Home with a vertically scrolling widget grid above
 All apps. Upward dragging scrolls Home content first, then brings All apps from
 below at the bottom boundary. Downward dragging scrolls All apps to its top,
 then brings Home from above. The visible populated alphabet opens a selected

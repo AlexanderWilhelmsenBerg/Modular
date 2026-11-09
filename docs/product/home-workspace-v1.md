@@ -7,6 +7,9 @@ Baseline: settings/identity PR #28, merged as `fff68d16de7aa615f9725cefd48b7c8c9
 This draft adds a configurable landing Home above the existing app list. It
 builds on [Home v2](home-presentation-v2.md),
 [organization](categories-folders-mega-sorter.md), and Core Most Used.
+The later [Home widget grid v2](home-widget-grid-v2.md) supersedes this version's
+stacked widget-row placement and widget editing details. Home-to-All apps
+navigation, widget host lifecycle and page behavior remain specified here.
 Release evidence is tracked in the [acceptance record](../implementation/home-workspace-validation.md).
 Requirements explicitly
 requested by the user are distinguished from proposed defaults below.

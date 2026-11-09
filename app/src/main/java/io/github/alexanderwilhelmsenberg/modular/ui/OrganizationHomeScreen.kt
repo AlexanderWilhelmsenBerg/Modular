@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -34,6 +35,7 @@ import io.github.alexanderwilhelmsenberg.modular.apps.*
 import io.github.alexanderwilhelmsenberg.modular.appearance.WallpaperHomeScrim
 import io.github.alexanderwilhelmsenberg.modular.organization.*
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
+import io.github.alexanderwilhelmsenberg.modular.widgets.WidgetLayoutLimits
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -75,11 +77,14 @@ fun OrganizationHomeScreen(
     alphabeticalSections: Boolean = true,
     homeResetToken: Int = 0,
     workspaceMode: Boolean = false,
-    widgetContent: @Composable (WorkspaceWidget) -> Unit = {},
+    widgetContent: @Composable (WorkspaceWidget, () -> Unit) -> Unit = { _, _ -> },
     canFitHalfWidget: (WorkspaceWidget, Int) -> Boolean = { _, _ -> true },
+    widgetLayoutLimits: (WorkspaceWidget) -> WidgetLayoutLimits? = { null },
+    onSaveWidgetGrid: suspend (Int, Int, Int, Int, Int) -> Result<Unit> = { _, _, _, _, _ -> Result.success(Unit) },
     onWidgetSurfaceVisible: (Boolean) -> Unit = {},
     onAddWidget: (String) -> Unit = {},
     onEditWorkspace: (String) -> Unit = {},
+    onOpenWorkspaceAdvanced: (String) -> Unit = onEditWorkspace,
     listeningApps: List<LaunchableApp> = emptyList(),
 ) {
     val scope = rememberCoroutineScope()
@@ -93,6 +98,7 @@ fun OrganizationHomeScreen(
     var organizeApp by remember { mutableStateOf<LaunchableApp?>(null) }
     var folderAction by remember { mutableStateOf<Pair<String, LaunchableApp>?>(null) }
     var editingSearch by remember { mutableStateOf(false) }
+    var editingWidgetGrid by remember { mutableStateOf(false) }
     var setupSorter by remember { mutableStateOf(false) }
     var categoryMembers by remember { mutableStateOf<String?>(null) }
     var pageName by rememberSaveable { mutableStateOf("home") }
@@ -122,7 +128,7 @@ fun OrganizationHomeScreen(
         onDispose { currentWidgetVisibilityCallback(false) }
     }
     val workspaceGesturesEnabled = workspaceMode && workspacePage && searchQuery.isBlank() &&
-        sorterController == null && !editingSearch
+        sorterController == null && !editingSearch && !editingWidgetGrid
     fun settle(open: Boolean, immediate: Boolean = false) {
         transitionJob?.cancel()
         savedAppsOpen = open
@@ -191,14 +197,6 @@ fun OrganizationHomeScreen(
                 if (source != NestedScrollSource.UserInput || !workspaceGesturesEnabled || !pointerActive) return Offset.Zero
                 if ((vertical.progress == 0f && available.y >= 0f) ||
                     (vertical.progress == 1f && available.y <= 0f)) return Offset.Zero
-                if (vertical.progress == 0f && available.y < 0f) {
-                    railJump = null
-                    railJumpSerial += 1
-                    listState.requestScrollToItem(0)
-                }
-                if (vertical.progress == 1f && available.y > 0f) activeWorkspaceList?.let { state ->
-                    state.requestScrollToItem((state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
-                }
                 return Offset(0f, consumeTransition(available.y))
             }
             override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
@@ -237,6 +235,7 @@ fun OrganizationHomeScreen(
     LaunchedEffect(homeResetToken) {
         openFolderId = null; editingFolderId = null; organizeApp = null; folderAction = null
         if (workspaceMode && homeResetToken != observedWorkspaceResetToken) {
+            editingWidgetGrid = false
             railJump = null
             searchOriginOpen = false
             requestedPage = HomePageId.Home
@@ -260,7 +259,7 @@ fun OrganizationHomeScreen(
         pageName.startsWith("category:") -> HomePageId.Category(pageName.removePrefix("category:"))
         else -> HomePageId.Category(pageName)
     }
-    Box(Modifier.fillMaxSize()
+    Box(Modifier.fillMaxSize().clipToBounds()
         .background(if (wallpaperMode) Color.Transparent else MaterialTheme.colorScheme.background)
         .onSizeChanged { viewportHeight = it.height }
         .then(if (workspaceMode) Modifier.nestedScroll(connection).pointerInput(workspaceGesturesEnabled) {
@@ -288,10 +287,11 @@ fun OrganizationHomeScreen(
             }
         } else Modifier)) {
         if (workspaceMode && wallpaperMode) WallpaperHomeScrim(wallpaperDimmingPercent, Modifier.fillMaxSize())
+        Box(Modifier.fillMaxSize().clipToBounds()) {
         LauncherPages(snapshot = if (sorter != null) snapshot.copy(categoriesEnabled = false) else snapshot,
             gesturesEnabled = !editingSearch && searchQuery.isBlank() && sorter == null &&
                 openFolderId == null && organizeApp == null && folderAction == null &&
-                categoryMembers == null && editingFolderId == null && !setupSorter && vertical.progress == 0f,
+                categoryMembers == null && editingFolderId == null && !setupSorter && !editingWidgetGrid && vertical.progress == 0f,
             homeResetToken = homeResetToken, initialPageId = initialPage,
             requestedPage = requestedPage, pageRequestSerial = pageRequestSerial,
             modifier = Modifier.offset { IntOffset(0, if (workspaceMode && workspacePage) (-vertical.progress * viewportHeight).roundToInt() else 0) },
@@ -328,14 +328,14 @@ fun OrganizationHomeScreen(
                         preferences = snapshot.workspacePreferences,
                         widgets = snapshot.widgets,
                         canFitHalfWidget = canFitHalfWidget,
-                        widgetContent = { widget ->
+                        widgetContent = { widget, onLongPress ->
                             var slotHeightDp by rememberSaveable(widget.appWidgetId, widget.heightDp, widget.paddingDp) {
                                 mutableIntStateOf(widget.heightDp + widget.paddingDp * 2)
                             }
                             if (widgetSurfaceVisible && pageName == pageKey) {
                                 Box(Modifier.fillMaxWidth().onSizeChanged { size ->
                                     if (size.height > 0) slotHeightDp = with(density) { size.height.toDp().value.roundToInt() }
-                                }) { widgetContent(widget) }
+                                }) { widgetContent(widget, onLongPress) }
                             } else {
                                 Spacer(Modifier.fillMaxWidth().height(slotHeightDp.dp))
                             }
@@ -362,6 +362,11 @@ fun OrganizationHomeScreen(
                         onFolderBounds = { id, bounds -> folderBounds[id] = bounds },
                         onAddWidget = { onAddWidget(pageKey) },
                         onEditWorkspace = { onEditWorkspace(pageKey) },
+                        onOpenWorkspaceAdvanced = { onOpenWorkspaceAdvanced(pageKey) },
+                        widgetLayoutLimits = widgetLayoutLimits,
+                        onSaveWidgetGrid = onSaveWidgetGrid,
+                        onEditingChange = { editingWidgetGrid = it },
+                        pageActive = pageName == pageKey,
                         starJumpSerial = starJumpSerial,
                         clockActive = pageName == pageKey && vertical.progress < 1f,
                         modifier = Modifier.fillMaxSize(),
@@ -410,8 +415,9 @@ fun OrganizationHomeScreen(
                     drawWallpaperScrim = !workspaceMode,
                 )
             })
+        }
         if (workspaceMode && workspacePage && sorter == null) {
-            Box(Modifier.fillMaxSize()
+            Box(Modifier.fillMaxSize().clipToBounds()
                 .offset { IntOffset(0, ((1f - vertical.progress) * viewportHeight).roundToInt()) }
                 .testTag("workspace-all-apps")) {
                 HomeScreen(
@@ -448,7 +454,7 @@ fun OrganizationHomeScreen(
                 (if (hasFeatured) listOf("★") else emptyList()) + sections.map { it.label } +
                     (if (projection.appListFolders.isNotEmpty()) listOf("◇") else emptyList())
             }
-            if (searchQuery.isBlank() && !editingSearch && alphabet.isNotEmpty()) AlphabetRail(
+            if (searchQuery.isBlank() && !editingSearch && !editingWidgetGrid && alphabet.isNotEmpty()) AlphabetRail(
                 alphabet = alphabet,
                 populated = alphabet.toSet(),
                 onSelect = { label ->
@@ -476,6 +482,7 @@ fun OrganizationHomeScreen(
                 verticalAlignment = Alignment.CenterVertically) {
                 TextButton(
                     onClick = { settle(vertical.progress < 1f) },
+                    enabled = !editingWidgetGrid,
                     contentPadding = PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.width(72.dp).testTag(if (vertical.progress < 1f) "workspace-apps-action" else "workspace-home-action"),
                 ) { Text(if (vertical.progress < 1f) "Apps" else "Home", maxLines = 1) }

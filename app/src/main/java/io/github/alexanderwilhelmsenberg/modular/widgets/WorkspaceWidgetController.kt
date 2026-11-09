@@ -4,6 +4,7 @@ import android.app.Activity
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
+import android.appwidget.AppWidgetHostView
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -29,6 +30,11 @@ import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationEdit
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationLimits
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationStore
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
+import io.github.alexanderwilhelmsenberg.modular.workspace.calculateWidgetAreaGeometry
+import io.github.alexanderwilhelmsenberg.modular.workspace.gridSpanHeightDp
+import io.github.alexanderwilhelmsenberg.modular.workspace.gridSpanWidthDp
+import io.github.alexanderwilhelmsenberg.modular.workspace.packWidgetGrid
+import io.github.alexanderwilhelmsenberg.modular.workspace.resolveWidgetGridSpan
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.ceil
@@ -55,7 +61,10 @@ class WorkspaceWidgetController internal constructor(
 ) {
     private val context = context.applicationContext
     private val manager = AppWidgetManager.getInstance(context)
-    private val host = AppWidgetHost(context, HOST_ID)
+    private val host = object : AppWidgetHost(context, HOST_ID) {
+        override fun onCreateView(context: Context, appWidgetId: Int, appWidget: AppWidgetProviderInfo): AppWidgetHostView =
+            EditableWidgetHostView(context)
+    }
     private val journal = WidgetStageJournal(context)
     val currentHostToken: String = runCatching { workspaceHostToken(context) }.getOrDefault("")
     private var launchBind: ((Intent) -> Unit)? = null
@@ -152,7 +161,7 @@ class WorkspaceWidgetController internal constructor(
             minContentWidthDp = minimumWidth,
             minContentHeightDp = minimumHeight,
             maxContentHeightDp = (if (maxResizePx > 0) pxToDp(maxResizePx)
-                else OrganizationLimits.MAX_WIDGET_HEIGHT_DP).coerceAtLeast(minimumHeight),
+                else Int.MAX_VALUE).coerceAtLeast(minimumHeight),
             canResizeWidth = horizontal,
             canResizeHeight = vertical,
             maxContentWidthDp = if (maxResizeWidthPx > 0) pxToDp(maxResizeWidthPx)
@@ -315,13 +324,20 @@ class WorkspaceWidgetController internal constructor(
         scope.launch {
             try {
                 val limits = layoutLimits(info)
-                val initialHeight = maxOf(pxToDp(info.minHeight), limits.minContentHeightDp, 96).coerceIn(
+                val preferences = store.currentSnapshot().workspacePreferences
+                val geometry = calculateWidgetAreaGeometry(context.resources.configuration.screenWidthDp, preferences)
+                val span = initialWidgetGridSpan(preferences, geometry,
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) info.targetCellWidth else 0,
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) info.targetCellHeight else 0,
+                    pxToDp(info.minWidth), pxToDp(info.minHeight))
+                val initialHeight = gridSpanHeightDp(span.rowSpan, preferences).coerceIn(
                     OrganizationLimits.MIN_WIDGET_HEIGHT_DP,
                     limits.maxContentHeightDp.coerceIn(OrganizationLimits.MIN_WIDGET_HEIGHT_DP,
                         OrganizationLimits.MAX_WIDGET_HEIGHT_DP))
                 val result = edit { current ->
                     if (!resultMatchesStage(id, journal.read()) || current.any { it.appWidgetId == id }) current
-                    else current + WorkspaceWidget(id, stage.pageId, stage.provider, initialHeight, currentHostToken)
+                    else current + WorkspaceWidget(id, stage.pageId, stage.provider, initialHeight, currentHostToken,
+                        columnSpan = span.columnSpan, rowSpan = span.rowSpan)
                 }
                 if (result) {
                     if (resultMatchesStage(id, journal.read())) runCatching { journal.clear() }.onFailure {
@@ -378,7 +394,8 @@ class WorkspaceWidgetController internal constructor(
 
     fun moveWidget(id: Int, pageId: String) {
         scope.launch {
-            if (!edit { widgets -> widgets.map { if (it.appWidgetId == id) it.copy(pageId = pageId) else it } })
+            if (!edit { widgets -> widgets.map { if (it.appWidgetId == id)
+                it.copy(pageId = pageId, gridColumn = -1, gridRow = -1) else it } })
                 message("Could not move widget")
         }
     }
@@ -391,7 +408,9 @@ class WorkspaceWidgetController internal constructor(
                     val samePage = widgets.withIndex().filter { it.value.pageId == widgets[from].pageId }.map { it.index }
                     val rank = samePage.indexOf(from)
                     val target = samePage.getOrNull(rank + delta) ?: return@edit widgets
-                    widgets.toMutableList().apply { add(target, removeAt(from)) }
+                    widgets.toMutableList().apply { add(target, removeAt(from)) }.map {
+                        if (it.pageId == widgets[from].pageId) it.copy(gridColumn = -1, gridRow = -1) else it
+                    }
                 }
             }) message("Could not reorder widget")
         }
@@ -449,6 +468,80 @@ class WorkspaceWidgetController internal constructor(
             lastFailure = result.exceptionOrNull() ?: lastFailure
         }
         return Result.failure(lastFailure)
+    }
+
+    suspend fun saveWidgetGrid(id: Int, columnSpan: Int, rowSpan: Int, column: Int, row: Int): Result<Unit> {
+        val widget = store.currentSnapshot().widgets.firstOrNull { it.appWidgetId == id }
+            ?: return Result.failure(IllegalArgumentException("Widget no longer exists"))
+        return saveWidgetGridLayout(id, columnSpan, rowSpan, column, row, widget.paddingDp)
+    }
+
+    /** Commit one valid, non-overlapping grid placement together with its padding. */
+    suspend fun saveWidgetGridLayout(
+        id: Int, columnSpan: Int, rowSpan: Int, column: Int, row: Int, paddingDp: Int,
+    ): Result<Unit> {
+        var failure: Throwable = IllegalStateException("Could not save widget layout")
+        repeat(3) {
+            val snapshot = store.currentSnapshot()
+            val widget = snapshot.widgets.firstOrNull { it.appWidgetId == id }
+                ?: return Result.failure(IllegalArgumentException("Widget no longer exists"))
+            if (widget.hostToken != currentHostToken)
+                return Result.failure(IllegalStateException("Widget belongs to another host"))
+            val limits = layoutLimits(widget)
+                ?: return Result.failure(IllegalStateException("Widget provider is unavailable"))
+            val preferences = snapshot.workspacePreferences
+            val geometry = calculateWidgetAreaGeometry(context.resources.configuration.screenWidthDp, preferences)
+            val pageWidgets = snapshot.widgets.filter { it.pageId == widget.pageId }
+            val current = packWidgetGrid(pageWidgets, preferences, geometry) { item ->
+                layoutLimits(item)?.let { it.minContentWidthDp to it.minContentHeightDp } ?: (0 to 0)
+            }
+            val oldCell = current.cells.first { it.widget.appWidgetId == id }
+            val keepLegacyHeight = widget.rowSpan == 0 && rowSpan == oldCell.rowSpan &&
+                rowSpan > OrganizationLimits.MAX_WIDGET_GRID_ROW_SPAN
+            if (columnSpan !in 1..preferences.gridColumnCount || rowSpan < 1 ||
+                (rowSpan > OrganizationLimits.MAX_WIDGET_GRID_ROW_SPAN && !keepLegacyHeight) ||
+                paddingDp !in 0..OrganizationLimits.MAX_WIDGET_PADDING_DP)
+                return Result.failure(IllegalArgumentException("Widget size is outside the supported grid"))
+            if ((!limits.canResizeWidth && columnSpan != oldCell.columnSpan) ||
+                (!limits.canResizeHeight && rowSpan != oldCell.rowSpan))
+                return Result.failure(IllegalArgumentException("This widget does not support resizing along that edge"))
+            val targetColumn = if (column < 0) oldCell.column else column
+            val targetRow = if (row < 0) oldCell.row else row
+            if (targetColumn < 0 || targetColumn + columnSpan > preferences.gridColumnCount ||
+                targetRow !in 0..OrganizationLimits.MAX_WIDGET_GRID_ROW)
+                return Result.failure(IllegalArgumentException("Choose a position inside the grid"))
+            val contentWidth = gridSpanWidthDp(columnSpan, geometry, preferences) - 2 * paddingDp
+            val contentHeight = gridSpanHeightDp(rowSpan, preferences) - 2 * paddingDp
+            if (contentWidth <= 0 || contentHeight < limits.minContentHeightDp ||
+                (contentWidth < limits.minContentWidthDp && columnSpan < preferences.gridColumnCount) ||
+                contentHeight > limits.maxContentHeightDp || contentWidth > limits.maxContentWidthDp)
+                return Result.failure(IllegalArgumentException("Choose a size within this widget's supported dimensions"))
+            val overlap = current.cells.any { other ->
+                other.widget.appWidgetId != id && targetColumn < other.column + other.columnSpan &&
+                    targetColumn + columnSpan > other.column && targetRow < other.row + other.rowSpan &&
+                    targetRow + rowSpan > other.row
+            }
+            if (overlap) return Result.failure(IllegalArgumentException("That space is occupied. Move the widget or choose a smaller size."))
+            val saved = widget.copy(columnSpan = columnSpan, rowSpan = if (keepLegacyHeight) 0 else rowSpan,
+                gridColumn = targetColumn, gridRow = targetRow, paddingDp = paddingDp,
+                heightDp = if (keepLegacyHeight) widget.heightDp else contentHeight.coerceIn(
+                    OrganizationLimits.MIN_WIDGET_HEIGHT_DP, OrganizationLimits.MAX_WIDGET_HEIGHT_DP))
+            val cells = current.cells.associateBy { it.widget.appWidgetId }
+            val updated = snapshot.widgets.map { item ->
+                if (item.appWidgetId == id) saved else cells[item.appWidgetId]?.let { cell ->
+                    if (cell.row <= OrganizationLimits.MAX_WIDGET_GRID_ROW)
+                        item.copy(gridColumn = cell.column, gridRow = cell.row)
+                    else item.copy(gridColumn = -1, gridRow = -1)
+                } ?: item
+            }
+            val result = store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(updated)), snapshot.revision))
+            if (result.isSuccess) {
+                placements = result.getOrThrow().widgets
+                return Result.success(Unit)
+            }
+            failure = result.exceptionOrNull() ?: failure
+        }
+        return Result.failure(failure)
     }
 
     private suspend fun edit(transform: (List<WorkspaceWidget>) -> List<WorkspaceWidget>): Boolean {

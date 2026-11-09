@@ -65,8 +65,7 @@ class WorkspaceConfiguredWidgetTest {
 
             rule.onNodeWithTag("home-settings").performClick()
             rule.onNodeWithTag("settings-open-productivity").performClick()
-            rule.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("settings-home-screens"))
-            rule.onNodeWithTag("settings-home-screens").performClick()
+            rule.onNodeWithTag("settings-open-home").performClick()
             val launchesBeforeReconfigure = fixtureState().launches
             rule.onNodeWithText("Configure").performScrollTo().assertIsDisplayed().performClick()
             rule.waitUntil(15_000) { fixtureState().launches > launchesBeforeReconfigure }

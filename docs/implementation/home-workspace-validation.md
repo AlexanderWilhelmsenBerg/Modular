@@ -31,6 +31,11 @@ Activity recreation. The existing capture matrix includes these widget layouts.
 Run results and screenshot review are recorded in the implementing pull request;
 these test descriptions alone are not a claim that device acceptance is complete.
 
+The later [Home widget grid v2](../product/home-widget-grid-v2.md) supersedes
+the paired-row behavior. Its added model, storage and native test inventory,
+plus unexecuted device checks, are in the
+[grid validation record](home-widget-grid-v2-validation.md).
+
 ## Device acceptance still required
 
 - On a Samsung device with gesture navigation, drag a scrollable widget and a

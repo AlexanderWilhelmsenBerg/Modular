@@ -117,7 +117,13 @@ class CoreMostUsedIntegrationTest {
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("featured-permission").assertDoesNotExist()
             rule.activityRule.scenario.recreate()
-            rule.waitUntil(15_000) { rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty() }
+            jumpToMostUsed()
+            rule.waitUntil(15_000) {
+                val list = rule.onNodeWithTag("home-list").fetchSemanticsNode()
+                list.config[SemanticsProperties.IndexForKey]("featured:${fixture.stableId}") >= 0 &&
+                    runCatching { rule.onNodeWithTag("section:★").assertIsDisplayed() }.isSuccess &&
+                    runCatching { rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed() }.isSuccess
+            }
             rule.onNodeWithTag("section:★").assertIsDisplayed()
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("home-settings").performClick()

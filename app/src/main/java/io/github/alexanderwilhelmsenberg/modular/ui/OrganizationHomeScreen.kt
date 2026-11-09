@@ -81,6 +81,9 @@ fun OrganizationHomeScreen(
     canFitHalfWidget: (WorkspaceWidget, Int) -> Boolean = { _, _ -> true },
     widgetLayoutLimits: (WorkspaceWidget) -> WidgetLayoutLimits? = { null },
     onSaveWidgetGrid: suspend (Int, Int, Int, Int, Int) -> Result<Unit> = { _, _, _, _, _ -> Result.success(Unit) },
+    onRemoveWidget: suspend (Int) -> Result<Unit> = {
+        Result.failure(IllegalStateException("Widget removal is unavailable"))
+    },
     onWidgetSurfaceVisible: (Boolean) -> Unit = {},
     onAddWidget: (String) -> Unit = {},
     onEditWorkspace: (String) -> Unit = {},
@@ -102,6 +105,7 @@ fun OrganizationHomeScreen(
     var setupSorter by remember { mutableStateOf(false) }
     var categoryMembers by remember { mutableStateOf<String?>(null) }
     var pageName by rememberSaveable { mutableStateOf("home") }
+    var drawerPageName by rememberSaveable { mutableStateOf("home") }
     var savedAppsOpen by rememberSaveable { mutableStateOf(false) }
     val vertical = remember { WorkspaceVerticalState(savedAppsOpen) }
     var observedWorkspaceResetToken by rememberSaveable { mutableIntStateOf(homeResetToken) }
@@ -111,12 +115,17 @@ fun OrganizationHomeScreen(
     var routeDragToApps by remember { mutableStateOf(false) }
     var transitionJob by remember { mutableStateOf<Job?>(null) }
     var railJump by remember { mutableStateOf<String?>(null) }
+    var railJumpPage by remember { mutableStateOf<HomePageId>(HomePageId.Home) }
     var railJumpSerial by remember { mutableIntStateOf(0) }
     var requestedPage by remember { mutableStateOf<HomePageId?>(null) }
     var pageRequestSerial by remember { mutableIntStateOf(0) }
+    var requestedDrawerPage by remember { mutableStateOf<HomePageId?>(null) }
+    var drawerRequestSerial by remember { mutableIntStateOf(0) }
     var previousWorkspaceQuery by remember { mutableStateOf(searchQuery) }
     var searchOriginOpen by rememberSaveable { mutableStateOf(false) }
+    var searchOriginDrawerPage by rememberSaveable { mutableStateOf("home") }
     var activeWorkspaceList by remember { mutableStateOf<LazyListState?>(null) }
+    var activeDrawerList by remember { mutableStateOf<LazyListState?>(null) }
     val homeWorkspaceList = rememberLazyListState()
     var retainedListeningApps by remember { mutableStateOf(listeningApps) }
     val workspacePage = pageName == "home" || pageName.startsWith("widget:")
@@ -142,14 +151,21 @@ fun OrganizationHomeScreen(
         if (workspaceMode) {
             if (previousWorkspaceQuery.isBlank() && searchQuery.isNotBlank()) {
                 searchOriginOpen = vertical.progress >= 0.5f
+                searchOriginDrawerPage = drawerPageName
+                requestedDrawerPage = HomePageId.Home
+                drawerRequestSerial += 1
                 settle(true, immediate = true)
             } else if (previousWorkspaceQuery.isNotBlank() && searchQuery.isBlank()) {
+                requestedDrawerPage = if (searchOriginDrawerPage.startsWith("category:"))
+                    HomePageId.Category(searchOriginDrawerPage.removePrefix("category:")) else HomePageId.Home
+                drawerRequestSerial += 1
                 settle(searchOriginOpen, immediate = true)
             }
         }
         previousWorkspaceQuery = searchQuery
     }
-    val connection = remember(vertical, workspaceMode, workspacePage, workspaceGesturesEnabled, viewportHeight, pointerActive, activeWorkspaceList) {
+    val connection = remember(vertical, workspaceMode, workspacePage, workspaceGesturesEnabled,
+        viewportHeight, pointerActive, activeWorkspaceList, activeDrawerList) {
         object : NestedScrollConnection {
             fun consumeTransition(deltaY: Float): Float {
                 val before = vertical.progress
@@ -164,7 +180,7 @@ fun OrganizationHomeScreen(
                     return translated - homeScroll
                 }
                 if (deltaY < 0f && translated < 0f && vertical.progress == 1f && remaining < 0f) {
-                    val appsScroll = listState.dispatchRawDelta(-remaining)
+                    val appsScroll = (activeDrawerList ?: listState).dispatchRawDelta(-remaining)
                     return translated - appsScroll
                 }
                 return translated
@@ -181,7 +197,7 @@ fun OrganizationHomeScreen(
                     return Offset(0f, homeTaken)
                 }
                 if (routeDragToApps && vertical.progress == 1f) {
-                    val appsTaken = -listState.dispatchRawDelta(-available.y)
+                    val appsTaken = -(activeDrawerList ?: listState).dispatchRawDelta(-available.y)
                     val remaining = available.y - appsTaken
                     if (remaining > 0f) {
                         routeDragToApps = false
@@ -209,8 +225,11 @@ fun OrganizationHomeScreen(
     }
     var error by remember { mutableStateOf<String?>(null) }
     val scrollingPages = remember { mutableStateMapOf<HomePageId, Boolean>() }
+    val scrollingDrawerPages = remember { mutableStateMapOf<HomePageId, Boolean>() }
     var pagerScrolling by remember { mutableStateOf(false) }
-    val pageScrolling = pagerScrolling || scrollingPages.values.any { it }
+    var drawerPagerScrolling by remember { mutableStateOf(false) }
+    val pageScrolling = pagerScrolling || drawerPagerScrolling || scrollingPages.values.any { it } ||
+        scrollingDrawerPages.values.any { it }
     val folderBounds = remember { mutableStateMapOf<String, androidx.compose.ui.unit.IntRect>() }
     LaunchedEffect(statuses, folderPressed, openFolderId, pageScrolling) {
         if (!folderPressed && openFolderId == null && !pageScrolling)
@@ -236,9 +255,12 @@ fun OrganizationHomeScreen(
         if (workspaceMode && homeResetToken != observedWorkspaceResetToken) {
             editingWidgetGrid = false
             railJump = null
+            railJumpPage = HomePageId.Home
             searchOriginOpen = false
             requestedPage = HomePageId.Home
             pageRequestSerial += 1
+            requestedDrawerPage = HomePageId.Home
+            drawerRequestSerial += 1
             homeWorkspaceList.requestScrollToItem(0)
             listState.requestScrollToItem(0)
             settle(false, immediate = true)
@@ -288,6 +310,8 @@ fun OrganizationHomeScreen(
         if (workspaceMode && wallpaperMode) WallpaperHomeScrim(wallpaperDimmingPercent, Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().clipToBounds()) {
         LauncherPages(snapshot = if (sorter != null) snapshot.copy(categoriesEnabled = false) else snapshot,
+            pageSequence = if (workspaceMode) snapshot.workspaceSurfacePages() else
+                (if (sorter != null) snapshot.copy(categoriesEnabled = false) else snapshot).visiblePageOrder(),
             gesturesEnabled = !editingSearch && searchQuery.isBlank() && sorter == null &&
                 openFolderId == null && organizeApp == null && folderAction == null &&
                 categoryMembers == null && editingFolderId == null && !setupSorter && !editingWidgetGrid && vertical.progress == 0f,
@@ -353,6 +377,7 @@ fun OrganizationHomeScreen(
                         onOpenWorkspaceAdvanced = { onOpenWorkspaceAdvanced(pageKey) },
                         widgetLayoutLimits = widgetLayoutLimits,
                         onSaveWidgetGrid = onSaveWidgetGrid,
+                        onRemoveWidget = onRemoveWidget,
                         onEditingChange = { editingWidgetGrid = it },
                         pageActive = pageName == pageKey,
                         clockActive = pageName == pageKey && vertical.progress < 1f,
@@ -408,53 +433,112 @@ fun OrganizationHomeScreen(
             Box(Modifier.fillMaxSize().clipToBounds()
                 .offset { IntOffset(0, ((1f - vertical.progress) * viewportHeight).roundToInt()) }
                 .testTag("workspace-all-apps")) {
-                HomeScreen(
-                    catalog = catalog.copy(apps = projection.homeApps),
-                    searchApps = projection.globalSearchApps,
-                    orderedApps = orderedApps?.filter { it.key in projection.homeKeys },
-                    listState = listState,
-                    onLaunch = onLaunch, onRefresh = onRefresh, onMakeDefault = onMakeDefault,
-                    onOpenSettings = onOpenSettings, showMakeDefault = showMakeDefault,
-                    searchQuery = searchQuery, onSearchQueryChange = onSearchQueryChange,
-                    showAppIcons = showAppIcons, wallpaperMode = wallpaperMode,
-                    wallpaperDimmingPercent = wallpaperDimmingPercent,
-                    featuredApps = featuredApps?.let(projection::filterDirectStarred),
-                    pinnedAppKeys = pinnedAppKeys, featuredMessage = featuredMessage,
-                    featuredNeedsPermission = featuredNeedsPermission,
-                    onOpenFeaturedSettings = onOpenFeaturedSettings,
-                    onOpenFeaturedManagement = onOpenFeaturedManagement,
-                    onPinApp = onPinApp, onAppInfo = onAppInfo, onUninstallApp = onUninstallApp,
-                    onRenameApp = onRenameApp, onHideApp = onHideApp,
-                    onOrganizeApp = { organizeApp = it },
-                    alphabeticalSections = true,
+                LauncherPages(
+                    snapshot = snapshot,
+                    pageSequence = snapshot.drawerSurfacePages(),
+                    testTag = "drawer-pages",
+                    handleBack = false,
+                    gesturesEnabled = vertical.progress == 1f && searchQuery.isBlank() &&
+                        !editingSearch && !editingWidgetGrid && openFolderId == null &&
+                        organizeApp == null && folderAction == null && categoryMembers == null &&
+                        editingFolderId == null && !setupSorter,
                     homeResetToken = homeResetToken,
-                    folders = projection.appListFolders.map { it.definition },
-                    featuredFolders = projection.mostUsedFolders.map { it.definition },
-                    featuredPinOrder = drawerPinOrder(projection.visiblePinRefs, mostUsedEnabled),
-                    onOpenFolder = { openFolderId = it.id }, onEditFolder = { editingFolderId = it.id },
-                    onFolderPress = { folderPressed = it },
-                    onFolderBounds = { id, bounds -> folderBounds[id] = bounds },
-                    showChrome = false, showAlphabetRail = false, enableReachability = false,
-                    externalJump = railJump, externalJumpSerial = railJumpSerial,
-                    drawWallpaperScrim = false,
+                    initialPageId = if (drawerPageName.startsWith("category:"))
+                        HomePageId.Category(drawerPageName.removePrefix("category:")) else HomePageId.Home,
+                    requestedPage = requestedDrawerPage,
+                    pageRequestSerial = drawerRequestSerial,
+                    onScrollingChange = { drawerPagerScrolling = it },
+                    onPageChanged = { drawerPageName = when (it) {
+                        HomePageId.Home -> "home"
+                        is HomePageId.Category -> "category:${it.id}"
+                        is HomePageId.Widget -> "home"
+                    } },
+                    renderPage = { page ->
+                        val category = (page as? HomePageId.Category)?.let { id ->
+                            snapshot.categories.firstOrNull { it.id == id.id }
+                        }
+                        val pageKey = if (category == null) "home" else "category:${category.id}"
+                        val pageList = if (category == null) listState else rememberLazyListState()
+                        if (drawerPageName == pageKey) SideEffect { activeDrawerList = pageList }
+                        LaunchedEffect(page, pageList.isScrollInProgress) {
+                            scrollingDrawerPages[page] = pageList.isScrollInProgress
+                        }
+                        DisposableEffect(page) { onDispose { scrollingDrawerPages.remove(page) } }
+                        HomeScreen(
+                            catalog = catalog.copy(apps = if (category == null) projection.homeApps
+                                else projection.categoryPages[category.id].orEmpty()),
+                            searchApps = projection.globalSearchApps,
+                            orderedApps = if (category == null)
+                                orderedApps?.filter { it.key in projection.homeKeys } else null,
+                            pageTitle = category?.name,
+                            listState = pageList,
+                            onLaunch = onLaunch, onRefresh = onRefresh, onMakeDefault = onMakeDefault,
+                            onOpenSettings = onOpenSettings,
+                            showMakeDefault = showMakeDefault && category == null,
+                            searchQuery = searchQuery, onSearchQueryChange = onSearchQueryChange,
+                            showAppIcons = showAppIcons, wallpaperMode = wallpaperMode,
+                            wallpaperDimmingPercent = wallpaperDimmingPercent,
+                            featuredApps = if (category == null)
+                                featuredApps?.let(projection::filterDirectStarred) else null,
+                            pinnedAppKeys = pinnedAppKeys, featuredMessage = featuredMessage,
+                            featuredNeedsPermission = featuredNeedsPermission,
+                            onOpenFeaturedSettings = onOpenFeaturedSettings,
+                            onOpenFeaturedManagement = onOpenFeaturedManagement,
+                            onPinApp = onPinApp, onAppInfo = onAppInfo, onUninstallApp = onUninstallApp,
+                            onRenameApp = onRenameApp, onHideApp = onHideApp,
+                            onOrganizeApp = { organizeApp = it },
+                            alphabeticalSections = true,
+                            homeResetToken = homeResetToken,
+                            folders = if (category == null) projection.appListFolders.map { it.definition }
+                                else emptyList(),
+                            featuredFolders = if (category == null) projection.mostUsedFolders.map { it.definition }
+                                else emptyList(),
+                            featuredPinOrder = if (category == null)
+                                drawerPinOrder(projection.visiblePinRefs, mostUsedEnabled) else emptyList(),
+                            onOpenFolder = { openFolderId = it.id },
+                            onEditFolder = { editingFolderId = it.id },
+                            onFolderPress = { folderPressed = it },
+                            onFolderBounds = { id, bounds -> folderBounds[id] = bounds },
+                            onAddCategoryApps = if (category != null) ({ categoryMembers = category.id }) else null,
+                            onStartCategorySorter = if (category != null) ({ setupSorter = true }) else null,
+                            showChrome = false, showAlphabetRail = false, enableReachability = false,
+                            externalJump = if (railJumpPage == page) railJump else null,
+                            externalJumpSerial = if (railJumpPage == page) railJumpSerial else 0,
+                            drawWallpaperScrim = false,
+                        )
+                    },
                 )
             }
             val locale = LocalConfiguration.current.locales[0]
-            val sections = remember(projection.homeApps, locale) {
-                HomeSectionBuilder(locale).sections(homeOrderedApps(projection.homeApps, orderedApps?.filter { it.key in projection.homeKeys }, locale))
+            val categoryRailId = drawerPageName.removePrefix("category:")
+                .takeIf { drawerPageName.startsWith("category:") && vertical.progress == 1f }
+            val categoryRailApps = categoryRailId?.let { projection.categoryPages[it].orEmpty() }
+            val railApps = categoryRailApps ?: projection.homeApps
+            val sections = remember(railApps, orderedApps, categoryRailId, locale) {
+                val order = if (categoryRailId == null)
+                    orderedApps?.filter { it.key in projection.homeKeys } else null
+                HomeSectionBuilder(locale).sections(homeOrderedApps(railApps, order, locale))
             }
             val hasFeatured = featuredApps != null
             val hasFolders = projection.mostUsedFolders.isNotEmpty() || projection.appListFolders.isNotEmpty()
-            val alphabet = remember(sections, hasFolders, hasFeatured) {
-                (if (hasFeatured) listOf("★") else emptyList()) +
-                    (if (hasFolders) listOf("◇") else emptyList()) + sections.map { it.label }
+            val alphabet = remember(sections, hasFolders, hasFeatured, categoryRailId) {
+                if (categoryRailId != null) sections.map { it.label } else
+                    (if (hasFeatured) listOf("★") else emptyList()) +
+                        (if (hasFolders) listOf("◇") else emptyList()) + sections.map { it.label }
             }
-            if (searchQuery.isBlank() && !editingSearch && !editingWidgetGrid && alphabet.isNotEmpty()) AlphabetRail(
+            if (searchQuery.isBlank() && !editingSearch && !editingWidgetGrid &&
+                !drawerPagerScrolling && alphabet.isNotEmpty()) AlphabetRail(
                 alphabet = alphabet,
                 populated = alphabet.toSet(),
                 onSelect = { label ->
+                    val target = categoryRailId?.let { HomePageId.Category(it) } ?: HomePageId.Home
+                    railJumpPage = target
                     railJump = if (label == "◇") "Folders" else label
                     railJumpSerial += 1
+                    if (target == HomePageId.Home) {
+                        requestedDrawerPage = HomePageId.Home
+                        drawerRequestSerial += 1
+                    }
                     settle(true)
                 },
                 wallpaperMode = wallpaperMode,

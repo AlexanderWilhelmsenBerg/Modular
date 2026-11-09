@@ -251,17 +251,20 @@ search remain available; an explicit category switch can filter Home.
 
 ## 5. Category pages and page-order tiles — ORG-04
 
-Use one horizontal page sequence with exactly one permanent Home page and one
-page per enabled category. Any category can appear before or after Home.
+Category pages form the drawer's horizontal sequence, with exactly one permanent
+All apps page and one page per enabled category. Any category can appear before
+or after All apps. Home/widget pages form a separate horizontal sequence above
+the drawer; swiping horizontally on Home never opens a category. The existing
+stored `HomePageId.Home` anchor represents All apps in the drawer sequence.
 Disabled pages retain their saved relative order but are omitted from navigation.
 
-Settings shows compact named tiles, including a distinct Home tile. Drag a
-category tile across Home to change its side, or within a side to change its
-distance/order. Home cannot be removed or disabled. Provide Move left/right
+Category settings shows compact named tiles, including a distinct All apps tile.
+Drag a category tile across All apps to change its side, or within a side to
+change its distance/order. All apps cannot be removed or disabled. Provide Move left/right
 actions alongside dragging. Show a preview with physical left/right labels and
 swipe arrows; names alone must not imply finger direction.
 
-Example physical page order: `Work | Home | Games | Media`. From Home, dragging
+Example drawer page order: `Work | All apps | Games | Media`. From All apps, dragging
 a finger right reveals Work; dragging left reveals Games, then Media. This is
 the proposed standard pager convention, not a fixed Games destination. Preserve
 configured physical sides in RTL layouts; translate labels and render names
@@ -284,9 +287,10 @@ Each category page:
 
 Preserve scroll/reachability by stable page ID through page switching, Settings
 round trips, and ordinary recreation. Removing/disabling the current category
-returns to Home safely. Android HOME always returns to Home, dismisses transient
+returns to All apps safely. Android HOME always returns to Home, dismisses transient
 UI, and ends Mega Sorter while retaining accepted assignments. Back dismisses
-the current popup/editor/search before returning from a category to Home.
+the current popup/editor/search before returning from the drawer to its originating
+Home/widget page. Reordering drawer categories must not change widget-page order.
 
 ## 6. Popup folders — ORG-05
 

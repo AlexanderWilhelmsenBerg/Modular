@@ -42,6 +42,13 @@ private fun HomePageId.savedKey(): String = when (this) {
     is HomePageId.Widget -> "widget:$id"
 }
 
+/** Keep the persisted relative order while giving each vertical surface its own pages. */
+internal fun OrganizationSnapshot.workspaceSurfacePages(): List<HomePageId> =
+    visiblePageOrder().filter { it == HomePageId.Home || it is HomePageId.Widget }
+
+internal fun OrganizationSnapshot.drawerSurfacePages(): List<HomePageId> =
+    visiblePageOrder().filter { it == HomePageId.Home || it is HomePageId.Category }
+
 /** Category pages use this compact label; ordinary Home intentionally has none. */
 @Composable
 fun CategoryPageHeading(name: String, modifier: Modifier = Modifier) {
@@ -81,8 +88,11 @@ fun LauncherPages(
     onScrollingChange: (Boolean) -> Unit = {},
     requestedPage: HomePageId? = null,
     pageRequestSerial: Int = 0,
+    pageSequence: List<HomePageId> = snapshot.visiblePageOrder(),
+    testTag: String = "launcher-pages",
+    handleBack: Boolean = true,
 ) {
-    val pages = snapshot.visiblePageOrder()
+    val pages = pageSequence
     val keys = pages.map { it.savedKey() }
     var selectedKey by rememberSaveable { mutableStateOf(initialPageId.savedKey()) }
     var observedResetToken by rememberSaveable { mutableStateOf(homeResetToken) }
@@ -125,7 +135,8 @@ fun LauncherPages(
             }
         }
     }
-    BackHandler(enabled = gesturesEnabled && pages.getOrNull(pagerState.currentPage) != HomePageId.Home) {
+    BackHandler(enabled = handleBack && gesturesEnabled &&
+        pages.getOrNull(pagerState.currentPage) != HomePageId.Home) {
         scope.launch {
             pagerState.animateScrollToPage(keys.indexOf("home"))
             selectedKey = "home"
@@ -138,7 +149,7 @@ fun LauncherPages(
             state = pagerState,
             key = { keys[it] },
             userScrollEnabled = gesturesEnabled && pages.size > 1,
-            modifier = modifier.fillMaxSize().testTag("launcher-pages"),
+            modifier = modifier.fillMaxSize().testTag(testTag),
         ) { index ->
             val page = pages[index]
             pageStateHolder.SaveableStateProvider(page.savedKey()) {

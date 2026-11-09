@@ -13,12 +13,14 @@ import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.geometry.Offset
@@ -31,11 +33,14 @@ import io.github.alexanderwilhelmsenberg.modular.apps.AndroidAppRepository
 import io.github.alexanderwilhelmsenberg.modular.apps.AppCustomizationStore
 import io.github.alexanderwilhelmsenberg.modular.organization.FolderDefinition
 import io.github.alexanderwilhelmsenberg.modular.organization.FolderPlacement
+import io.github.alexanderwilhelmsenberg.modular.organization.HomePageId
+import io.github.alexanderwilhelmsenberg.modular.organization.MembershipOverride
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationBatch
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationEdit
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationStore
 import io.github.alexanderwilhelmsenberg.modular.mostused.MostUsedSettingsStore
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePage
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
@@ -49,6 +54,141 @@ import org.junit.Test
 /** Exercises the composed launcher, rather than the isolated legacy HomeScreen. */
 class WorkspaceNavigationTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
+
+    @Test fun horizontalPagesStayOnTheirOwnVerticalSurface() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = OrganizationStore(context)
+        val appRepository = AndroidAppRepository(context)
+        val original = runBlocking { store.currentSnapshot() }
+        val game = original.categories.first { it.id == "games" }
+        val pageId = UUID.randomUUID().toString()
+        val widgetPage = WorkspacePage(pageId, "Swipe ${pageId.take(8)}")
+        val widgetId = HomePageId.Widget(widgetPage.id)
+        val gameId = HomePageId.Category(game.id)
+        val mixedOrder = listOf(HomePageId.Home, gameId, widgetId) +
+            original.pageOrder.filterNot { it == HomePageId.Home || it == gameId }
+        var created = false
+        var fixtureApp: io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp? = null
+        fun offSurface(tag: String): Boolean {
+            val nodes = rule.onAllNodesWithTag(tag)
+            return nodes.fetchSemanticsNodes().isEmpty() ||
+                runCatching { nodes[0].assertIsNotDisplayed() }.isSuccess
+        }
+        fun swipe(tag: String, left: Boolean) {
+            rule.onNodeWithTag(tag).performTouchInput {
+                val y = height * 0.22f
+                val start = Offset(width * (if (left) 0.82f else 0.18f), y)
+                down(start)
+                for (step in 1..12) moveTo(Offset(
+                    start.x + width * (if (left) -0.64f else 0.64f) * step / 12f, y), 20L)
+                up()
+            }
+        }
+        try {
+            rule.waitUntil(15_000) {
+                appRepository.catalog.value.apps.isNotEmpty() && !appRepository.catalog.value.isRefreshing
+            }
+            val customizations = runBlocking { AppCustomizationStore(context).currentCustomizations() }
+            val app = customizations.visibleApps(appRepository.catalog.value.apps).first { it.enabled }
+            fixtureApp = app
+            runBlocking {
+                val current = store.currentSnapshot()
+                store.update(OrganizationBatch(listOf(
+                    OrganizationEdit.SetCategoriesEnabled(true),
+                    OrganizationEdit.UpdateCategory(game.copy(enabled = true, showOnHome = true)),
+                    OrganizationEdit.SetMembership(game.id, app.key, MembershipOverride.INCLUDE),
+                    OrganizationEdit.CreateWorkspacePage(widgetPage),
+                    OrganizationEdit.SetPageOrder(mixedOrder),
+                ), current.revision)).getOrThrow()
+            }
+            created = true
+            waitForHome()
+            swipe("launcher-pages", left = true)
+            rule.waitUntil(15_000) {
+                runCatching { rule.onNodeWithTag("launcher-page:widget:${widgetPage.id}")
+                    .assertIsDisplayed() }.isSuccess
+            }
+            assertTrue("Category leaked into the Home pager", offSurface("launcher-page:category:games"))
+
+            rule.onNodeWithTag("workspace-apps-action").performClick()
+            waitForAllApps()
+            swipe("drawer-pages", left = true)
+            rule.waitUntil(15_000) {
+                runCatching { rule.onNodeWithTag("launcher-page:category:games")
+                    .assertIsDisplayed() }.isSuccess
+            }
+            assertTrue("Widget page leaked into the drawer", offSurface("launcher-page:widget:${widgetPage.id}"))
+            val categoryLetter = HomeSectionBuilder(rule.activity.resources.configuration.locales[0])
+                .bucket(app.label)
+            rule.onNodeWithTag("rail:$categoryLetter").assertIsDisplayed()
+            assertTrue("Category rail exposed Most Used", offSurface("rail:★"))
+            assertTrue("Category rail exposed Folders", offSurface("rail:◇"))
+            tapRail(categoryLetter)
+            rule.onNodeWithTag("launcher-page:category:games").assertIsDisplayed()
+            rule.onNode(hasTestTag("home-list") and
+                hasAnyAncestor(hasTestTag("launcher-page:category:games")))
+                .performScrollToIndex(0)
+
+            rule.onNodeWithTag("drawer-pages").performTouchInput {
+                val start = Offset(width * 0.45f, height * 0.25f)
+                down(start)
+                for (step in 1..20) moveTo(start + Offset(0f, height * 0.85f * step / 20f), 20L)
+                up()
+            }
+            waitForHome()
+            rule.onNodeWithTag("launcher-page:widget:${widgetPage.id}").assertIsDisplayed()
+            rule.onNodeWithTag("workspace-apps-action").performClick()
+            waitForAllApps()
+            rule.onNodeWithTag("launcher-page:category:games").assertIsDisplayed()
+            rule.runOnIdle { rule.activity.onBackPressedDispatcher.onBackPressed() }
+            waitForHome()
+            rule.onNodeWithTag("launcher-page:widget:${widgetPage.id}").assertIsDisplayed()
+
+            // The upper surface's rail always targets central All apps, even after
+            // a category was the last drawer page.
+            val centralLetter = HomeSectionBuilder(rule.activity.resources.configuration.locales[0])
+                .bucket(app.label)
+            tapRail(centralLetter)
+            waitForAllApps()
+            rule.waitUntil(15_000) { offSurface("launcher-page:category:games") }
+            rule.onNodeWithTag("workspace-home-action").performClick()
+            waitForHome()
+            rule.onNodeWithTag("launcher-page:widget:${widgetPage.id}").assertIsDisplayed()
+
+            swipe("launcher-pages", left = false)
+            rule.waitUntil(15_000) {
+                offSurface("launcher-page:widget:${widgetPage.id}")
+            }
+            assertTrue("Category leaked into the Home pager", offSurface("launcher-page:category:games"))
+
+            rule.onNodeWithTag("workspace-apps-action").performClick()
+            waitForAllApps()
+            assertTrue("Home rail did not return to central All apps", offSurface("launcher-page:category:games"))
+            swipe("drawer-pages", left = true)
+            rule.waitUntil(15_000) {
+                runCatching { rule.onNodeWithTag("launcher-page:category:games")
+                    .assertIsDisplayed() }.isSuccess
+            }
+            swipe("drawer-pages", left = false)
+            rule.waitUntil(15_000) {
+                offSurface("launcher-page:category:games")
+            }
+        } finally {
+            if (created) runBlocking {
+                val current = store.currentSnapshot()
+                store.update(OrganizationBatch(listOf(
+                    OrganizationEdit.DeleteWorkspacePage(widgetPage.id),
+                    OrganizationEdit.UpdateCategory(game),
+                    fixtureApp?.let { OrganizationEdit.SetMembership(game.id, it.key,
+                        original.overrideFor(game.id, it.key)) }
+                        ?: error("Fixture app missing during cleanup"),
+                    OrganizationEdit.SetCategoriesEnabled(original.categoriesEnabled),
+                    OrganizationEdit.SetPageOrder(original.pageOrder),
+                ), current.revision)).getOrThrow()
+            }
+            appRepository.close()
+        }
+    }
 
     @Test fun coldLandingAppsAndBackRestoreHome() {
         waitForHome()
@@ -369,10 +509,12 @@ class WorkspaceNavigationTest {
 
     private fun waitForHome() {
         rule.waitUntil(15_000) {
-            rule.onAllNodesWithTag("workspace-home").fetchSemanticsNodes().isNotEmpty() &&
+            val homes = rule.onAllNodesWithTag("workspace-home")
+            homes.fetchSemanticsNodes().indices.any { index ->
+                runCatching { homes[index].assertIsDisplayed() }.isSuccess
+            } &&
                 rule.onAllNodesWithTag("workspace-apps-action").fetchSemanticsNodes().isNotEmpty()
         }
-        rule.onNodeWithTag("workspace-home").assertIsDisplayed()
     }
 
     private fun waitForAllApps() {

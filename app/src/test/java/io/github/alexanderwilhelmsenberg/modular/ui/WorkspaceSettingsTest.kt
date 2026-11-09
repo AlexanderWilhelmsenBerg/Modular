@@ -9,14 +9,31 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class WorkspaceSettingsTest {
-    @Test fun categoryAndWidgetPagesCanCrossPermanentHome() {
-        val category = HomePageId.Category("work")
-        val widget = HomePageId.Widget("notes")
-        val original = listOf(category, HomePageId.Home, widget)
+    @Test fun widgetPagesCrossHomeWithoutMovingCategorySides() {
+        val leftCategory = HomePageId.Category("work")
+        val rightCategory = HomePageId.Category("games")
+        val leftWidget = HomePageId.Widget("notes")
+        val rightWidget = HomePageId.Widget("music")
+        val original = listOf(leftCategory, leftWidget, HomePageId.Home, rightCategory, rightWidget)
+        val workspace = workspacePageOrder(original)
 
-        assertEquals(listOf(widget, category, HomePageId.Home), movedWorkspacePage(original, 2, 0))
-        assertEquals(listOf(category, widget, HomePageId.Home), movedWorkspacePage(original, 2, 1))
-        assertEquals(original, movedWorkspacePage(original, 1, 0))
+        assertEquals(listOf(leftWidget, HomePageId.Home, rightWidget), workspace)
+        val moved = movedWorkspacePage(workspace, 2, 0)
+        assertEquals(listOf(rightWidget, leftWidget, HomePageId.Home), moved)
+        assertEquals(listOf(rightWidget, leftWidget, leftCategory, HomePageId.Home, rightCategory),
+            mergeSurfacePageOrder(original, moved, PageOrderSurface.WORKSPACE))
+        assertEquals(workspace, movedWorkspacePage(workspace, 1, 0))
+    }
+
+    @Test fun movingWidgetAcrossHomePreservesCategorySideAndOrder() {
+        val c1 = HomePageId.Category("c1")
+        val c2 = HomePageId.Category("c2")
+        val w1 = HomePageId.Widget("w1")
+        val w2 = HomePageId.Widget("w2")
+        val original = listOf(c1, w1, c2, HomePageId.Home, w2)
+        val reordered = listOf(w1, w2, HomePageId.Home)
+        assertEquals(listOf(w1, w2, c1, c2, HomePageId.Home),
+            mergeSurfacePageOrder(original, reordered, PageOrderSurface.WORKSPACE))
     }
 
     @Test fun namesRejectBlankLongAndCaseAccentInsensitiveDuplicates() {

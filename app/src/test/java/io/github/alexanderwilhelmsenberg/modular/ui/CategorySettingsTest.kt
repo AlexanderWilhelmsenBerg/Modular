@@ -16,6 +16,19 @@ class CategorySettingsTest {
         assertEquals(listOf(work, HomePageId.Home, games), movedCategoryPage(order, 1, 0))
     }
 
+    @Test fun categoryReorderDoesNotMoveWidgetPagesAcrossHome() {
+        val c1 = HomePageId.Category("c1")
+        val c2 = HomePageId.Category("c2")
+        val w1 = HomePageId.Widget("w1")
+        val w2 = HomePageId.Widget("w2")
+        val original = listOf(w1, c1, HomePageId.Home, w2, c2)
+        val category = categoryPageOrder(original)
+        assertEquals(listOf(c1, HomePageId.Home, c2), category)
+        val moved = movedCategoryPage(category, 0, 2)
+        assertEquals(listOf(w1, HomePageId.Home, w2, c2, c1),
+            mergeSurfacePageOrder(original, moved, PageOrderSurface.CATEGORY))
+    }
+
     @Test fun nameValidationRejectsBlankAndLocaleEquivalentDuplicates() {
         val categories = listOf(CategoryDefinition("games", "Games"))
         assertNotNull(categoryNameError("   ", categories, null))

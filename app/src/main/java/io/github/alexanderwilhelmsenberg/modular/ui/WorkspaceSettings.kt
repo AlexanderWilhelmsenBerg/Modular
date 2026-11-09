@@ -135,14 +135,19 @@ fun WorkspaceSettingsUi(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                Text("Arrange screens from physical left to right. Home stays available.", style = MaterialTheme.typography.bodySmall)
-                WorkspacePageTiles(snapshot, !busy, onReorder = { save(OrganizationEdit.SetPageOrder(it)) })
+                Text("Arrange Home and widget screens from physical left to right. Category pages are arranged in Categories and folders.",
+                    style = MaterialTheme.typography.bodySmall)
+                val homeOrder = workspacePageOrder(snapshot.pageOrder)
+                WorkspacePageTiles(snapshot, homeOrder, !busy, onReorder = { reordered ->
+                    save(OrganizationEdit.SetPageOrder(mergeSurfacePageOrder(
+                        snapshot.pageOrder, reordered, PageOrderSurface.WORKSPACE)))
+                })
                 OutlinedButton(
                     onClick = { addPage = true }, enabled = !busy,
                     modifier = Modifier.fillMaxWidth().testTag("workspace-add-page"),
                 ) { Text("Add widget screen") }
                 Text("Screens", style = MaterialTheme.typography.titleMedium)
-                snapshot.pageOrder.forEach { page ->
+                homeOrder.forEach { page ->
                     when (page) {
                         HomePageId.Home -> WorkspaceScreenRow("Home", "Permanent main screen", false, null, null)
                         is HomePageId.Category -> {
@@ -352,18 +357,19 @@ private fun List<WorkspaceWidget>.swapped(
     return toMutableList().apply { val item = this[first]; this[first] = this[second]; this[second] = item }
 }
 
-/** Home itself is fixed as an identity; other pages can cross it. */
+/** Home itself is fixed as an identity; widget pages can cross it. */
 internal fun movedWorkspacePage(order: List<HomePageId>, from: Int, to: Int): List<HomePageId> =
     if (order.getOrNull(from) == HomePageId.Home) order else order.moved(from, to)
 
 @Composable
-private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, enabled: Boolean, onReorder: (List<HomePageId>) -> Unit) {
+private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, order: List<HomePageId>,
+    enabled: Boolean, onReorder: (List<HomePageId>) -> Unit) {
     val density = LocalDensity.current
     val step = with(density) { 100.dp.toPx() }
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("workspace-page-order"),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            snapshot.pageOrder.forEachIndexed { index, page ->
+            order.forEachIndexed { index, page ->
                 val label = when (page) {
                     HomePageId.Home -> "Home"
                     is HomePageId.Category -> snapshot.categories.firstOrNull { it.id == page.id }?.name ?: "Removed"
@@ -375,13 +381,13 @@ private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, enabled: Boolean,
                     is HomePageId.Widget -> snapshot.workspacePages.any { it.id == page.id && it.enabled }
                 }
                 var drag by remember(page) { mutableFloatStateOf(0f) }
-                val dragModifier = if (enabled && page != HomePageId.Home) Modifier.pointerInput(snapshot.pageOrder, page) {
+                val dragModifier = if (enabled && page != HomePageId.Home) Modifier.pointerInput(order, page) {
                     detectDragGesturesAfterLongPress(
                         onDragStart = { drag = 0f },
                         onDragEnd = {
-                            val target = (index + (drag / step).roundToInt()).coerceIn(snapshot.pageOrder.indices)
+                            val target = (index + (drag / step).roundToInt()).coerceIn(order.indices)
                             drag = 0f
-                            if (target != index) onReorder(movedWorkspacePage(snapshot.pageOrder, index, target))
+                            if (target != index) onReorder(movedWorkspacePage(order, index, target))
                         },
                         onDragCancel = { drag = 0f },
                         onDrag = { change, amount -> change.consume(); drag += amount.x },
@@ -409,7 +415,7 @@ private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, enabled: Boolean,
         }
     }
     Text("Long press and drag a screen, or use the move controls below.", style = MaterialTheme.typography.bodySmall)
-    snapshot.pageOrder.forEachIndexed { index, page ->
+    order.forEachIndexed { index, page ->
         if (page == HomePageId.Home) return@forEachIndexed
         val name = when (page) {
             is HomePageId.Category -> snapshot.categories.firstOrNull { it.id == page.id }?.name
@@ -419,10 +425,10 @@ private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, enabled: Boolean,
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(name, Modifier.weight(1f).padding(top = 12.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
             TextButton(enabled = enabled && index > 0, onClick = {
-                onReorder(movedWorkspacePage(snapshot.pageOrder, index, index - 1))
+                onReorder(movedWorkspacePage(order, index, index - 1))
             }) { Text("←") }
-            TextButton(enabled = enabled && index < snapshot.pageOrder.lastIndex, onClick = {
-                onReorder(movedWorkspacePage(snapshot.pageOrder, index, index + 1))
+            TextButton(enabled = enabled && index < order.lastIndex, onClick = {
+                onReorder(movedWorkspacePage(order, index, index + 1))
             }) { Text("→") }
         }
     }

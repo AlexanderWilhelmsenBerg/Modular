@@ -39,7 +39,7 @@ try:
             adb("shell", "cmd", "locale", "set-app-locales", PACKAGE)
         result = adb("shell", "am", "instrument", "-w", "-e", "class", TEST,
                      "-e", "workspace_theme", theme, RUNNER, timeout=300)
-        if "OK (5 tests)" not in result:
+        if "OK (6 tests)" not in result:
             raise RuntimeError(f"Workspace fixture failed at {width}dp/{theme}/{font}/rtl={rtl}:\n{result}")
         subprocess.run(["adb", "pull", "/sdcard/Pictures/ModularWorkspace/.", str(OUT)],
                        check=True, timeout=60)

@@ -51,13 +51,16 @@ Use distinct product names:
 - **All apps:** existing alphabetical app list, presented below the workspace.
   Existing category visibility rules may omit direct entries; search still finds
   all non-hidden launchable apps. The name does not change that policy.
-- **Workspace pages:** Home plus ordered category pages and custom widget pages.
+- **Workspace pages:** Home plus ordered custom widget pages.
+- **Drawer pages:** All apps plus ordered category pages.
 - **Add-on pages:** a future page type, unavailable until a versioned rendering
   contract is implemented and validated.
 
-There is one horizontal workspace sequence and one shared All apps screen,
-not a separate drawer instance for every page. Example physical order:
-`Work category | Home | Widgets | Games category`.
+There are two separate horizontal sequences. For example, Home uses
+`Notes widgets | Home | Music widgets`, and the drawer uses
+`Work category | All apps | Games category`. Horizontal Home swipes never
+open a category. All Home pages share the drawer; returning restores the
+originating Home page. Settings arrange the two sequences independently.
 
 | Action | Proposed result |
 | --- | --- |
@@ -68,6 +71,7 @@ not a separate drawer instance for every page. Example physical order:
 | Tap a letter on Home/widget page | Open All apps and align that populated letter's header |
 | Drag along the rail | Open All apps and continue the existing continuous letter selection |
 | Swipe horizontally on a workspace page | Adjacent configured page; no wrapping at ends |
+| Swipe horizontally in the drawer | Adjacent category/All apps page; never a widget page |
 | Back in All apps, after dismissing search/popups | Return to the originating workspace page |
 | Back on a side page | Return to main Home |
 | Back on main Home | Leave Home visible |
@@ -174,7 +178,8 @@ widgets or crop them into decorative cards that obscure their content.
 - Horizontal page gestures start in launcher-owned space, with directional
   locking and a deliberate threshold. System back edges and status-bar gestures
   retain Android behavior. Offer explicit page navigation in edit mode/settings.
-- All apps does not change workspace pages on horizontal row swipes. Mega Sorter
+- All apps moves through drawer category pages on horizontal row swipes, without
+  changing the selected Home/widget page. Mega Sorter
   retains those gestures exclusively while active. Search, editors and folder
   popups similarly own their interactions before page navigation.
 - Respect disabled/reduced animations with direct state changes or minimal

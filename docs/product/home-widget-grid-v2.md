@@ -48,6 +48,12 @@ diamond appears only when at least one folder shortcut is eligible.
 
 ## Interaction
 
+- Horizontal swipes on Home visit only configured Home/widget pages. Category
+  pages belong to the separate drawer: horizontal swipes there move between
+  All apps and enabled categories. Each surface keeps its own page order and
+  selected page. Returning from the drawer restores the originating Home page.
+  Home screen settings arrange widget pages; category settings arrange drawer
+  pages around All apps. Reordering either surface preserves the other order.
 - Home scrolls vertically through widget content. At rest, Home and All apps
   are strictly separate full-screen views: neither shows a strip of the other.
   When the Home scroll reaches its bottom, the remaining motion in that same
@@ -62,7 +68,10 @@ diamond appears only when at least one folder shortcut is eligible.
 - In edit mode, select a widget, drag it between valid cells, or use its resize
   handle to change column and row spans. Reject overlaps and sizes unsupported
   by the provider; show an error when a save fails. On-Home controls provide
-  Move, Resize and Done. Home screens settings provide provider configuration,
+  Move, Resize, **Remove widget** and Done. Remove widget asks for confirmation;
+  cancellation keeps the widget. A successful removal persists the change and
+  releases its owned Android widget binding. A failed save keeps the widget and
+  shows a retryable error. The provider app stays installed. Home screens settings provide provider configuration,
   page moves, size/padding edits and Remove. Empty-space long press and widget
   long press have distinct targets.
 - Android widget binding, consent, configuration, host lifecycle and recovery

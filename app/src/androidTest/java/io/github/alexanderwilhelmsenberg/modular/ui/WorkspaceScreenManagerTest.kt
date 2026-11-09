@@ -37,6 +37,8 @@ class WorkspaceScreenManagerTest {
             rule.onNodeWithTag("settings-back").performClick()
             rule.onNodeWithTag("workspace-settings-content").assertIsDisplayed()
             rule.onNodeWithTag("workspace-tile:home").assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithTag("workspace-tile:category:games")
+                .fetchSemanticsNodes().isEmpty())
             rule.onNodeWithTag("workspace-add-page").performScrollTo().assertIsDisplayed().performClick()
             rule.onNodeWithTag("workspace-page-name").performTextInput(name)
             rule.onNodeWithText("Left").performClick()

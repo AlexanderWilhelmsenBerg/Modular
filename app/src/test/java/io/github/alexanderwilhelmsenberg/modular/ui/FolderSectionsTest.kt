@@ -21,6 +21,17 @@ class FolderSectionsTest {
             HomeListEntry.App(suggested, true), HomeListEntry.FeaturedStatus), entries)
     }
 
+    @Test fun externalSuggestionsKeepProviderOrderWhileFolderPinsRemainOrdered() {
+        val saved = listOf(HomePinRef.App(pinned.key), HomePinRef.Folder("two"), HomePinRef.Folder("one"))
+        val active = drawerPinOrder(saved, coreMostUsedEnabled = false)
+        val folders = mergedDrawerFolders(listOf(one, two), emptyList(), active)
+        val entries = drawerSectionEntries(listOf(suggested, pinned), folders, active, false, emptyList())
+        assertEquals(listOf(HomeListEntry.Header("★"), HomeListEntry.App(suggested, true),
+            HomeListEntry.App(pinned, true), HomeListEntry.Header("Folders"),
+            HomeListEntry.Folder(two), HomeListEntry.Folder(one)), entries)
+        assertEquals(saved, drawerPinOrder(saved, coreMostUsedEnabled = true))
+    }
+
     @Test fun emptyFeaturedAppsShowPinPrompt() {
         assertEquals(listOf(HomeListEntry.Header("★"), HomeListEntry.FeaturedEmpty),
             featuredHomeEntries(emptyList(), listOf(HomePinRef.Folder("one")), false))

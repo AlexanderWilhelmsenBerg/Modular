@@ -388,7 +388,8 @@ fun OrganizationHomeScreen(
                     folders = if (category == null && sorter == null) projection.appListFolders.map { it.definition } else emptyList(),
                     featuredFolders = if (category == null && sorter == null)
                         projection.mostUsedFolders.map { it.definition } else emptyList(),
-                    featuredPinOrder = if (category == null && sorter == null) projection.visiblePinRefs else emptyList(),
+                    featuredPinOrder = if (category == null && sorter == null)
+                        drawerPinOrder(projection.visiblePinRefs, mostUsedEnabled) else emptyList(),
                     onOpenFolder = { openFolderId = it.id }, onEditFolder = { editingFolderId = it.id },
                     onFolderPress = { folderPressed = it }, onEditingChange = { editingSearch = it },
                     onFolderBounds = { id, bounds -> folderBounds[id] = bounds },
@@ -429,7 +430,7 @@ fun OrganizationHomeScreen(
                     homeResetToken = homeResetToken,
                     folders = projection.appListFolders.map { it.definition },
                     featuredFolders = projection.mostUsedFolders.map { it.definition },
-                    featuredPinOrder = projection.visiblePinRefs,
+                    featuredPinOrder = drawerPinOrder(projection.visiblePinRefs, mostUsedEnabled),
                     onOpenFolder = { openFolderId = it.id }, onEditFolder = { editingFolderId = it.id },
                     onFolderPress = { folderPressed = it },
                     onFolderBounds = { id, bounds -> folderBounds[id] = bounds },

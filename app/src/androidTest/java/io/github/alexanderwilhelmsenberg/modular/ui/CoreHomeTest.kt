@@ -288,6 +288,21 @@ class CoreHomeTest {
     }
 
     @Test
+    fun drawerWithFoldersDoesNotClaimItHasNoContent() {
+        composeRule.setContent {
+            HomeScreen(
+                catalog = AppCatalog(),
+                folders = listOf(io.github.alexanderwilhelmsenberg.modular.organization.FolderDefinition(
+                    "visible-folder", "My folder")),
+                onLaunch = {}, onRefresh = {}, onMakeDefault = {}, onOpenSettings = {},
+            )
+        }
+        composeRule.onNodeWithTag("section:Folders").assertIsDisplayed()
+        composeRule.onNodeWithText("My folder").assertIsDisplayed()
+        composeRule.onNodeWithText("No apps available").assertDoesNotExist()
+    }
+
+    @Test
     fun catalogErrorCanBeRetried() {
         var refreshes = 0
         composeRule.setContent {

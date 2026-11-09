@@ -4,6 +4,10 @@ import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.organization.FolderDefinition
 import io.github.alexanderwilhelmsenberg.modular.organization.HomePinRef
 
+/** Core app pins only rank Core suggestions; folder ordering is always retained. */
+internal fun drawerPinOrder(pins: List<HomePinRef>, coreMostUsedEnabled: Boolean): List<HomePinRef> =
+    if (coreMostUsedEnabled) pins else pins.filterIsInstance<HomePinRef.Folder>()
+
 /** Saved app pins lead suggested Most Used apps. Folder pins are handled separately. */
 internal fun featuredHomeEntries(
     apps: List<LaunchableApp>?,

@@ -127,7 +127,8 @@ fun HomeScreen(
             if (hasPausedProfileApps) add(HomeListEntry.Notice("paused-profile-notice", "Some apps are unavailable while a profile is paused."))
             if (catalog.lastError != null) add(HomeListEntry.Error)
             if (catalog.isRefreshing && normalApps.isEmpty() && catalog.lastError == null) add(HomeListEntry.Loading)
-            else if (!searching && normalApps.isEmpty() && catalog.lastError == null) add(HomeListEntry.Empty)
+            else if (!searching && normalApps.isEmpty() && safeFeatured == null &&
+                drawerFolders.isEmpty() && catalog.lastError == null) add(HomeListEntry.Empty)
             else if (visibleApps.isEmpty() && searching && catalog.lastError == null) add(HomeListEntry.NoResults)
             if (!searching) addAll(drawerSectionEntries(safeFeatured, drawerFolders, featuredPinOrder,
                 showStatus = !featuredMessage.isNullOrBlank() || featuredNeedsPermission,

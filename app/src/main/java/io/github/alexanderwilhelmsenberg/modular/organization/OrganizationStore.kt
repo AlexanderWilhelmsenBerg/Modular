@@ -154,9 +154,6 @@ class OrganizationStore internal constructor(private val dataStore: DataStore<Pr
                 val changed = transform(before)
                 val next = if (changed == before) before else changed.copy(revision = before.revision + 1)
                 val settings = decodeMostUsedSettings(preferences[mostUsedSettingsKey])
-                if (next.pins.any { it is HomePinRef.Folder && it !in before.pins }) {
-                    require(settings.enabled) { "Turn on Most Used before placing a folder there" }
-                }
                 validate(next)
                 val encoded = encodeOrganization(next)
                 require(encoded.toByteArray(Charsets.UTF_8).size <= OrganizationLimits.MAX_DOCUMENT_BYTES) {

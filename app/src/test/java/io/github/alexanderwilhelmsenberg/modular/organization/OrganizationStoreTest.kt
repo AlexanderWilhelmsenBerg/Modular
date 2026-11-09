@@ -56,6 +56,26 @@ class OrganizationStoreTest {
         assertEquals(listOf(HomePinRef.App(a), HomePinRef.App(b)), mostUsed.currentSettings().pinRefs)
     }
 
+    @Test fun pinnedFoldersPersistWithoutEnablingMostUsed() = runBlocking {
+        val memory = MemoryPreferences()
+        val mostUsed = MostUsedSettingsStore(memory)
+        mostUsed.setEnabled(false).getOrThrow()
+        val store = OrganizationStore(memory)
+        val pinned = FolderDefinition("pinned", "Pinned", listOf(a), FolderPlacement.MOST_USED)
+        val alphabetical = FolderDefinition("alpha", "Alphabetical", listOf(b), FolderPlacement.APP_LIST)
+        store.update(OrganizationBatch(listOf(
+            OrganizationEdit.CreateFolder(pinned),
+            OrganizationEdit.CreateFolder(alphabetical),
+        ))).getOrThrow()
+        store.update(OrganizationBatch(listOf(
+            OrganizationEdit.UpdateFolder(alphabetical.copy(placement = FolderPlacement.MOST_USED)),
+        ))).getOrThrow()
+        val restored = OrganizationStore(memory).currentSnapshot()
+        assertEquals(listOf(HomePinRef.Folder("pinned"), HomePinRef.Folder("alpha")), restored.pins)
+        assertEquals(restored.pins, mostUsed.currentSettings().pinRefs)
+        assertFalse(mostUsed.currentSettings().enabled)
+    }
+
     @Test fun pickerBatchIsAtomicWhenDestinationDisappears() = runBlocking {
         val store = OrganizationStore(MemoryPreferences())
         val start = store.currentSnapshot()

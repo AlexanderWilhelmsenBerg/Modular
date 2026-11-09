@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.absoluteOffset
@@ -18,6 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -66,6 +69,8 @@ internal fun WorkspaceWidgetGrid(
     onEmptyLongPress: () -> Unit,
     limits: (WorkspaceWidget) -> WidgetLayoutLimits?,
     onSave: suspend (Int, Int, Int, Int, Int) -> Result<Unit>,
+    onRemoveWidget: suspend (Int) -> Result<Unit>,
+    onRemoved: (Int) -> Unit,
     widgetContent: @Composable (WorkspaceWidget, () -> Unit) -> Unit,
 ) {
     val columns = preferences.gridColumnCount.coerceIn(1, 12)
@@ -76,6 +81,10 @@ internal fun WorkspaceWidgetGrid(
     val scope = rememberCoroutineScope()
     var savingId by remember { mutableStateOf<Int?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var confirmRemoveId by remember { mutableStateOf<Int?>(null) }
+    var removing by remember { mutableStateOf(false) }
+    var removeError by remember { mutableStateOf<String?>(null) }
+    val density = LocalDensity.current
     val hasSelection = band.cells.any { it.widget.appWidgetId == selectedId }
     val selected = band.cells.firstOrNull { it.widget.appWidgetId == selectedId }
     val selectedLimit = selected?.widget?.let(limits)
@@ -83,11 +92,13 @@ internal fun WorkspaceWidgetGrid(
         (if (selectedLimit?.canResizeHeight == true) 2 else 0)
     val controlsPerRow = (geometry.widthDp / 44).coerceAtLeast(1)
     val controlRows = (controlCount + controlsPerRow - 1) / controlsPerRow
+    // A narrow screen can wrap the labeled removal action at larger font scales.
+    val controlHeight = maxOf(48, (48 * density.fontScale).roundToInt())
     val extraHeight = if (editMode && hasSelection)
-        maxOf((rowHeight + rowGap) * 2, controlRows * 48 + rowGap * 2) else 0
+        maxOf((rowHeight + rowGap) * 2,
+            controlRows * controlHeight + controlHeight * 2 + rowGap * 2) else 0
     val totalHeight = (band.heightDp + extraHeight)
         .coerceAtLeast(if (editMode && band.cells.isEmpty() && band.heightDp == 0) rowHeight * 2 else 0)
-    val density = LocalDensity.current
     val emptyHold = if (editMode) Modifier else Modifier.pointerInput(band, density) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -231,9 +242,9 @@ internal fun WorkspaceWidgetGrid(
                 }
             }
             if (editMode && selected) {
-                FlowRow(Modifier.absoluteOffset(x = geometry.leftDp.dp, y = (band.heightDp + rowGap).dp)
-                    .width(geometry.widthDp.dp)
-                    .testTag("workspace-widget-controls:${widget.appWidgetId}")) {
+                Column(Modifier.absoluteOffset(x = geometry.leftDp.dp, y = (band.heightDp + rowGap).dp)
+                    .width(geometry.widthDp.dp)) {
+                FlowRow(Modifier.testTag("workspace-widget-controls:${widget.appWidgetId}")) {
                     GridControl("←", "Move widget left") { save(cell.column - 1, cell.row, cell.columnSpan, cell.rowSpan) }
                     GridControl("→", "Move widget right") { save(cell.column + 1, cell.row, cell.columnSpan, cell.rowSpan) }
                     GridControl("↑", "Move widget up") { save(cell.column, cell.row - 1, cell.columnSpan, cell.rowSpan) }
@@ -251,10 +262,52 @@ internal fun WorkspaceWidgetGrid(
                         save(cell.column, cell.row, cell.columnSpan, cell.rowSpan + 1)
                     }
                 }
+                TextButton(onClick = {
+                    removeError = null
+                    confirmRemoveId = widget.appWidgetId
+                }, enabled = savingId == null,
+                    modifier = Modifier.testTag("workspace-widget-remove:${widget.appWidgetId}")) {
+                    Text("Remove widget")
+                }
+                }
             }
         }
         if (error != null) Text(error.orEmpty(), Modifier.align(Alignment.BottomStart).padding(8.dp),
             color = MaterialTheme.colorScheme.error)
+    }
+    confirmRemoveId?.let { id ->
+        AlertDialog(
+            onDismissRequest = { if (!removing) confirmRemoveId = null },
+            title = { Text("Remove widget?") },
+            text = {
+                Column {
+                    Text("This removes the widget from this screen. Its provider app stays installed.")
+                    removeError?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.testTag("workspace-widget-remove-error")) }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    removing = true
+                    removeError = null
+                    scope.launch {
+                        val result = runCatching { onRemoveWidget(id) }
+                            .getOrElse { Result.failure(it) }
+                        removing = false
+                        result.onSuccess {
+                            confirmRemoveId = null
+                            onRemoved(id)
+                        }.onFailure {
+                            removeError = it.message ?: "Could not remove widget. Try again."
+                        }
+                    }
+                }, enabled = !removing,
+                    modifier = Modifier.testTag("workspace-widget-remove-confirm")) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemoveId = null }, enabled = !removing) { Text("Cancel") }
+            },
+        )
     }
 }
 

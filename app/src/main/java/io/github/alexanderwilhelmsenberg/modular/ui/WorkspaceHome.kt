@@ -98,6 +98,9 @@ internal fun WorkspaceHome(
     onOpenWorkspaceAdvanced: () -> Unit = onEditWorkspace,
     widgetLayoutLimits: (WorkspaceWidget) -> WidgetLayoutLimits? = { null },
     onSaveWidgetGrid: suspend (Int, Int, Int, Int, Int) -> Result<Unit> = { _, _, _, _, _ -> Result.success(Unit) },
+    onRemoveWidget: suspend (Int) -> Result<Unit> = {
+        Result.failure(IllegalStateException("Widget removal is unavailable"))
+    },
     onEditingChange: (Boolean) -> Unit = {},
     pageActive: Boolean = true,
     clockActive: Boolean = true,
@@ -109,6 +112,10 @@ internal fun WorkspaceHome(
     var editMode by rememberSaveable(pageId) { mutableStateOf(false) }
     var selectedWidgetId by rememberSaveable(pageId) { mutableStateOf<Int?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(pageWidgets, selectedWidgetId) {
+        if (selectedWidgetId != null && pageWidgets.none { it.appWidgetId == selectedWidgetId })
+            selectedWidgetId = null
+    }
     DisposableEffect(pageId, pageActive, editMode) {
         if (pageActive) onEditingChange(editMode)
         onDispose { if (pageActive && editMode) onEditingChange(false) }
@@ -209,7 +216,9 @@ internal fun WorkspaceHome(
                             selectedWidgetId, onSelect = { selectedWidgetId = it },
                             onLongPress = { startEditing(it) }, limits = widgetLayoutLimits,
                             onEmptyLongPress = { menuOpen = true },
-                            onSave = onSaveWidgetGrid, widgetContent = widgetContent)
+                            onSave = onSaveWidgetGrid, onRemoveWidget = onRemoveWidget,
+                            onRemoved = { if (selectedWidgetId == it) selectedWidgetId = null },
+                            widgetContent = widgetContent)
                     }
                     if (hasWidgetGrid) item(key = "workspace-widget-gap") { Spacer(Modifier.height(geometry.gapDp.dp)) }
                 }

@@ -3,11 +3,14 @@ package io.github.alexanderwilhelmsenberg.modular.ui
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithTag
@@ -19,7 +22,11 @@ import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationEdit
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationSnapshot
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePreferences
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
+import io.github.alexanderwilhelmsenberg.modular.workspace.WidgetAreaGeometry
+import io.github.alexanderwilhelmsenberg.modular.workspace.groupWidgetGridBands
+import io.github.alexanderwilhelmsenberg.modular.workspace.packWidgetGrid
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -158,6 +165,56 @@ class WidgetLayoutEditorTest {
         rule.onNodeWithTag("workspace-widget-layout-save").performClick()
         rule.waitForIdle()
         assertEquals(listOf(43, 4, 38, -1, -1, 8), writes.single())
+    }
+
+
+    @Test fun failedGridRemovalKeepsWidgetAndConfirmationForRetry() {
+        val widget = WorkspaceWidget(44, "home", "test/Provider", heightDp = 96,
+            columnSpan = 1, rowSpan = 1, gridColumn = 0, gridRow = 0)
+        val preferences = WorkspacePreferences(gridRowHeightDp = 96)
+        val geometry = WidgetAreaGeometry(0, 320, 8, 156)
+        val layout = packWidgetGrid(listOf(widget), preferences, geometry)
+        val band = groupWidgetGridBands(layout).single()
+        var attempts = 0
+        rule.setContent {
+            var present by remember { mutableStateOf(true) }
+            val screenDensity = LocalDensity.current
+            MaterialTheme {
+                CompositionLocalProvider(LocalDensity provides Density(screenDensity.density, 2f)) {
+                    if (present) WorkspaceWidgetGrid(
+                        layout = layout, band = band, preferences = preferences, geometry = geometry,
+                        editMode = true, selectedId = widget.appWidgetId,
+                        onSelect = {}, onLongPress = {}, onEmptyLongPress = {},
+                        limits = { WidgetLayoutLimits(0, 0, 2048, true, true) },
+                        onSave = { _, _, _, _, _ -> Result.success(Unit) },
+                        onRemoveWidget = {
+                            attempts++
+                            if (attempts == 1) Result.failure(IllegalStateException("Disk busy"))
+                            else Result.success(Unit)
+                        },
+                        onRemoved = { present = false },
+                        widgetContent = { _, _ -> Text("Widget") },
+                    )
+                }
+            }
+        }
+
+        val gridBounds = rule.onNodeWithTag("workspace-widget-grid").fetchSemanticsNode().boundsInRoot
+        val buttonBounds = rule.onNodeWithTag("workspace-widget-remove:44").fetchSemanticsNode().boundsInRoot
+        assertTrue("Remove control must fit within the selected grid band at large font", buttonBounds.bottom <= gridBounds.bottom)
+        rule.onNodeWithTag("workspace-widget-remove:44").performClick()
+        rule.onNodeWithTag("workspace-widget-remove-confirm").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("workspace-widget-cell:44").assertExists()
+        rule.onNodeWithTag("workspace-widget-remove-confirm").assertExists()
+        rule.onNodeWithTag("workspace-widget-remove-error").assertExists()
+        rule.onNodeWithText("Disk busy").assertExists()
+        assertEquals(1, attempts)
+
+        rule.onNodeWithTag("workspace-widget-remove-confirm").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("workspace-widget-cell:44").assertDoesNotExist()
+        assertEquals(2, attempts)
     }
 
 }

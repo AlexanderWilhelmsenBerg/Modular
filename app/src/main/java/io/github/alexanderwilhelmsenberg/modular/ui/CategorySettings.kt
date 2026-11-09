@@ -147,9 +147,18 @@ fun CategorySettingsUi(
                     }
                 }
                 OutlinedButton(onClick = { creating = true }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("category-create")) { Text("Create category") }
+                CategoryPageOrder(
+                    order = categoryPageOrder(snapshot.pageOrder),
+                    categories = snapshot.categories,
+                    enabled = !busy,
+                    onReorder = { reordered ->
+                        save(listOf(OrganizationEdit.SetPageOrder(mergeSurfacePageOrder(
+                            snapshot.pageOrder, reordered, PageOrderSurface.CATEGORY))))
+                    },
+                )
                 OutlinedButton(onClick = { detailsOpen = false; onOpenHomeSettings() }, enabled = !busy,
                     modifier = Modifier.fillMaxWidth().testTag("categories-manage-screens")) {
-                    Text("Arrange all Home screens")
+                    Text("Manage Home widget screens")
                 }
                 OutlinedButton(onClick = { detailsOpen = false; onManageFolders() }, modifier = Modifier.fillMaxWidth().testTag("categories-manage-folders")) { Text("Manage folders") }
                 OutlinedButton(onClick = { detailsOpen = false; onStartMegaSorter() }, modifier = Modifier.fillMaxWidth().testTag("categories-start-sorter")) { Text("Start Mega Sorter") }
@@ -267,8 +276,8 @@ private fun CategoryEditorDialog(
                     CategorySettingSwitch("Show in App drawer list and Most Used", showOnHome, !busy, "category-editor-home") { showOnHome = it }
                     Text("Initial position", style = MaterialTheme.typography.titleSmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TextButton(onClick = { leftOfHome = true }) { Text(if (leftOfHome) "✓ Left of Home" else "Left of Home") }
-                        TextButton(onClick = { leftOfHome = false }) { Text(if (!leftOfHome) "✓ Right of Home" else "Right of Home") }
+                        TextButton(onClick = { leftOfHome = true }) { Text(if (leftOfHome) "✓ Left of All apps" else "Left of All apps") }
+                        TextButton(onClick = { leftOfHome = false }) { Text(if (!leftOfHome) "✓ Right of All apps" else "Right of All apps") }
                     }
                 }
                 saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }

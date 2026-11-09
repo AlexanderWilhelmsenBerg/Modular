@@ -22,6 +22,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
@@ -196,6 +197,25 @@ class WidgetGridIntegrationTest {
         capture("settings")
     }
 
+    @Test fun selectedWidgetCanBeRemovedAfterConfirmation() = withFixture { fixture ->
+        val widget = fixture.add(GridFixtureSmallProvider::class.java)
+        fixture.placeAtStart(listOf(widget))
+        nativeLongPress(widget.appWidgetId)
+        rule.onNodeWithTag("workspace-widget-remove:${widget.appWidgetId}").assertIsDisplayed().performClick()
+        rule.onNodeWithTag("workspace-widget-remove-confirm").assertIsDisplayed()
+        rule.onNodeWithText("Cancel").performClick()
+        assertTrue(fixture.snapshot().widgets.any { it.appWidgetId == widget.appWidgetId })
+
+        rule.onNodeWithTag("workspace-widget-remove:${widget.appWidgetId}").performClick()
+        rule.onNodeWithTag("workspace-widget-remove-confirm").performClick()
+        rule.waitUntil(15_000) {
+            fixture.snapshot().widgets.none { it.appWidgetId == widget.appWidgetId }
+        }
+        rule.waitUntil(15_000) {
+            !fixture.hasHostId(widget.appWidgetId)
+        }
+    }
+
     private fun nativeLongPress(id: Int) {
         // EditableWidgetHostView uses Android View.postDelayed. Compose's virtual
         // longClick clock can advance past the hold without running that callback.
@@ -332,6 +352,7 @@ class WidgetGridIntegrationTest {
         )
 
         fun snapshot() = runBlocking { store.currentSnapshot() }
+        fun hasHostId(id: Int) = id in host.appWidgetIds
 
         fun withBlankHome(block: () -> Unit) {
             val homeWidgets = original.widgets.filter { it.pageId == WorkspacePageId.HOME }

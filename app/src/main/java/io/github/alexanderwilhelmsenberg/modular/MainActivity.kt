@@ -405,6 +405,7 @@ class MainActivity : ComponentActivity() {
                                 canFitHalfWidget = widgetController::canFitHalf,
                                 widgetLayoutLimits = widgetController::layoutLimits,
                                 onSaveWidgetGrid = widgetController::saveWidgetGrid,
+                                onRemoveWidget = widgetController::removeWidgetAndAwait,
                                 onAddWidget = widgetController::addWidget,
                                 onEditWorkspace = { pageId ->
                                     workspacePageToEdit = pageId

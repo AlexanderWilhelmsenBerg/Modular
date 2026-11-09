@@ -33,7 +33,43 @@ import io.github.alexanderwilhelmsenberg.modular.organization.CategoryDefinition
 import io.github.alexanderwilhelmsenberg.modular.organization.HomePageId
 import kotlin.math.roundToInt
 
-/** Home's fixed position is movable only by moving category tiles across it. */
+internal fun workspacePageOrder(order: List<HomePageId>): List<HomePageId> =
+    order.filter { it == HomePageId.Home || it is HomePageId.Widget }
+
+internal fun categoryPageOrder(order: List<HomePageId>): List<HomePageId> =
+    order.filter { it == HomePageId.Home || it is HomePageId.Category }
+
+internal enum class PageOrderSurface { WORKSPACE, CATEGORY }
+
+/**
+ * Keep the other surface's left/right sides and relative order while saving a
+ * reordered subset. Replacing fixed list slots can move Home across other pages.
+ */
+internal fun mergeSurfacePageOrder(
+    original: List<HomePageId>,
+    reorderedSubset: List<HomePageId>,
+    surface: PageOrderSurface,
+): List<HomePageId> {
+    val selectedBefore = if (surface == PageOrderSurface.WORKSPACE)
+        workspacePageOrder(original) else categoryPageOrder(original)
+    if (HomePageId.Home !in reorderedSubset || reorderedSubset.size != selectedBefore.size ||
+        reorderedSubset.toSet() != selectedBefore.toSet()) return original
+    val otherBefore = if (surface == PageOrderSurface.WORKSPACE)
+        categoryPageOrder(original) else workspacePageOrder(original)
+    val selectedHome = reorderedSubset.indexOf(HomePageId.Home)
+    val otherHome = otherBefore.indexOf(HomePageId.Home)
+    val workspaceLeft = if (surface == PageOrderSurface.WORKSPACE)
+        reorderedSubset.take(selectedHome) else otherBefore.take(otherHome)
+    val categoryLeft = if (surface == PageOrderSurface.CATEGORY)
+        reorderedSubset.take(selectedHome) else otherBefore.take(otherHome)
+    val workspaceRight = if (surface == PageOrderSurface.WORKSPACE)
+        reorderedSubset.drop(selectedHome + 1) else otherBefore.drop(otherHome + 1)
+    val categoryRight = if (surface == PageOrderSurface.CATEGORY)
+        reorderedSubset.drop(selectedHome + 1) else otherBefore.drop(otherHome + 1)
+    return workspaceLeft + categoryLeft + HomePageId.Home + workspaceRight + categoryRight
+}
+
+/** All apps stays fixed while category tiles move across it. */
 internal fun movedCategoryPage(order: List<HomePageId>, from: Int, to: Int): List<HomePageId> {
     if (from !in order.indices || to !in order.indices || order[from] == HomePageId.Home || from == to) return order
     return order.toMutableList().apply { add(to, removeAt(from)) }
@@ -51,8 +87,8 @@ fun CategoryPageOrder(
     val tileStepPx = with(density) { 100.dp.toPx() }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         Text("Page order", style = MaterialTheme.typography.titleMedium)
-        Text("Physical left  ←  Home  →  Physical right", style = MaterialTheme.typography.bodySmall)
-        Text("Swipe a finger right for the page on Home’s left; swipe left for its right.", style = MaterialTheme.typography.bodySmall)
+        Text("Physical left  ←  All apps  →  Physical right", style = MaterialTheme.typography.bodySmall)
+        Text("Swipe right for a category on All apps’ left; swipe left for its right.", style = MaterialTheme.typography.bodySmall)
         // A physical page sequence must remain left-to-right even in an RTL locale.
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Row(
@@ -75,11 +111,11 @@ fun CategoryPageOrder(
                         )
                     } else Modifier
                     OutlinedCard(
-                        modifier = Modifier.width(92.dp).then(dragModifier).testTag("page-tile:${if (page == HomePageId.Home) "home" else (page as HomePageId.Category).id}"),
+                        modifier = Modifier.width(92.dp).then(dragModifier).testTag("page-tile:${if (page == HomePageId.Home) "all-apps" else (page as HomePageId.Category).id}"),
                         colors = CardDefaults.outlinedCardColors(containerColor = if (dragPx != 0f) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface),
                     ) {
                         Text(
-                            text = if (page == HomePageId.Home) "Home" else category?.name ?: "Removed",
+                            text = if (page == HomePageId.Home) "All apps" else category?.name ?: "Removed",
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 12.dp),
                             textAlign = TextAlign.Center,
                             maxLines = 1,

@@ -1,12 +1,12 @@
 # Home widget grid v2 validation
 
 Product contract: [Home widget grid v2](../product/home-widget-grid-v2.md).
-The checks below are implemented in the repository. At the previous head, all
-148 native connected tests passed and six of seven screenshot-matrix runs
-passed. The subsequent RTL fix passed local compilation and lint; final CI and
-the seventh matrix run remain pending. Record revision, command, device/API
-level and result for final execution. A prior-head pass is not a final-revision
-or physical-device acceptance claim.
+The grid baseline was merged in PR #31 as `23cee7489c13`: verification, signed
+builds, native API 35 tests and all seven screenshot configurations passed
+([CI run](https://github.com/AlexanderWilhelmsenBerg/Modular/actions/runs/42614089377)).
+The subsequent Home/drawer page separation and widget-removal correction needs
+its own passing CI result. Record revision and run in the implementing PR; a
+baseline pass is not a final-revision or physical-device acceptance claim.
 
 | Area | Implemented check | Execution still needed |
 | --- | --- | --- |
@@ -35,3 +35,10 @@ On a physical device, repeat consent/configuration cancellation, rotation,
 process death, missing-provider recovery and widget move/resize. The existing
 [Home workspace validation](home-workspace-validation.md) tracks the broader
 navigation, headset, resource and Samsung gesture checks.
+
+For the navigation/removal correction, verify Home swipes only visit Home/widget
+pages and drawer swipes only visit All apps/category pages, with independent
+selection and settings order. Check restoration, search, rail jumps, deleted
+pages and vertical handoff from a category. Long-press a native widget, cancel
+Remove widget once, then confirm it: placement and owned host ID must disappear.
+A failed save must keep the widget and offer a retry; provider apps stay installed.

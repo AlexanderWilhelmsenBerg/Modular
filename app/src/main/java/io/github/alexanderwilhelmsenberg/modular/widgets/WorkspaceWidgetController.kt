@@ -36,7 +36,9 @@ import io.github.alexanderwilhelmsenberg.modular.workspace.gridSpanWidthDp
 import io.github.alexanderwilhelmsenberg.modular.workspace.packWidgetGrid
 import io.github.alexanderwilhelmsenberg.modular.workspace.resolveWidgetGridSpan
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.ceil
 import kotlin.math.min
 
@@ -384,12 +386,32 @@ class WorkspaceWidgetController internal constructor(
 
     fun removeWidget(id: Int) {
         scope.launch {
-            val owned = placements.any { it.appWidgetId == id && it.hostToken == currentHostToken }
-            if (edit { widgets -> widgets.filterNot { it.appWidgetId == id } }) {
-                if (owned) deleteHostIdSafely(id)
+            runCatching { removeWidgetAndAwait(id) }.getOrElse { Result.failure(it) }.onFailure {
+                message(it.message ?: "Could not remove widget")
             }
-            else message("Could not remove widget")
         }
+    }
+
+    /** Persist removal before releasing the host ID, so a failed write leaves the widget usable. */
+    suspend fun removeWidgetAndAwait(id: Int): Result<Unit> = withContext(NonCancellable) {
+        var failure: Throwable = IllegalStateException("Could not remove widget")
+        repeat(3) {
+            val snapshot = store.currentSnapshot()
+            val widget = snapshot.widgets.firstOrNull { it.appWidgetId == id }
+                ?: return@withContext Result.failure(IllegalArgumentException("Widget no longer exists"))
+            val owned = currentHostToken.isNotEmpty() && widget.hostToken == currentHostToken
+            val result = store.update(OrganizationBatch(
+                listOf(OrganizationEdit.SetWidgets(snapshot.widgets.filterNot { it.appWidgetId == id })),
+                snapshot.revision,
+            ))
+            if (result.isSuccess) {
+                placements = result.getOrThrow().widgets
+                if (owned) deleteHostIdSafely(id)
+                return@withContext Result.success(Unit)
+            }
+            failure = result.exceptionOrNull() ?: failure
+        }
+        Result.failure(failure)
     }
 
     fun moveWidget(id: Int, pageId: String) {

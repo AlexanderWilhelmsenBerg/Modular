@@ -158,20 +158,20 @@ class WidgetGridIntegrationTest {
 
         val grip = rule.onNodeWithTag("workspace-widget-resize:${widget.appWidgetId}")
             .fetchSemanticsNode().boundsInRoot
-        assertTrue("Resize grip must be at the physical bottom-left", grip.center.x < movedCell.center.x &&
+        assertTrue("Resize grip must be at the physical bottom-right", grip.center.x > movedCell.center.x &&
             grip.center.y > movedCell.center.y)
-        drag("workspace-widget-resize:${widget.appWidgetId}", -columnStep, rowStep)
+        drag("workspace-widget-resize:${widget.appWidgetId}", columnStep, rowStep)
         rule.waitUntil(15_000) {
             fixture.snapshot().widgets.any {
                 it.appWidgetId == widget.appWidgetId && it.columnSpan == 2 && it.rowSpan == 2 &&
-                    it.gridColumn == 0 && it.gridRow == 1
+                    it.gridColumn == 1 && it.gridRow == 1
             }
         }
         val resizedCell = fixture.cell(widget.appWidgetId)
         fixture.assertNear("two-row resized cell", resizedCell.height, 2 * 96f + 8f)
         fixture.assertNear("two-column resized cell", resizedCell.width,
             (2 * originalCell.width + 8f * fixture.density) / fixture.density)
-        fixture.assertNear("bottom-left resize keeps right edge fixed", resizedCell.right - movedCell.right, 0f)
+        fixture.assertNear("bottom-right resize keeps left edge fixed", resizedCell.left - movedCell.left, 0f)
         val grid = gridContaining(resizedCell)
         assertTrue("Resized widget must remain inside its grid", resizedCell.right <= grid.right)
         fixture.snapshot().widgets.filter { it.pageId == "home" && it.appWidgetId != widget.appWidgetId }

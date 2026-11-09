@@ -156,6 +156,8 @@ fun HomeScreen(
             jumpSerial += 1
             jump = externalJump to jumpSerial
         } else if (externalJumpSerial > 0) {
+            jump = null
+            reachability.reset()
             jumpHeaderLabel = null
             navigationSpacePx = 0
         }

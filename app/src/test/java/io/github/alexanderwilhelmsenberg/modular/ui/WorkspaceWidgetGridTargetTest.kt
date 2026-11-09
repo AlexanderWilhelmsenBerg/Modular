@@ -12,23 +12,29 @@ class WorkspaceWidgetGridTargetTest {
         leftDp = 0, topDp = 0, widthDp = 80, heightDp = 96,
     )
 
-    @Test fun draggingBottomLeftOutwardKeepsTopRightFixed() {
-        val target = bottomLeftResizeTarget(cell(column = 1, columnSpan = 1),
-            dxDp = -80f, dyDp = 104f, columnStepDp = 80, rowStepDp = 104, columns = 4)
-        assertEquals(WidgetGridTarget(column = 0, row = 1, columnSpan = 2, rowSpan = 2), target)
-        assertEquals(2, target.column + target.columnSpan)
+    @Test fun draggingBottomRightOutwardKeepsTopLeftFixed() {
+        val target = bottomRightResizeTarget(cell(column = 1, columnSpan = 1),
+            dxDp = 80f, dyDp = 104f, columnStepDp = 80, rowStepDp = 104, columns = 4)
+        assertEquals(WidgetGridTarget(column = 1, row = 1, columnSpan = 2, rowSpan = 2), target)
+        assertEquals(1, target.column)
     }
 
-    @Test fun draggingBottomLeftInwardShrinksFromPhysicalLeft() {
-        val target = bottomLeftResizeTarget(cell(column = 0, columnSpan = 2, rowSpan = 2),
-            dxDp = 80f, dyDp = -104f, columnStepDp = 80, rowStepDp = 104, columns = 4)
-        assertEquals(WidgetGridTarget(column = 1, row = 1, columnSpan = 1, rowSpan = 1), target)
-        assertEquals(2, target.column + target.columnSpan)
+    @Test fun draggingBottomRightInwardShrinksFromPhysicalRight() {
+        val target = bottomRightResizeTarget(cell(column = 0, columnSpan = 2, rowSpan = 2),
+            dxDp = -80f, dyDp = -104f, columnStepDp = 80, rowStepDp = 104, columns = 4)
+        assertEquals(WidgetGridTarget(column = 0, row = 1, columnSpan = 1, rowSpan = 1), target)
+        assertEquals(0, target.column)
     }
 
     @Test fun gripStopsAtPhysicalGridBounds() {
-        val target = bottomLeftResizeTarget(cell(column = 1, columnSpan = 2),
-            dxDp = -1_000f, dyDp = 10_000f, columnStepDp = 80, rowStepDp = 104, columns = 4)
-        assertEquals(WidgetGridTarget(column = 0, row = 1, columnSpan = 3, rowSpan = 32), target)
+        val target = bottomRightResizeTarget(cell(column = 1, columnSpan = 2),
+            dxDp = 1_000f, dyDp = 10_000f, columnStepDp = 80, rowStepDp = 104, columns = 4)
+        assertEquals(WidgetGridTarget(column = 1, row = 1, columnSpan = 3, rowSpan = 32), target)
+    }
+
+    @Test fun firstColumnWidgetCanGrowWithoutMovingItsOrigin() {
+        val target = bottomRightResizeTarget(cell(column = 0, columnSpan = 1),
+            dxDp = 80f, dyDp = 0f, columnStepDp = 80, rowStepDp = 104, columns = 4)
+        assertEquals(WidgetGridTarget(column = 0, row = 1, columnSpan = 2, rowSpan = 1), target)
     }
 }

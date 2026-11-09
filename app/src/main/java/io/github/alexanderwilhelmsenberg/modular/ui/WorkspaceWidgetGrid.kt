@@ -58,8 +58,8 @@ internal data class WidgetGridTarget(
     val rowSpan: Int,
 )
 
-/** The top-right grid edge stays fixed while the bottom-left grip moves. */
-internal fun bottomLeftResizeTarget(
+/** The top-left grid edge stays fixed while the bottom-right grip moves. */
+internal fun bottomRightResizeTarget(
     cell: WidgetGridCell,
     dxDp: Float,
     dyDp: Float,
@@ -67,14 +67,12 @@ internal fun bottomLeftResizeTarget(
     rowStepDp: Int,
     columns: Int,
 ): WidgetGridTarget {
-    val right = cell.column + cell.columnSpan
-    val left = (cell.column + (dxDp / columnStepDp.coerceAtLeast(1)).roundToInt())
-        .coerceIn(0, (right - 1).coerceAtLeast(0))
+    val width = (cell.columnSpan + (dxDp / columnStepDp.coerceAtLeast(1)).roundToInt())
+        .coerceIn(1, columns - cell.column)
     val rowDelta = (dyDp / rowStepDp.coerceAtLeast(1)).roundToInt()
     val height = if (rowDelta == 0) cell.rowSpan else
         (cell.rowSpan + rowDelta).coerceIn(1, 32)
-    return WidgetGridTarget(left.coerceAtMost(columns - 1), cell.row,
-        (right - left).coerceIn(1, columns), height)
+    return WidgetGridTarget(cell.column, cell.row, width, height)
 }
 
 /** One non-scrolling grid band within Home's lazy list. */
@@ -154,7 +152,7 @@ internal fun WorkspaceWidgetGrid(
             val targetColumn = (cell.column + (dxDp / columnStep).roundToInt())
                 .coerceIn(0, (columns - cell.columnSpan).coerceAtLeast(0))
             val targetRow = (cell.row + (dyDp / rowStep).roundToInt()).coerceIn(0, 256)
-            val candidate = if (resizing) bottomLeftResizeTarget(cell, dxDp, dyDp,
+            val candidate = if (resizing) bottomRightResizeTarget(cell, dxDp, dyDp,
                 columnStep, rowStep, columns) else WidgetGridTarget(targetColumn, targetRow,
                 cell.columnSpan, cell.rowSpan)
             fun valid(column: Int, row: Int, widthSpan: Int, heightSpan: Int): Boolean {
@@ -225,15 +223,16 @@ internal fun WorkspaceWidgetGrid(
                             .border(2.dp, color, RoundedCornerShape(8.dp))
                             .background(color.copy(alpha = 0.14f)))
                         val canResize = limit?.canResizeWidth == true || limit?.canResizeHeight == true
-                        val gripSizeDp = minOf(32, cell.widthDp / 2, cell.heightDp / 2).coerceAtLeast(1)
-                        if (canResize) Canvas(Modifier.align(AbsoluteAlignment.BottomLeft)
+                        // Keep the center outside this hit region even for a square 32dp cell.
+                        val gripSizeDp = minOf(32, (cell.widthDp - 1) / 2,
+                            (cell.heightDp - 1) / 2).coerceAtLeast(1)
+                        if (canResize) Canvas(Modifier.align(AbsoluteAlignment.BottomRight)
                             .size(gripSizeDp.dp)
-                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp))
                             .pointerInput(widget.appWidgetId, layout.cells, savingId) {
                                 detectDragGestures(onDragStart = { resizing = true }, onDragEnd = {
                                     val x = with(density) { drag.x.toDp().value }
                                     val y = with(density) { drag.y.toDp().value }
-                                    val target = bottomLeftResizeTarget(cell, x, y,
+                                    val target = bottomRightResizeTarget(cell, x, y,
                                         columnStep, rowStep, columns)
                                     save(target.column, target.row, target.columnSpan, target.rowSpan)
                                     drag = Offset.Zero; resizing = false
@@ -244,16 +243,14 @@ internal fun WorkspaceWidgetGrid(
                                 }
                             }.testTag("workspace-widget-resize:${widget.appWidgetId}")) {
                             val stroke = minOf(2.dp.toPx(), size.minDimension / 4f)
-                            val gripColor = color
-                            drawLine(gripColor, Offset(size.width * .25f, size.height * .75f),
-                                Offset(size.width * .75f, size.height * .25f), stroke,
-                                cap = StrokeCap.Round)
-                            drawLine(gripColor, Offset(size.width * .25f, size.height * .75f),
-                                Offset(size.width * .25f, size.height * .45f), stroke,
-                                cap = StrokeCap.Round)
-                            drawLine(gripColor, Offset(size.width * .25f, size.height * .75f),
-                                Offset(size.width * .55f, size.height * .75f), stroke,
-                                cap = StrokeCap.Round)
+                            // Two short equal sides: a quiet physical bottom-right corner.
+                            val edge = size.width - stroke * 2f
+                            val bottom = size.height - stroke * 2f
+                            val arm = size.minDimension * .4f
+                            drawLine(color, Offset(edge - arm, bottom), Offset(edge, bottom),
+                                stroke, cap = StrokeCap.Square)
+                            drawLine(color, Offset(edge, bottom - arm), Offset(edge, bottom),
+                                stroke, cap = StrokeCap.Square)
                         }
                     }
                 }

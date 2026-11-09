@@ -44,10 +44,15 @@ pages and vertical handoff from a category. Long-press a native widget, choose E
 Remove widget once, then confirm it: placement and owned host ID must disappear.
 A failed save must keep the widget and offer a retry; provider apps stay installed.
 
-For the gesture editor, `WorkspaceWidgetGridTargetTest` checks fixed-top-right
-bottom-left resizing and bounds. `HomeActionsSheetTest` checks the three menu
+For the gesture editor, `WorkspaceWidgetGridTargetTest` checks fixed-top-left
+bottom-right resizing and bounds. `HomeActionsSheetTest` checks the three menu
 routes and selected widget. Native integration must hold-drag the widget body,
-resize left/down from the physical bottom-left, preserve saved geometry, and
+resize right/down from the physical bottom-right, preserve saved geometry, and
 confirm no permanent Add widget/Edit Home or nudge controls remain. Review the
 Home menu and edit-state screenshots in every matrix configuration, particularly
 small widgets, enlarged text and RTL. Record final CI evidence in the PR.
+
+For drawer entry, reopen from a scrolled letter and from a category using a long
+upward Home swipe. Central All apps must land at offset zero with Most Used
+visible when enabled; remaining opening travel cannot skip it. Verify a fresh
+drawer gesture and alphabet navigation still scroll normally.

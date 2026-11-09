@@ -57,7 +57,11 @@ diamond appears only when at least one folder shortcut is eligible.
 - Home scrolls vertically through widget content. At rest, Home and All apps
   are strictly separate full-screen views: neither shows a strip of the other.
   When the Home scroll reaches its bottom, the remaining motion in that same
-  upward drag opens All apps from below. The reverse boundary handoff uses the
+  upward drag opens central All apps from below at scroll position zero, with
+  Most Used first when enabled, regardless of the previous category or letter.
+  Remaining upward movement in that opening gesture is consumed; a new gesture
+  scrolls the drawer. Letter taps still open their selected section.
+  The reverse boundary handoff uses the
   same downward drag. Widget taps, scrolling and other provider gestures remain
   available outside edit mode.
 - Long press empty Home space or a widget to open the app-action-style bottom
@@ -68,8 +72,9 @@ diamond appears only when at least one folder shortcut is eligible.
   Home. Choosing Edit after holding a widget selects that widget. Home has no
   permanent Add widget or Edit Home footer buttons.
 - In edit mode, hold and drag the widget body between valid cells. Drag its
-  physical bottom-left grip to resize column and row spans, keeping the top-right
-  corner fixed, including in RTL. Reject overlaps and sizes unsupported by the
+  physical bottom-right grip to resize column and row spans, keeping the top-left
+  corner fixed, including in RTL. The grip is a minimal equal-sided corner mark
+  (┘), with no arrow shaft or button background. Reject overlaps and sizes unsupported by the
   provider; show an error when a save fails. There are no move arrows or size
   increment buttons. The edit header exposes a **Remove widget** icon for the
   selected widget, alongside Done, keeping small cells clear. Remove widget asks for confirmation;

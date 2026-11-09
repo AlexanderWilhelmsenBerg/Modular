@@ -38,7 +38,7 @@ supersedes its text-only presentation and top control placement.
 
 Install the matching debug or release reference sort APK. In Core Settings, enable
 its service and open **Settings** on the module card. Toggle **Reverse alphabetical order**, then
-select **Use on Home**. Change the switch and **Save settings** to compare ordering.
+select **Use in App drawer**. Change the switch and **Save settings** to compare ordering.
 Select **Use alphabetical order** to restore Core ordering. No instance or context
 needs to be created for this ordinary path.
 

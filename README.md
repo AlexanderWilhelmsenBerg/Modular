@@ -110,7 +110,8 @@ acceptance remains pending. See the
 
 ## Built-in Most Used
 
-[Most Used](docs/addons/most-used.md) optionally adds a starred Home section in Core.
+[Most Used](docs/addons/most-used.md) optionally adds a starred section at the top of Core’s app drawer.
+Folders follow Most Used, then the alphabetical apps. Home is a separate widget workspace.
 Saved pins come first in manual order. With Most Used enabled, suggestions learn
 from successful app launches through Home, search, and the star section by default;
 no Usage Access is needed. Users can instead select Android foreground time and
@@ -128,6 +129,6 @@ map areas, with hidden folders always manageable in Settings. These organization
 features are implemented in the feature branch; release validation is tracked in
 the [category acceptance record](docs/implementation/category-validation.md).
 
-Module cards have a **Settings** button with normal controls and a **Use on Home**
+Module cards have a **Settings** button with normal controls and a **Use in App drawer**
 action for sort helpers. Instances, contexts, and JSON editing are under Advanced
 configuration and are not required for normal add-on setup.

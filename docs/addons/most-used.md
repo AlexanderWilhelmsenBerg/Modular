@@ -69,7 +69,7 @@ ordinary Most Used use. The Signed APKs workflow builds it only when
 
 For an older Core that still uses the separate add-on, install a matching debug
 or release variant, open **Settings > Add-on modules > Most Used > Settings**,
-set the day/count values, and choose **Use on Home**. Its Usage Access must be
+set the day/count values, and choose **Use in App drawer**. Its Usage Access must be
 granted to the add-on package. Android 17 / One UI 9 restricted-settings behavior
 has varied by device; consult the linked Android help and the device's own
 prompts for this legacy add-on.

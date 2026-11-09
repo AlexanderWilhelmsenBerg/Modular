@@ -322,7 +322,7 @@ default source under [ADR-0007](../decisions/ADR-0007-local-most-used-learning.m
 - Core renders the validated descriptor's flat settings as ordinary controls: switches,
   bounded number fields, text fields, and enumerated choices. Normal setup requires no
   JSON, manual instance creation, capability identifiers, or context creation.
-- A sort helper's **Use on Home** action validates and saves its settings and selects its
+- A sort helper's **Use in App drawer** action validates and saves its settings and selects its
   ordering atomically. **Save settings** updates active settings without manual deactivation.
   Failed changes preserve the previous working configuration. **Use alphabetical order**
   restores the built-in order. Advanced instance/context tools remain optional.

@@ -61,7 +61,7 @@ try:
         suffix = f"-{width}dp-{'dark' if mode == 'yes' else 'light'}-font{font_scale}"
         capture("most-used" + suffix, ["-n", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug/io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.UsageAccessActivity"], ["Open Usage Access settings", "Configure in Modular"])
         capture("alphabetical" + suffix, ["-n", "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical.debug/io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical.SortSettingsActivity"], ["Configure in Modular"])
-        capture("core-most-used" + suffix, ["-a", "io.github.alexanderwilhelmsenberg.modular.action.OPEN_MODULE_SETTINGS", "-p", "io.github.alexanderwilhelmsenberg.modular.debug", "--es", "moduleComponent", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug/io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.MostUsedSortService"], ["Recent days", "Use on Home"])
+        capture("core-most-used" + suffix, ["-a", "io.github.alexanderwilhelmsenberg.modular.action.OPEN_MODULE_SETTINGS", "-p", "io.github.alexanderwilhelmsenberg.modular.debug", "--es", "moduleComponent", "io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.debug/io.github.alexanderwilhelmsenberg.modular.addon.sort.mostused.MostUsedSortService"], ["Recent days", "Use in App drawer"])
 finally:
     adb("shell", "wm", "size", "reset")
     adb("shell", "wm", "density", "reset")

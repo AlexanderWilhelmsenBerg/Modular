@@ -21,7 +21,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationLimits
@@ -30,7 +29,6 @@ import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePreferences
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
 import io.github.alexanderwilhelmsenberg.modular.workspace.WIDGET_RAIL_INSET_DP
 import io.github.alexanderwilhelmsenberg.modular.workspace.calculateWidgetAreaGeometry
-import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -59,11 +57,11 @@ internal fun WidgetAreaEditor(
                 Text("Available width after the alphabet rail: ${(screenWidth - WIDGET_RAIL_INSET_DP).coerceAtLeast(0)} dp. Current widget area: ${geometry.widthDp} dp.",
                     style = MaterialTheme.typography.bodySmall)
                 LayoutValueSlider("Area width", "$width%", width, 50..100,
-                    "workspace-widget-area-width", { width = it })
+                    "workspace-widget-area-width", { width = it }, enabled = !busy)
                 LayoutValueSlider("Edge margin", "$margin dp", margin, 0..48,
-                    "workspace-widget-margin", { margin = it })
+                    "workspace-widget-margin", { margin = it }, enabled = !busy)
                 LayoutValueSlider("Spacing between widgets", "$gap dp", gap, 0..48,
-                    "workspace-widget-gap", { gap = it })
+                    "workspace-widget-gap", { gap = it }, enabled = !busy)
                 Text("Set the edge margin to 0 dp to place widgets against the available edges. The alphabet rail keeps its touch space.",
                     style = MaterialTheme.typography.bodySmall)
                 Text("Half-width widgets that need more space appear on full-width rows.",
@@ -101,9 +99,8 @@ internal fun WidgetSizeEditor(
     val maxHeight = limits.maxContentHeightDp
         .coerceIn(minHeight, OrganizationLimits.MAX_WIDGET_HEIGHT_DP)
     val validHeight = height in minHeight..maxHeight
-    // Match the controller's width check when deciding whether the draft can be saved.
-    val metrics = LocalContext.current.resources.displayMetrics
-    val screenWidth = ceil(metrics.widthPixels / metrics.density.toDouble()).toInt()
+    // Use the app window width, including in multi-window mode, for the fit hint.
+    val screenWidth = LocalConfiguration.current.screenWidthDp
     val halfWidth = calculateWidgetAreaGeometry(screenWidth, preferences).halfCellWidthDp
     val fitsHalf = canFitHalf(widget.copy(span = 1, paddingDp = padding), halfWidth)
     val changed = span != widget.span || height != widget.heightDp || padding != widget.paddingDp

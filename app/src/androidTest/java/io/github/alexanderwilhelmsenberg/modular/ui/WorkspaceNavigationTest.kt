@@ -292,8 +292,14 @@ class WorkspaceNavigationTest {
             rule.onNodeWithTag("section:★").assertIsDisplayed()
             val reopenedScroll = rule.onNodeWithTag("home-list").fetchSemanticsNode()
                 .config[SemanticsProperties.VerticalScrollAxisRange].value()
-            assertTrue("Opening swipe must land at the top, not carry into Most Used: $reopenedScroll",
-                reopenedScroll < 0.01f)
+            // LazyColumn semantics include the item index. The zero-height
+            // reachability spacer can make the top report index 1 rather than 0.
+            // Compare with an actual top request instead of assuming pixel units.
+            rule.onNodeWithTag("home-list").performScrollToIndex(0)
+            val topScroll = rule.onNodeWithTag("home-list").fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange].value()
+            assertTrue("Opening swipe must land at the top, not carry into Most Used: $reopenedScroll vs $topScroll",
+                kotlin.math.abs(reopenedScroll - topScroll) < 0.01f)
             // A new drawer gesture still navigates normally after the opening one.
             tapRail("◇")
             rule.onNodeWithTag("section:Folders").assertIsDisplayed()

@@ -223,7 +223,9 @@ internal fun WorkspaceWidgetGrid(
                             .border(2.dp, color, RoundedCornerShape(8.dp))
                             .background(color.copy(alpha = 0.14f)))
                         val canResize = limit?.canResizeWidth == true || limit?.canResizeHeight == true
-                        val gripSizeDp = minOf(32, cell.widthDp / 2, cell.heightDp / 2).coerceAtLeast(1)
+                        // Keep the center outside this hit region even for a square 32dp cell.
+                        val gripSizeDp = minOf(32, (cell.widthDp - 1) / 2,
+                            (cell.heightDp - 1) / 2).coerceAtLeast(1)
                         if (canResize) Canvas(Modifier.align(AbsoluteAlignment.BottomRight)
                             .size(gripSizeDp.dp)
                             .pointerInput(widget.appWidgetId, layout.cells, savingId) {

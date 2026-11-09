@@ -234,12 +234,12 @@ class WidgetLayoutEditorTest {
             columnSpan = 1, rowSpan = 1, gridColumn = 0, gridRow = 0)
         val preferences = WorkspacePreferences(gridColumnCount = 12,
             gridRowHeightDp = 32, widgetGapDp = 0)
-        val geometry = WidgetAreaGeometry(0, 240, 0, 120)
+        val geometry = WidgetAreaGeometry(0, 384, 0, 192)
         val layout = packWidgetGrid(listOf(widget), preferences, geometry)
         val band = groupWidgetGridBands(layout).single()
         rule.setContent {
             MaterialTheme {
-                Box(androidx.compose.ui.Modifier.width(240.dp)) {
+                Box(androidx.compose.ui.Modifier.width(384.dp)) {
                     WorkspaceWidgetGrid(layout, band, preferences, geometry,
                         editMode = true, selectedId = 45, onSelect = {},
                         onLongPress = {}, onEmptyLongPress = {},

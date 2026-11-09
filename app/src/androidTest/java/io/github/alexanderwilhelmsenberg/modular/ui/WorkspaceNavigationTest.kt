@@ -169,7 +169,9 @@ class WorkspaceNavigationTest {
                 runCatching { rule.onNodeWithTag("launcher-page:category:games")
                     .assertIsDisplayed() }.isSuccess
             }
-            swipe("drawer-pages", left = false)
+            rule.onNodeWithTag("workspace-home-action").performClick()
+            waitForHome()
+            swipeHomeUpToDrawer()
             rule.waitUntil(15_000) {
                 offSurface("launcher-page:category:games")
             }
@@ -284,6 +286,17 @@ class WorkspaceNavigationTest {
             rule.waitUntil(15_000) {
                 runCatching { rule.onNodeWithTag("section:Folders").assertIsDisplayed() }.isSuccess
             }
+            rule.onNodeWithTag("workspace-home-action").performClick()
+            waitForHome()
+            swipeHomeUpToDrawer()
+            rule.onNodeWithTag("section:★").assertIsDisplayed()
+            val reopenedScroll = rule.onNodeWithTag("home-list").fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange].value()
+            assertTrue("Opening swipe must land at the top, not carry into Most Used: $reopenedScroll",
+                reopenedScroll < 0.01f)
+            // A new drawer gesture still navigates normally after the opening one.
+            tapRail("◇")
+            rule.onNodeWithTag("section:Folders").assertIsDisplayed()
             rule.onNodeWithTag("home-search-field").performTextInput(app.label)
             rule.waitUntil(15_000) {
                 rule.onAllNodesWithTag("app-row:${app.key.stableId}")
@@ -506,6 +519,16 @@ class WorkspaceNavigationTest {
                     snapshot.revision)).getOrThrow()
             }
         }
+    }
+
+    private fun swipeHomeUpToDrawer() {
+        rule.onNodeWithTag("workspace-home").performTouchInput {
+            val start = Offset(width * 0.4f, height * 0.8f)
+            down(start)
+            for (step in 1..30) moveTo(start - Offset(0f, height * 2.5f * step / 30f), 20L)
+            up()
+        }
+        waitForAllApps()
     }
 
     private fun waitForHome() {

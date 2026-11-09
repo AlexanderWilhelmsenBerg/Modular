@@ -169,6 +169,17 @@ fun OrganizationHomeScreen(
         object : NestedScrollConnection {
             fun consumeTransition(deltaY: Float): Float {
                 val before = vertical.progress
+                if (before == 0f && deltaY < 0f) {
+                    // A new Home swipe opens the central drawer at its first section,
+                    // regardless of the previous category, letter jump, or scroll.
+                    requestedDrawerPage = HomePageId.Home
+                    drawerRequestSerial += 1
+                    railJumpPage = HomePageId.Home
+                    railJump = null
+                    railJumpSerial += 1
+                    listState.requestScrollToItem(0)
+                    activeDrawerList = listState
+                }
                 val translated = vertical.drag(deltaY, viewportHeight.toFloat())
                 if (before > 0f && vertical.progress == 0f && deltaY > 0f) routeDragToHome = true
                 if (before < 1f && vertical.progress == 1f && deltaY < 0f) routeDragToApps = true
@@ -180,8 +191,9 @@ fun OrganizationHomeScreen(
                     return translated - homeScroll
                 }
                 if (deltaY < 0f && translated < 0f && vertical.progress == 1f && remaining < 0f) {
-                    val appsScroll = (activeDrawerList ?: listState).dispatchRawDelta(-remaining)
-                    return translated - appsScroll
+                    // Finish the opening gesture at the top, without carrying
+                    // its remaining travel into Most Used. A fresh swipe scrolls.
+                    return deltaY
                 }
                 return translated
             }
@@ -197,13 +209,11 @@ fun OrganizationHomeScreen(
                     return Offset(0f, homeTaken)
                 }
                 if (routeDragToApps && vertical.progress == 1f) {
-                    val appsTaken = -(activeDrawerList ?: listState).dispatchRawDelta(-available.y)
-                    val remaining = available.y - appsTaken
-                    if (remaining > 0f) {
+                    if (available.y > 0f) {
                         routeDragToApps = false
-                        return Offset(0f, appsTaken + consumeTransition(remaining))
+                        return Offset(0f, consumeTransition(available.y))
                     }
-                    return Offset(0f, appsTaken)
+                    return Offset(0f, available.y)
                 }
                 if (vertical.progress <= 0f || vertical.progress >= 1f) return Offset.Zero
                 return Offset(0f, consumeTransition(available.y))

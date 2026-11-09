@@ -258,7 +258,7 @@ class WidgetLayoutEditorTest {
         assertTrue("Resize grip must use at most half of a tiny cell's height",
             grip.height <= cell.height / 2f + 1f)
         assertTrue("Body center must remain outside the grip",
-            body.center.y < grip.top || body.center.x > grip.right)
+            body.center.y < grip.top || body.center.x < grip.left)
         rule.onNodeWithTag("workspace-widget-remove:45").assertDoesNotExist()
     }
 

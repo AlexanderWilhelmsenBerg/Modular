@@ -9,6 +9,9 @@ import android.text.format.DateFormat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -45,6 +48,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -177,7 +182,30 @@ internal fun WorkspaceHome(
     LazyColumn(
         state = listState,
         userScrollEnabled = true,
-        modifier = Modifier.fillMaxSize().testTag("workspace-home"),
+        modifier = Modifier.fillMaxSize().pointerInput(listState, editMode) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                // Rows and native widgets own their holds. Only whitespace outside
+                // measured list items, including content padding, opens this menu.
+                val info = listState.layoutInfo
+                val inItem = info.visibleItemsInfo.any { item ->
+                    val viewportTop = item.offset - info.viewportStartOffset
+                    val y = down.position.y
+                    y >= viewportTop && y < viewportTop + item.size
+                }
+                if (inItem || editMode) {
+                    var pressed: Boolean
+                    do {
+                        pressed = awaitPointerEvent(PointerEventPass.Final).changes.any { it.pressed }
+                    } while (pressed)
+                } else {
+                    awaitLongPressOrCancellation(down.id)?.let { held ->
+                        held.consume()
+                        menuOpen = true
+                    }
+                }
+            }
+        }.testTag("workspace-home"),
         contentPadding = PaddingValues(top = 72.dp, bottom = 124.dp),
     ) {
         item(key = "workspace-empty-top") {

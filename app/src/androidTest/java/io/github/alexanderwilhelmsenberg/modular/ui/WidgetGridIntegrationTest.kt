@@ -31,11 +31,14 @@ import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationBatch
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationEdit
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationStore
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePreferences
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePage
+import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePageId
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceSection
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -108,9 +111,29 @@ class WidgetGridIntegrationTest {
     }
 
     @Test fun widgetLongPressAndEmptySpaceExposeGridEditingActions() = withFixture { fixture ->
+        fixture.withBlankHome {
+            rule.onNodeWithTag("workspace-home").performScrollToIndex(0)
+            rule.waitUntil(15_000) {
+                runCatching { rule.onNodeWithTag("workspace-add-widget").assertIsDisplayed() }.isSuccess
+            }
+            val home = rule.onNodeWithTag("workspace-home").fetchSemanticsNode().boundsInRoot
+            val actions = rule.onNodeWithTag("workspace-add-widget")
+                .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val apps = rule.onNodeWithTag("workspace-apps-action")
+                .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val blankTop = actions.bottom + 12f * fixture.density
+            val blankBottom = minOf(home.bottom, apps.top) - 12f * fixture.density
+            assertTrue("Short Home must leave wallpaper below its actions", blankBottom > blankTop)
+            val point = Offset(home.width * 0.4f, (blankTop + blankBottom) / 2f - home.top)
+            rule.onNodeWithTag("workspace-home").performTouchInput { longClick(point) }
+            rule.onNodeWithTag("workspace-home-menu").assertIsDisplayed()
+            rule.onNodeWithTag("workspace-menu-edit").performClick()
+            rule.onNodeWithTag("workspace-widget-edit-done").performClick()
+        }
         val widget = fixture.add(GridFixtureSmallProvider::class.java)
         fixture.placeAtStart(listOf(widget))
         nativeLongPress(widget.appWidgetId)
+        rule.onNodeWithTag("workspace-home-menu").assertIsNotDisplayed()
         rule.onNodeWithTag("workspace-widget-controls:${widget.appWidgetId}").assertIsDisplayed()
         rule.onNodeWithTag("workspace-widget-move:${widget.appWidgetId}").assertIsDisplayed()
         rule.onNodeWithTag("workspace-widget-resize:${widget.appWidgetId}").assertIsDisplayed()
@@ -299,6 +322,44 @@ class WidgetGridIntegrationTest {
         )
 
         fun snapshot() = runBlocking { store.currentSnapshot() }
+
+        fun withBlankHome(block: () -> Unit) {
+            val homeWidgets = original.widgets.filter { it.pageId == WorkspacePageId.HOME }
+            if (homeWidgets.isEmpty()) {
+                block()
+                return
+            }
+            val id = UUID.randomUUID().toString()
+            val page = WorkspacePage(id, "Grid test ${id.take(8)}")
+            runBlocking {
+                val current = store.currentSnapshot()
+                store.update(OrganizationBatch(listOf(
+                    OrganizationEdit.CreateWorkspacePage(page, current.pageOrder.size),
+                    OrganizationEdit.SetWidgets(original.widgets.map { widget ->
+                        if (widget.pageId == WorkspacePageId.HOME)
+                            widget.copy(pageId = WorkspacePageId.widget(id)) else widget
+                    }),
+                ), current.revision)).getOrThrow()
+            }
+            try {
+                rule.onNodeWithTag("workspace-home").performScrollToIndex(0)
+                rule.waitUntil(15_000) {
+                    homeWidgets.all { rule.onAllNodesWithTag("workspace-widget-cell:${it.appWidgetId}")
+                        .fetchSemanticsNodes().isEmpty() } &&
+                        runCatching { rule.onNodeWithTag("workspace-add-widget")
+                            .assertIsDisplayed() }.isSuccess
+                }
+                block()
+            } finally {
+                runBlocking {
+                    val current = store.currentSnapshot()
+                    store.update(OrganizationBatch(listOf(
+                        OrganizationEdit.SetWidgets(original.widgets),
+                        OrganizationEdit.DeleteWorkspacePage(id),
+                    ), current.revision)).getOrThrow()
+                }
+            }
+        }
 
         fun prepare() {
             ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(

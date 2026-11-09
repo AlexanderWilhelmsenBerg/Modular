@@ -86,7 +86,7 @@ internal fun WorkspaceWidgetGrid(
     val extraHeight = if (editMode && hasSelection)
         maxOf((rowHeight + rowGap) * 2, controlRows * 48 + rowGap * 2) else 0
     val totalHeight = (band.heightDp + extraHeight)
-        .coerceAtLeast(if (editMode && band.cells.isEmpty()) rowHeight * 2 else 0)
+        .coerceAtLeast(if (editMode && band.cells.isEmpty() && band.heightDp == 0) rowHeight * 2 else 0)
     val density = LocalDensity.current
     val emptyHold = if (editMode) Modifier else Modifier.pointerInput(band, density) {
         awaitEachGesture {

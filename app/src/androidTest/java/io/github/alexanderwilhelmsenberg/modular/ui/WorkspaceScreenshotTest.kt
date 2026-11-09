@@ -6,6 +6,10 @@ import android.content.ComponentName
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -283,7 +287,14 @@ class WorkspaceScreenshotTest {
         val file = File(requireNotNull(context.getExternalFilesDir("workspace-screenshots")),
             "workspace-$scene-${width}dp-$theme-font$font-$direction.png")
         FileOutputStream(file).use { out ->
-            val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            // The drawer is pure Compose; capture its settled drawn surface rather
+            // than a previous Home frame still held by the window compositor.
+            val bitmap = if (scene == "all-apps") rule.onRoot().captureToImage().asAndroidBitmap()
+                else {
+                    instrumentation.waitForIdleSync()
+                    SystemClock.sleep(200) // Let native widget views reach the compositor.
+                    requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                }
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
             bitmap.recycle()
         }

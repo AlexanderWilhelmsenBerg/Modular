@@ -295,7 +295,11 @@ class WidgetGridIntegrationTest {
             // Settings contains only Compose content. Capture its drawn surface so
             // closing the popup cannot leave the previous Home frame in this image.
             val bitmap = if (scene == "settings") rule.onRoot().captureToImage().asAndroidBitmap()
-                else requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                else {
+                    instrumentation.waitForIdleSync()
+                    SystemClock.sleep(200) // Include the presented native widget frame.
+                    requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                }
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
             bitmap.recycle()
         }

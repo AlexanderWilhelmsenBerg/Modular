@@ -11,13 +11,13 @@ TEST = ("io.github.alexanderwilhelmsenberg.modular.ui.WorkspaceScreenshotTest,"
         "io.github.alexanderwilhelmsenberg.modular.ui.WidgetGridIntegrationTest")
 PACKAGE = "io.github.alexanderwilhelmsenberg.modular.debug"
 MATRIX = [
+    (414, "LIGHT", "1.0", True),
     (320, "LIGHT", "1.0", False),
     (375, "LIGHT", "1.0", False),
     (414, "DARK", "1.0", False),
     (768, "DARK", "1.0", False),
     (375, "LIGHT", "1.5", False),
     (375, "AMOLED", "1.0", False),
-    (414, "LIGHT", "1.0", True),
 ]
 
 

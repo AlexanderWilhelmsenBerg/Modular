@@ -114,7 +114,8 @@ internal fun WorkspaceWidgetGrid(
             }
         }
     }
-    Box(Modifier.fillMaxWidth().height(totalHeight.dp).then(emptyHold).testTag("workspace-widget-grid")) {
+    Box(Modifier.fillMaxWidth().height(totalHeight.dp).then(emptyHold).testTag("workspace-widget-grid"),
+        contentAlignment = AbsoluteAlignment.TopLeft) {
         if (editMode) {
             // The open rows are visible drop targets and leave room to move the last widget down.
             Box(Modifier.absoluteOffset(x = geometry.leftDp.dp).width(geometry.widthDp.dp)
@@ -170,7 +171,8 @@ internal fun WorkspaceWidgetGrid(
             }
             val baseModifier = Modifier.absoluteOffset(x = cell.leftDp.dp, y = (cell.topDp - band.topDp).dp)
                 .width(cell.widthDp.dp).height(cell.heightDp.dp)
-            Box(baseModifier.testTag("workspace-widget-cell:${widget.appWidgetId}")) {
+            Box(baseModifier.testTag("workspace-widget-cell:${widget.appWidgetId}"),
+                contentAlignment = AbsoluteAlignment.TopLeft) {
                 val contentHeight = (cell.heightDp - widget.paddingDp * 2).coerceAtLeast(1)
                 widgetContent(widget.copy(heightDp = contentHeight), { onLongPress(widget.appWidgetId) })
                 if (editMode) {

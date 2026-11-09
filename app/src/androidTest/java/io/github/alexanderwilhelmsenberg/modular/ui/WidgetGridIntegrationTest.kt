@@ -12,6 +12,9 @@ import android.view.View
 import android.view.ViewConfiguration
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasTestTag
@@ -289,7 +292,10 @@ class WidgetGridIntegrationTest {
         val file = File(requireNotNull(context.getExternalFilesDir("workspace-screenshots")),
             "grid-$scene-${width}dp-$theme-font$font-$direction.png")
         FileOutputStream(file).use { out ->
-            val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            // Settings contains only Compose content. Capture its drawn surface so
+            // closing the popup cannot leave the previous Home frame in this image.
+            val bitmap = if (scene == "settings") rule.onRoot().captureToImage().asAndroidBitmap()
+                else requireNotNull(instrumentation.uiAutomation.takeScreenshot())
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
             bitmap.recycle()
         }

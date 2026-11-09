@@ -143,7 +143,7 @@ internal fun WorkspaceHome(
     val sectionOrder = if (mainHome) preferences.sectionOrder.distinct().let { order ->
         if (editMode && WorkspaceSection.WIDGETS !in order) listOf(WorkspaceSection.WIDGETS) + order else order
     } else listOf(WorkspaceSection.CLOCK, WorkspaceSection.WIDGETS)
-    BoxWithConstraints(modifier) {
+    BoxWithConstraints(modifier, contentAlignment = AbsoluteAlignment.TopLeft) {
     // The geometry is measured from the physical left edge. The alphabet rail is
     // reserved on the physical right even when Compose uses RTL layout direction.
     val geometry = calculateWidgetAreaGeometry(maxWidth.value.roundToInt(), preferences)

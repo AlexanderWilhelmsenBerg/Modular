@@ -107,7 +107,7 @@ fun CoreMostUsedSettingsUi(
     Column(Modifier.fillMaxWidth().testTag("core-most-used-card")) {
         SettingsRow(
             title = "Most Used",
-            description = "Show pinned and frequently used apps on Home",
+            description = "Show pinned and frequent apps at the top of App drawer",
             icon = SettingsIcon.STAR,
             onClick = { detailsOpen = true },
             trailing = {
@@ -136,7 +136,7 @@ fun CoreMostUsedSettingsUi(
                 Text("Configure Most Used")
             }
             if (!enabled && hasImportedSettings) Text(
-                "Previous Most Used settings are saved. Turn on Most Used to show your pins on Home.",
+                "Previous Most Used settings are saved. Turn on Most Used to show your pins in App drawer.",
                 style = MaterialTheme.typography.bodySmall,
             )
             if (!detailsOpen) {

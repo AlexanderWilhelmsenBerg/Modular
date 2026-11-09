@@ -216,6 +216,11 @@ are retained. Wallpaper stays off until chosen.
 
 ## 8. Built-in Most Used starred section and pins — HOME-V2-06
 
+The later [Home widget grid v2](home-widget-grid-v2.md#home-and-all-apps-content)
+keeps this Most Used section at the top of the separate All apps view, followed
+by a single Folders section before alphabetical apps. Its star on Home navigates
+to drawer Most Used. The ranking, pins, source and learning rules below remain.
+
 - Core Settings offers a built-in **Most Used** toggle, off by default. When
   enabled, a `★` section appears before `#`/letters, with a star at the top of
   the rail. The complete alphabetical catalog follows.

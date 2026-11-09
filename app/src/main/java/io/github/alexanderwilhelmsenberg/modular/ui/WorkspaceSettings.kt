@@ -186,17 +186,20 @@ fun WorkspaceSettingsUi(
                         Text("Widget area: ${prefs.widgetAreaWidthPercent}% width · ${prefs.widgetMarginDp} dp edge · ${prefs.widgetGapDp} dp gap")
                     }
                 }
-                Text("Section order", style = MaterialTheme.typography.titleSmall)
-                prefs.sectionOrder.forEachIndexed { index, section ->
+                Text("Home section order", style = MaterialTheme.typography.titleSmall)
+                Text("When enabled, Most Used appears at the top of App drawer. Folders follow, above the alphabetical app list.",
+                    style = MaterialTheme.typography.bodySmall)
+                val homeSections = prefs.sectionOrder.filter { it != WorkspaceSection.MOST_USED }
+                homeSections.forEachIndexed { index, section ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(section.label(), Modifier.weight(1f).padding(top = 12.dp), maxLines = 1)
                         TextButton(enabled = !busy && index > 0, onClick = {
                             save(OrganizationEdit.SetWorkspacePreferences(prefs.copy(
-                                sectionOrder = prefs.sectionOrder.moved(index, index - 1))))
+                                sectionOrder = prefs.sectionOrder.swappedHomeSections(section, homeSections[index - 1]))))
                         }) { Text("↑") }
-                        TextButton(enabled = !busy && index < prefs.sectionOrder.lastIndex, onClick = {
+                        TextButton(enabled = !busy && index < homeSections.lastIndex, onClick = {
                             save(OrganizationEdit.SetWorkspacePreferences(prefs.copy(
-                                sectionOrder = prefs.sectionOrder.moved(index, index + 1))))
+                                sectionOrder = prefs.sectionOrder.swappedHomeSections(section, homeSections[index + 1]))))
                         }) { Text("↓") }
                     }
                 }
@@ -325,6 +328,20 @@ fun WorkspaceSettingsUi(
 internal fun <T> List<T>.moved(from: Int, to: Int): List<T> =
     if (from !in indices || to !in indices || from == to) this
     else toMutableList().apply { add(to, removeAt(from)) }
+
+/** Reorder visible Home sections while keeping the legacy Most Used slot in storage. */
+internal fun List<WorkspaceSection>.swappedHomeSections(
+    first: WorkspaceSection, second: WorkspaceSection,
+): List<WorkspaceSection> {
+    val firstIndex = indexOf(first)
+    val secondIndex = indexOf(second)
+    if (firstIndex < 0 || secondIndex < 0 || first == WorkspaceSection.MOST_USED ||
+        second == WorkspaceSection.MOST_USED) return this
+    return toMutableList().apply {
+        this[firstIndex] = second
+        this[secondIndex] = first
+    }
+}
 
 private fun List<WorkspaceWidget>.swapped(
     firstId: Int, secondId: Int,

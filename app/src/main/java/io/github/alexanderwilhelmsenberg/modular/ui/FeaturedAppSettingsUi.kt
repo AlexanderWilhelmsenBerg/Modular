@@ -125,10 +125,10 @@ fun FeaturedAppSettingsUi(
                 }
             }
             if (featured.featureState == FeaturedAppsResultParcel.STATE_PERMISSION_REQUIRED) Text(
-                "Usage Access is off. Saved pins still appear on Home.",
+                "Usage Access is off. Saved pins still appear at the top of App drawer.",
                 style = MaterialTheme.typography.bodySmall,
             ) else if (featured.featureState == FeaturedAppsResultParcel.STATE_NO_HISTORY) Text(
-                "No usage history yet. Saved pins still appear on Home.",
+                "No usage history yet. Saved pins still appear at the top of App drawer.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

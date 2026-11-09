@@ -129,7 +129,7 @@ fun CategorySettingsUi(
                             CategorySettingSwitch("Page enabled", category.enabled, !busy, "category-enabled:${category.id}") {
                                 save(listOf(OrganizationEdit.UpdateCategory(category.copy(enabled = it))))
                             }
-                            CategorySettingSwitch("Show in main app list and Most Used", category.showOnHome, !busy, "category-home:${category.id}") { show ->
+                            CategorySettingSwitch("Show in App drawer list and Most Used", category.showOnHome, !busy, "category-home:${category.id}") { show ->
                                 if (!show && category.enabled && snapshot.categoriesEnabled) confirmSuppression = category.id
                                 else save(listOf(OrganizationEdit.UpdateCategory(category.copy(showOnHome = show))))
                             }
@@ -214,8 +214,8 @@ fun CategorySettingsUi(
         val pins = snapshot.pins.count { it is HomePinRef.App && it.key in affected }
         AlertDialog(
             onDismissRequest = { confirmSuppression = null },
-            title = { Text("Hide ${category.name} apps from the main list and Most Used?") },
-            text = { Text("${affected.size} direct app entries, including $pins saved pins, will leave the main app list and Most Used. Search and the category page will still show them. Listening choices stay as configured. Saved pins return if you show these apps again.") },
+            title = { Text("Hide ${category.name} apps from App drawer and Most Used?") },
+            text = { Text("${affected.size} direct app entries, including $pins saved pins, will leave the alphabetical App drawer list and Most Used. Search and the category page will still show them. Listening choices stay as configured. Saved pins return if you show these apps again.") },
             confirmButton = { Button(enabled = !busy, onClick = {
                 save(listOf(OrganizationEdit.UpdateCategory(category.copy(showOnHome = false)))) { confirmSuppression = null }
             }) { Text("Hide from both") } },
@@ -264,7 +264,7 @@ private fun CategoryEditorDialog(
                 validation?.let { if (name.isNotEmpty()) Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (category == null) {
                     CategorySettingSwitch("Page enabled", enabled, !busy, "category-editor-enabled") { enabled = it }
-                    CategorySettingSwitch("Show in main app list and Most Used", showOnHome, !busy, "category-editor-home") { showOnHome = it }
+                    CategorySettingSwitch("Show in App drawer list and Most Used", showOnHome, !busy, "category-editor-home") { showOnHome = it }
                     Text("Initial position", style = MaterialTheme.typography.titleSmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         TextButton(onClick = { leftOfHome = true }) { Text(if (leftOfHome) "✓ Left of Home" else "Left of Home") }

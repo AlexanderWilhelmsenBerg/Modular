@@ -112,7 +112,6 @@ fun OrganizationHomeScreen(
     var transitionJob by remember { mutableStateOf<Job?>(null) }
     var railJump by remember { mutableStateOf<String?>(null) }
     var railJumpSerial by remember { mutableIntStateOf(0) }
-    var starJumpSerial by remember { mutableIntStateOf(0) }
     var requestedPage by remember { mutableStateOf<HomePageId?>(null) }
     var pageRequestSerial by remember { mutableIntStateOf(0) }
     var previousWorkspaceQuery by remember { mutableStateOf(searchQuery) }
@@ -340,14 +339,6 @@ fun OrganizationHomeScreen(
                                 Spacer(Modifier.fillMaxWidth().height(slotHeightDp.dp))
                             }
                         },
-                        featuredApps = if (page == HomePageId.Home) featured else null,
-                        featuredFolders = if (page == HomePageId.Home && mostUsedEnabled)
-                            projection.mostUsedFolders.map { it.definition } else emptyList(),
-                        featuredMessage = featuredMessage,
-                        featuredNeedsPermission = featuredNeedsPermission,
-                        onOpenFeaturedSettings = onOpenFeaturedSettings,
-                        onOpenFeaturedManagement = onOpenFeaturedManagement,
-                        pinOrder = projection.visiblePinRefs,
                         listeningApps = if (page == HomePageId.Home) retainedListeningApps else emptyList(),
                         pinnedKeys = pinnedAppKeys,
                         listState = pageList,
@@ -357,9 +348,6 @@ fun OrganizationHomeScreen(
                         onPinApp = onPinApp, onAppInfo = onAppInfo, onUninstallApp = onUninstallApp,
                         onRenameApp = onRenameApp, onHideApp = onHideApp,
                         onOrganizeApp = { organizeApp = it },
-                        onOpenFolder = { openFolderId = it.id }, onEditFolder = { editingFolderId = it.id },
-                        onFolderPress = { folderPressed = it },
-                        onFolderBounds = { id, bounds -> folderBounds[id] = bounds },
                         onAddWidget = { onAddWidget(pageKey) },
                         onEditWorkspace = { onEditWorkspace(pageKey) },
                         onOpenWorkspaceAdvanced = { onOpenWorkspaceAdvanced(pageKey) },
@@ -367,7 +355,6 @@ fun OrganizationHomeScreen(
                         onSaveWidgetGrid = onSaveWidgetGrid,
                         onEditingChange = { editingWidgetGrid = it },
                         pageActive = pageName == pageKey,
-                        starJumpSerial = starJumpSerial,
                         clockActive = pageName == pageKey && vertical.progress < 1f,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -388,7 +375,7 @@ fun OrganizationHomeScreen(
                     searchQuery = searchQuery, onSearchQueryChange = onSearchQueryChange,
                     showAppIcons = showAppIcons, wallpaperMode = wallpaperMode,
                     wallpaperDimmingPercent = wallpaperDimmingPercent,
-                    featuredApps = if (workspaceMode) null else featured,
+                    featuredApps = featured,
                     pinnedAppKeys = pinnedAppKeys, featuredMessage = featuredMessage,
                     onOpenFeaturedSettings = onOpenFeaturedSettings,
                     featuredNeedsPermission = featuredNeedsPermission,
@@ -399,9 +386,9 @@ fun OrganizationHomeScreen(
                     alphabeticalSections = if (category != null || sorter != null) true else alphabeticalSections,
                     homeResetToken = homeResetToken,
                     folders = if (category == null && sorter == null) projection.appListFolders.map { it.definition } else emptyList(),
-                    featuredFolders = if (!workspaceMode && category == null && sorter == null && mostUsedEnabled)
+                    featuredFolders = if (category == null && sorter == null)
                         projection.mostUsedFolders.map { it.definition } else emptyList(),
-                    featuredPinOrder = if (!workspaceMode && mostUsedEnabled) projection.visiblePinRefs else emptyList(),
+                    featuredPinOrder = if (category == null && sorter == null) projection.visiblePinRefs else emptyList(),
                     onOpenFolder = { openFolderId = it.id }, onEditFolder = { editingFolderId = it.id },
                     onFolderPress = { folderPressed = it }, onEditingChange = { editingSearch = it },
                     onFolderBounds = { id, bounds -> folderBounds[id] = bounds },
@@ -430,13 +417,19 @@ fun OrganizationHomeScreen(
                     searchQuery = searchQuery, onSearchQueryChange = onSearchQueryChange,
                     showAppIcons = showAppIcons, wallpaperMode = wallpaperMode,
                     wallpaperDimmingPercent = wallpaperDimmingPercent,
-                    featuredApps = null, pinnedAppKeys = pinnedAppKeys,
+                    featuredApps = featuredApps?.let(projection::filterDirectStarred),
+                    pinnedAppKeys = pinnedAppKeys, featuredMessage = featuredMessage,
+                    featuredNeedsPermission = featuredNeedsPermission,
+                    onOpenFeaturedSettings = onOpenFeaturedSettings,
+                    onOpenFeaturedManagement = onOpenFeaturedManagement,
                     onPinApp = onPinApp, onAppInfo = onAppInfo, onUninstallApp = onUninstallApp,
                     onRenameApp = onRenameApp, onHideApp = onHideApp,
                     onOrganizeApp = { organizeApp = it },
                     alphabeticalSections = true,
                     homeResetToken = homeResetToken,
                     folders = projection.appListFolders.map { it.definition },
+                    featuredFolders = projection.mostUsedFolders.map { it.definition },
+                    featuredPinOrder = projection.visiblePinRefs,
                     onOpenFolder = { openFolderId = it.id }, onEditFolder = { editingFolderId = it.id },
                     onFolderPress = { folderPressed = it },
                     onFolderBounds = { id, bounds -> folderBounds[id] = bounds },
@@ -449,26 +442,19 @@ fun OrganizationHomeScreen(
             val sections = remember(projection.homeApps, locale) {
                 HomeSectionBuilder(locale).sections(homeOrderedApps(projection.homeApps, orderedApps?.filter { it.key in projection.homeKeys }, locale))
             }
-            val hasFeatured = featuredApps != null || (mostUsedEnabled && projection.mostUsedFolders.isNotEmpty())
-            val alphabet = remember(sections, projection.appListFolders, hasFeatured) {
-                (if (hasFeatured) listOf("★") else emptyList()) + sections.map { it.label } +
-                    (if (projection.appListFolders.isNotEmpty()) listOf("◇") else emptyList())
+            val hasFeatured = featuredApps != null
+            val hasFolders = projection.mostUsedFolders.isNotEmpty() || projection.appListFolders.isNotEmpty()
+            val alphabet = remember(sections, hasFolders, hasFeatured) {
+                (if (hasFeatured) listOf("★") else emptyList()) +
+                    (if (hasFolders) listOf("◇") else emptyList()) + sections.map { it.label }
             }
             if (searchQuery.isBlank() && !editingSearch && !editingWidgetGrid && alphabet.isNotEmpty()) AlphabetRail(
                 alphabet = alphabet,
                 populated = alphabet.toSet(),
                 onSelect = { label ->
-                    if (label == "★") {
-                        requestedPage = HomePageId.Home
-                        pageRequestSerial += 1
-                        starJumpSerial += 1
-                        settle(false)
-                    }
-                    else {
-                        railJump = if (label == "◇") "Folders" else label
-                        railJumpSerial += 1
-                        settle(true)
-                    }
+                    railJump = if (label == "◇") "Folders" else label
+                    railJumpSerial += 1
+                    settle(true)
                 },
                 wallpaperMode = wallpaperMode,
                 modifier = Modifier.align(AbsoluteAlignment.BottomRight).navigationBarsPadding().padding(bottom = 72.dp),

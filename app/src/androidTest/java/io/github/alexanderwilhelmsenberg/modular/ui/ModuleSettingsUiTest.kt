@@ -89,7 +89,7 @@ class ModuleSettingsUiTest {
             }, {})
         } }
         rule.onNodeWithContentDescription("Reverse alphabetical order").assertIsOff().performClick().assertIsOn()
-        rule.onNodeWithText("Use on Home").performClick()
+        rule.onNodeWithText("Use in App drawer").performClick()
         rule.waitForIdle()
         assertEquals("{\"reverse\":true}" to true, saved)
     }
@@ -104,7 +104,7 @@ class ModuleSettingsUiTest {
         } }
         rule.onNodeWithTag("module-setting-days").performTextClearance()
         rule.onNodeWithTag("module-setting-days").performTextInput("31")
-        rule.onNodeWithText("Use on Home").performClick()
+        rule.onNodeWithText("Use in App drawer").performClick()
         rule.onNodeWithText("Enter 1–30.").assertIsDisplayed()
         rule.runOnIdle { assertNull(saved) }
     }
@@ -129,7 +129,7 @@ class ModuleSettingsUiTest {
             }, {})
         } }
         rule.onNodeWithText("This module is offline. Reconnect it to change settings.").assertIsDisplayed()
-        rule.onNodeWithText("Use on Home").assertIsNotEnabled()
+        rule.onNodeWithText("Use in App drawer").assertIsNotEnabled()
     }
 
     @Test fun offlineModuleCanOpenAddonPermissions() {
@@ -152,7 +152,7 @@ class ModuleSettingsUiTest {
             ModuleSettingsDialog(module(days, sort = false), "{}", false, { _, _ -> Result.success(Unit) }, {})
         } }
         rule.onNodeWithText("Save settings").assertIsDisplayed()
-        rule.onNodeWithText("Use on Home").assertDoesNotExist()
+        rule.onNodeWithText("Use in App drawer").assertDoesNotExist()
     }
 
     @Test fun missingDescriptorExplainsWhyThereAreNoControls() {

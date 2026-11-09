@@ -73,7 +73,8 @@ fun OrganizationSettingsHost(
         )
         SettingsRow(
             title = "Folders",
-            description = "Group apps and set when they appear",
+            description = if (mostUsedEnabled) "Below Most Used, above alphabetical apps"
+                else "Above alphabetical apps in App drawer",
             icon = SettingsIcon.FOLDER,
             modifier = Modifier.testTag("settings-folders"),
             onClick = { foldersOpen = true },

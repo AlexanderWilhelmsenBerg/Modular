@@ -5,6 +5,22 @@ and supersedes the two-column row layout in [Widget layout](widget-layout.md).
 Home remains a vertically scrolling workspace above the distinct All apps view;
 the grid changes widget placement within Home and custom widget pages.
 
+## Home and All apps content
+
+Home contains its configured clock/date/battery, widgets and contextual Listening
+section. Most Used and folder shortcuts live in the separate All apps view. Its
+visible order is **Most Used → Folders → alphabetical apps**: Most Used appears
+only while enabled, and the single Folders section appears only when it has
+eligible shortcuts, regardless of the Most Used toggle. That section combines
+visible folders once per identity: **Pinned** folders use their saved manual
+order first, followed by **Alphabetical** folders sorted by name. These UI names
+map to the existing `MOST_USED` and `APP_LIST` saved placement values. Saved pins,
+folder placement and smart-visibility rules remain authoritative; presentation
+does not move or duplicate stored data. There is no Show on Home folder option.
+On Home, the star opens drawer Most Used and the diamond opens drawer Folders.
+The star follows the Most Used enabled state, including its empty state; the
+diamond appears only when at least one folder shortcut is eligible.
+
 ## Layout and sizing
 
 - The default grid has four columns and 96 dp rows. Users can set 1–12 columns

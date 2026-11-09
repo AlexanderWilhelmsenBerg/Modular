@@ -34,12 +34,10 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,8 +60,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.alexanderwilhelmsenberg.modular.apps.AppKey
 import io.github.alexanderwilhelmsenberg.modular.apps.LaunchableApp
 import io.github.alexanderwilhelmsenberg.modular.apps.rememberAppIcon
-import io.github.alexanderwilhelmsenberg.modular.organization.FolderDefinition
-import io.github.alexanderwilhelmsenberg.modular.organization.HomePinRef
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePreferences
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceSection
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
@@ -85,13 +81,6 @@ internal fun WorkspaceHome(
     widgets: List<WorkspaceWidget>,
     widgetContent: @Composable (WorkspaceWidget, () -> Unit) -> Unit,
     canFitHalfWidget: (WorkspaceWidget, Int) -> Boolean = { _, _ -> true },
-    featuredApps: List<LaunchableApp>?,
-    featuredFolders: List<FolderDefinition>,
-    featuredMessage: String?,
-    featuredNeedsPermission: Boolean,
-    onOpenFeaturedSettings: (() -> Unit)?,
-    onOpenFeaturedManagement: (() -> Unit)?,
-    pinOrder: List<HomePinRef>,
     listeningApps: List<LaunchableApp>,
     pinnedKeys: Set<AppKey>,
     listState: LazyListState,
@@ -104,10 +93,6 @@ internal fun WorkspaceHome(
     onRenameApp: ((LaunchableApp) -> Unit)?,
     onHideApp: ((LaunchableApp) -> Unit)?,
     onOrganizeApp: ((LaunchableApp) -> Unit)?,
-    onOpenFolder: (FolderDefinition) -> Unit,
-    onEditFolder: (FolderDefinition) -> Unit,
-    onFolderPress: (Boolean) -> Unit,
-    onFolderBounds: (String, androidx.compose.ui.unit.IntRect) -> Unit,
     onAddWidget: () -> Unit,
     onEditWorkspace: () -> Unit,
     onOpenWorkspaceAdvanced: () -> Unit = onEditWorkspace,
@@ -115,7 +100,6 @@ internal fun WorkspaceHome(
     onSaveWidgetGrid: suspend (Int, Int, Int, Int, Int) -> Result<Unit> = { _, _, _, _, _ -> Result.success(Unit) },
     onEditingChange: (Boolean) -> Unit = {},
     pageActive: Boolean = true,
-    starJumpSerial: Int = 0,
     clockActive: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
@@ -135,10 +119,6 @@ internal fun WorkspaceHome(
         selectedWidgetId = id
         editMode = true
         onEditingChange(true)
-    }
-    val featured = remember(featuredApps, featuredFolders, pinOrder, featuredMessage, featuredNeedsPermission) {
-        featuredHomeEntries(featuredApps, featuredFolders, pinOrder,
-            showStatus = !featuredMessage.isNullOrBlank() || featuredNeedsPermission)
     }
     val sectionOrder = if (mainHome) preferences.sectionOrder.distinct().let { order ->
         if (editMode && WorkspaceSection.WIDGETS !in order) listOf(WorkspaceSection.WIDGETS) + order else order
@@ -163,22 +143,6 @@ internal fun WorkspaceHome(
         if (editMode) listOf(WidgetGridBand(0, 0, emptyList())) else emptyList()
     }
     val hasWidgetGrid = pageWidgets.isNotEmpty() || editMode
-    LaunchedEffect(starJumpSerial) {
-        if (mainHome && starJumpSerial > 0) {
-            var index = 1 // Empty launcher-owned wallpaper area before the sections.
-            for (section in sectionOrder) {
-                if (section == WorkspaceSection.MOST_USED) break
-                when (section) {
-                    WorkspaceSection.CLOCK -> if (preferences.showClock || preferences.showDate || preferences.showBattery) index++
-                    WorkspaceSection.WIDGETS -> if (hasWidgetGrid)
-                        index += widgetBands.size + 1 + (if (editMode) 1 else 0)
-                    WorkspaceSection.LISTENING -> if (listeningApps.isNotEmpty()) index += listeningApps.size + 1
-                    WorkspaceSection.MOST_USED -> Unit
-                }
-            }
-            listState.scrollToItem(index)
-        }
-    }
     LazyColumn(
         state = listState,
         userScrollEnabled = true,
@@ -249,42 +213,7 @@ internal fun WorkspaceHome(
                     }
                     if (hasWidgetGrid) item(key = "workspace-widget-gap") { Spacer(Modifier.height(geometry.gapDp.dp)) }
                 }
-                WorkspaceSection.MOST_USED -> if (mainHome) {
-                    items(featured, key = { "workspace:${it.id}" }) { entry ->
-                        when (entry) {
-                            is HomeListEntry.Header -> Text(
-                                if (entry.label == "★") "Most Used" else entry.label,
-                                Modifier.fillMaxWidth().padding(start = 24.dp, top = 16.dp, bottom = 8.dp),
-                                color = foreground, fontSize = 20.sp, fontWeight = FontWeight.Medium,
-                            )
-                            is HomeListEntry.App -> HomeAppRow(
-                                app = entry.app, enabled = entry.app.enabled,
-                                showIcon = showIcons, icon = if (showIcons) rememberAppIcon(entry.app) else null,
-                                wallpaperMode = wallpaperMode, pinned = entry.app.key in pinnedKeys,
-                                onPinApp = onPinApp, onAppInfo = onAppInfo, onUninstallApp = onUninstallApp,
-                                onRenameApp = onRenameApp, onHideApp = onHideApp,
-                                onOrganizeApp = onOrganizeApp, onClick = { onLaunch(entry.app) },
-                            )
-                            is HomeListEntry.Folder -> FolderShortcut(entry.folder, wallpaperMode,
-                                onOpenFolder, onEditFolder, onFolderPress, onFolderBounds)
-                            HomeListEntry.FeaturedEmpty -> Column(Modifier.fillMaxWidth().padding(start = 24.dp, bottom = 12.dp)) {
-                                Text(featuredMessage ?: "Pin apps to show them here", color = foreground)
-                                if (onOpenFeaturedSettings != null) Button(onClick = onOpenFeaturedSettings,
-                                    modifier = Modifier.testTag("featured-settings")) { Text("Pin apps") }
-                                if (featuredNeedsPermission && onOpenFeaturedManagement != null)
-                                    Button(onClick = onOpenFeaturedManagement, modifier = Modifier.testTag("featured-permission")) { Text("Enable usage access") }
-                            }
-                            HomeListEntry.FeaturedStatus -> Column(Modifier.fillMaxWidth().padding(start = 24.dp, bottom = 12.dp)) {
-                                Text(featuredMessage ?: "Enable usage access to see suggested apps", color = foreground)
-                                if (onOpenFeaturedSettings != null) Button(onClick = onOpenFeaturedSettings,
-                                    modifier = Modifier.testTag("featured-settings")) { Text("Settings") }
-                                if (featuredNeedsPermission && onOpenFeaturedManagement != null)
-                                    Button(onClick = onOpenFeaturedManagement, modifier = Modifier.testTag("featured-permission")) { Text("Enable usage access") }
-                            }
-                            else -> Unit
-                        }
-                    }
-                }
+                WorkspaceSection.MOST_USED -> Unit // Featured apps live in the drawer.
                 WorkspaceSection.LISTENING -> if (mainHome && listeningApps.isNotEmpty()) {
                     item(key = "listening-title") {
                         Text("Listening", Modifier.fillMaxWidth().padding(start = 24.dp, top = 16.dp, bottom = 8.dp),

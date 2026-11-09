@@ -35,6 +35,10 @@ The later [Home widget grid v2](../product/home-widget-grid-v2.md) supersedes
 the paired-row behavior. Its added model, storage and native test inventory,
 plus unexecuted device checks, are in the
 [grid validation record](home-widget-grid-v2-validation.md).
+The latest drawer-order decision puts Most Used, one combined Folders section,
+then alphabetical apps in All apps. Home contains no Most Used or folders.
+Check both rail destinations and confirm visible Pinned folders remain in the
+drawer when Most Used is disabled; the grid validation record tracks final CI.
 
 ## Device acceptance still required
 

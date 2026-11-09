@@ -46,11 +46,12 @@ class CoreMostUsedIntegrationTest {
             waitToggle(ToggleableState.On)
             rule.onNodeWithTag("settings-back").performClick()
             rule.onNodeWithTag("settings-back").performClick()
-            rule.waitUntil(10_000) { rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Most Used").assertIsDisplayed()
+            rule.onNodeWithTag("workspace-apps-action").performClick()
+            rule.waitUntil(10_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithTag("section:★").assertIsDisplayed()
             rule.activityRule.scenario.recreate()
-            rule.waitUntil(15_000) { rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Most Used").assertIsDisplayed()
+            rule.waitUntil(15_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithTag("section:★").assertIsDisplayed()
             rule.onNodeWithTag("home-settings").performClick()
             rule.onNodeWithTag("settings-open-productivity").performClick()
             waitToggle(ToggleableState.On)
@@ -83,10 +84,11 @@ class CoreMostUsedIntegrationTest {
             store.setSource(MostUsedSource.LOCAL).getOrThrow()
             store.setSuggestedCount(1).getOrThrow()
             store.setEnabled(true).getOrThrow()
-            // Most Used now lives in the workspace stack above All apps.
+            // Most Used is at the top of the Apps drawer.
             rule.waitUntil(15_000) { rule.onAllNodesWithTag("workspace-home").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithTag("workspace-home").performScrollToIndex(0)
-            rule.waitUntil(15_000) { rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithTag("workspace-apps-action").performClick()
+            rule.waitUntil(15_000) { rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithTag("featured-permission").assertDoesNotExist()
             rule.onNodeWithTag("home-search-field").performTextInput(fixture.packageName)
             rule.waitUntil(10_000) { rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty() }
@@ -102,14 +104,14 @@ class CoreMostUsedIntegrationTest {
             rule.waitUntil(15_000) { rule.activityRule.scenario.state == Lifecycle.State.RESUMED }
             rule.onNodeWithTag("home-search-field").performTextClearance()
             rule.waitUntil(15_000) {
-                rule.onAllNodesWithText("Most Used").fetchSemanticsNodes().isNotEmpty() &&
+                rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() &&
                     rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty()
             }
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("featured-permission").assertDoesNotExist()
             rule.activityRule.scenario.recreate()
             rule.waitUntil(15_000) { rule.onAllNodesWithTag(rowTag).fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Most Used").assertIsDisplayed()
+            rule.onNodeWithTag("section:★").assertIsDisplayed()
             rule.onAllNodesWithTag(rowTag)[0].assertIsDisplayed()
             rule.onNodeWithTag("home-settings").performClick()
             rule.onNodeWithTag("settings-open-productivity").performClick()

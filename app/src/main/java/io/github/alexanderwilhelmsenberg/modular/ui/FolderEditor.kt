@@ -98,6 +98,9 @@ fun ManageFoldersUi(
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("manage-folders")) {
         Text("Manage folders", style = MaterialTheme.typography.titleLarge)
+        Text(if (mostUsedEnabled) "Folders appear below Most Used and above alphabetical apps in App drawer."
+            else "Folders appear above alphabetical apps in App drawer.",
+            style = MaterialTheme.typography.bodySmall)
         if (snapshot.folders.isEmpty()) Text("No folders yet.")
         snapshot.folders.forEach { folder ->
             OutlinedButton(onClick = { editingId = folder.id }, modifier = Modifier.fillMaxWidth()
@@ -105,10 +108,7 @@ fun ManageFoldersUi(
                 Column(Modifier.fillMaxWidth()) {
                     Text(folder.name, style = MaterialTheme.typography.titleMedium, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
-                    Text("${if (folder.placement == FolderPlacement.MOST_USED) "Most Used" else "App list"} · ${statusForFolder(folder)} · ${folder.members.size} apps",
-                        style = MaterialTheme.typography.bodySmall)
-                    if (folder.placement == FolderPlacement.MOST_USED && !mostUsedEnabled) Text(
-                        "Turn on Most Used in Settings to show this shortcut.",
+                    Text("${if (folder.placement == FolderPlacement.MOST_USED) "Pinned order" else "Alphabetical order"} · ${statusForFolder(folder)} · ${folder.members.size} apps",
                         style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -237,17 +237,17 @@ fun FolderEditor(
                 if (draft.name.isNotBlank() && invalidName) Text("Use a unique folder name (up to ${OrganizationLimits.MAX_NAME_CODE_POINTS} characters).",
                     color = MaterialTheme.colorScheme.error)
                 FolderIconPicker(draft.iconId) { iconId -> draft = draft.copy(iconId = iconId) }
-                Text("Shortcut placement", style = MaterialTheme.typography.titleSmall)
-                OrganizationChoiceRow("App list", draft.placement == FolderPlacement.APP_LIST,
+                Text("Folder order", style = MaterialTheme.typography.titleSmall)
+                OrganizationChoiceRow("Alphabetical", draft.placement == FolderPlacement.APP_LIST,
                     tag = "folder-editor-placement:list") {
                     if (it) draft = draft.copy(placement = FolderPlacement.APP_LIST)
                 }
-                OrganizationChoiceRow("Most Used", draft.placement == FolderPlacement.MOST_USED,
-                    enabled = mostUsedEnabled || draft.placement == FolderPlacement.MOST_USED,
+                OrganizationChoiceRow("Pinned (manual order)", draft.placement == FolderPlacement.MOST_USED,
                     tag = "folder-editor-placement:most-used") {
                     if (it) draft = draft.copy(placement = FolderPlacement.MOST_USED)
                 }
-                if (!mostUsedEnabled) Text("Most Used is off. Turn it on in Settings to show a folder there.",
+                Text(if (mostUsedEnabled) "Both appear in the App drawer Folders section, below Most Used."
+                    else "Both appear in the App drawer Folders section, above alphabetical apps.",
                     style = MaterialTheme.typography.bodySmall)
                 Text("Apps in this folder", style = MaterialTheme.typography.titleSmall)
                 if (draft.members.isEmpty()) Text("No apps added yet.")

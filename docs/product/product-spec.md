@@ -437,9 +437,13 @@ platform consent/configuration and Core-hosted views; they do not require
 Modular add-on APKs or Usage Access.
 
 The unified page organizer retains category order and adds custom widget pages
-on either side of the permanent Home. Most Used and its folders move to Home;
-app-list folders remain at the bottom of All apps. Listening apps are selected
-and ordered by the user and appear on a matching headset output connection.
+on either side of the permanent Home. Home contains clock, widgets and contextual
+Listening. All apps shows Most Used at the top, then one Folders section combining
+all visible shortcuts regardless of the Most Used toggle, then alphabetical apps.
+Pinned folders retain manual order before alphabetically sorted folders; saved
+placement values remain compatible and there is no Show on Home folder option.
+The Home star opens drawer Most Used; the diamond opens drawer Folders. Listening
+apps are selected and ordered by the user and appear on a matching headset output connection.
 Core shares foreground audio signals with smart folders; no scanning, automatic
 playback or background service is introduced. Future add-on page rendering is
 reserved architecture, not an implemented capability.

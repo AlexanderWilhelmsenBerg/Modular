@@ -117,7 +117,7 @@ fun WorkspaceSettingsUi(
     }
     LaunchedEffect(error) { if (error != null) dialogScroll.animateScrollTo(0) }
 
-    fun save(edit: OrganizationEdit, afterSuccess: () -> Unit = {}, onFailure: ((String) -> Unit)? = null) {
+    fun save(edit: OrganizationEdit, onFailure: ((String) -> Unit)? = null, afterSuccess: () -> Unit = {}) {
         if (busy) return
         busy = true
         error = null
@@ -353,7 +353,7 @@ fun WorkspaceSettingsUi(
         error = error,
         onDismiss = { editWidgetArea = false },
         onSave = { preferences, onSuccess ->
-            save(OrganizationEdit.SetWorkspacePreferences(preferences), onSuccess)
+            save(OrganizationEdit.SetWorkspacePreferences(preferences), afterSuccess = onSuccess)
         },
     )
     snapshot.widgets.firstOrNull { it.appWidgetId == editWidgetId }?.let { widget ->

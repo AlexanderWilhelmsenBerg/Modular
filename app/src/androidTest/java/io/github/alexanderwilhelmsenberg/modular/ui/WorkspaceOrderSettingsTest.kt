@@ -71,8 +71,8 @@ class WorkspaceOrderSettingsTest {
         rule.onNodeWithTag("workspace-section-order-save").performClick()
         rule.waitForIdle()
 
-        val expected = listOf(WorkspaceSection.CLOCK, WorkspaceSection.MOST_USED,
-            WorkspaceSection.LISTENING, WorkspaceSection.WIDGETS)
+        val expected = listOf(WorkspaceSection.CLOCK, WorkspaceSection.LISTENING,
+            WorkspaceSection.MOST_USED, WorkspaceSection.WIDGETS)
         assertEquals(2, writes.size)
         assertEquals(0L, writes[0].expectedRevision)
         assertEquals(expected, (writes[0].edits.single() as OrganizationEdit.SetWorkspacePreferences)

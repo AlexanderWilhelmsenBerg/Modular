@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performScrollTo
@@ -107,6 +108,7 @@ class CoreMostUsedIntegrationTest {
             context.startActivity(Intent(originalIntent).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             rule.waitUntil(15_000) { rule.activityRule.scenario.state == Lifecycle.State.RESUMED }
             rule.onNodeWithTag("home-search-field").performTextClearance()
+            rule.onNodeWithTag("home-search-field").performImeAction()
             jumpToMostUsed()
             rule.waitUntil(15_000) {
                 rule.onAllNodesWithTag("section:★").fetchSemanticsNodes().isNotEmpty() &&

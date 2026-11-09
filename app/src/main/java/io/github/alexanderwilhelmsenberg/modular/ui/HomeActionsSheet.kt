@@ -28,7 +28,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import io.github.alexanderwilhelmsenberg/modular.R
+import io.github.alexanderwilhelmsenberg.modular.R
 
 /** Home's action menu uses the same sheet, header, and row rhythm as app actions. */
 @OptIn(ExperimentalMaterial3Api::class)

@@ -193,7 +193,7 @@ extension mechanisms with separate lifecycle/security boundaries.
 
 - Long press empty Home space or a widget to open the **Home screen** bottom
   sheet with Add widget, Edit and Advanced. Edit enables hold-and-drag movement,
-  a bottom-left resize grip and a selected-widget removal icon; Done exits.
+  a bottom-left resize grip and a selected-widget removal icon in the edit header; Done exits.
   Settings > Productivity > Home screens manages pages and widget configuration.
   The [grid v2 contract](home-widget-grid-v2.md) supersedes the original stack
   controls; Home has no permanent Add widget or Edit Home footer buttons.

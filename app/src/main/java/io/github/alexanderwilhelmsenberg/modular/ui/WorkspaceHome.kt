@@ -12,7 +12,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -23,13 +22,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
@@ -37,15 +41,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.AbsoluteAlignment
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,6 +76,7 @@ import io.github.alexanderwilhelmsenberg.modular.workspace.groupWidgetGridBands
 import io.github.alexanderwilhelmsenberg.modular.workspace.packWidgetGrid
 import io.github.alexanderwilhelmsenberg.modular.widgets.WidgetLayoutLimits
 import java.util.Date
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /** Scrollable Home and widget-page content. The parent owns the shared rail and navigation. */
@@ -109,6 +121,10 @@ internal fun WorkspaceHome(
     var selectedWidgetId by rememberSaveable(pageId) { mutableStateOf<Int?>(null) }
     var sheetOpen by remember { mutableStateOf(false) }
     var pendingWidgetId by remember { mutableStateOf<Int?>(null) }
+    var confirmRemoveId by remember(pageId) { mutableStateOf<Int?>(null) }
+    var removing by remember(pageId) { mutableStateOf(false) }
+    var removeError by remember(pageId) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(pageWidgets, selectedWidgetId) {
         if (selectedWidgetId != null && pageWidgets.none { it.appWidgetId == selectedWidgetId })
             selectedWidgetId = null
@@ -117,6 +133,12 @@ internal fun WorkspaceHome(
         if (pendingWidgetId != null && pageWidgets.none { it.appWidgetId == pendingWidgetId }) {
             pendingWidgetId = null
             sheetOpen = false
+        }
+    }
+    LaunchedEffect(pageWidgets, confirmRemoveId) {
+        if (confirmRemoveId != null && pageWidgets.none { it.appWidgetId == confirmRemoveId }) {
+            confirmRemoveId = null
+            removeError = null
         }
     }
     DisposableEffect(pageId, pageActive, editMode) {
@@ -210,10 +232,41 @@ internal fun WorkspaceHome(
                         Row(Modifier.fillMaxWidth()
                             .background(if (wallpaperMode) Color.Black.copy(alpha = 0.8f)
                                 else MaterialTheme.colorScheme.surface)
-                            .padding(start = 16.dp, end = 64.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Arrange widgets", color = foreground,
-                                style = MaterialTheme.typography.titleMedium)
+                            .padding(start = 16.dp, end = 64.dp)
+                            .testTag("workspace-widget-edit-header"),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text("Arrange widgets", Modifier.weight(1f), color = foreground,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            selectedWidgetId?.takeIf { id ->
+                                pageWidgets.any { it.appWidgetId == id }
+                            }?.let { id ->
+                                IconButton(onClick = {
+                                    confirmRemoveId = id
+                                    removeError = null
+                                }, modifier = Modifier.size(40.dp)
+                                    .testTag("workspace-widget-remove:$id")
+                                    .semantics { contentDescription = "Remove widget" }) {
+                                    Canvas(Modifier.size(20.dp)) {
+                                        val stroke = 1.8.dp.toPx()
+                                        drawLine(foreground, Offset(size.width * .18f, size.height * .23f),
+                                            Offset(size.width * .82f, size.height * .23f), stroke,
+                                            cap = StrokeCap.Round)
+                                        drawLine(foreground, Offset(size.width * .37f, size.height * .13f),
+                                            Offset(size.width * .63f, size.height * .13f), stroke,
+                                            cap = StrokeCap.Round)
+                                        drawLine(foreground, Offset(size.width * .28f, size.height * .32f),
+                                            Offset(size.width * .34f, size.height * .85f), stroke,
+                                            cap = StrokeCap.Round)
+                                        drawLine(foreground, Offset(size.width * .72f, size.height * .32f),
+                                            Offset(size.width * .66f, size.height * .85f), stroke,
+                                            cap = StrokeCap.Round)
+                                        drawLine(foreground, Offset(size.width * .34f, size.height * .85f),
+                                            Offset(size.width * .66f, size.height * .85f), stroke,
+                                            cap = StrokeCap.Round)
+                                    }
+                                }
+                            }
                             TextButton(onClick = {
                                 editMode = false; selectedWidgetId = null; onEditingChange(false)
                             }, modifier = Modifier.testTag("workspace-widget-edit-done")) { Text("Done") }
@@ -224,8 +277,7 @@ internal fun WorkspaceHome(
                             selectedWidgetId, onSelect = { selectedWidgetId = it },
                             onLongPress = { openSheet(it) }, limits = widgetLayoutLimits,
                             onEmptyLongPress = { openSheet() },
-                            onSave = onSaveWidgetGrid, onRemoveWidget = onRemoveWidget,
-                            onRemoved = { if (selectedWidgetId == it) selectedWidgetId = null },
+                            onSave = onSaveWidgetGrid,
                             widgetContent = widgetContent)
                     }
                     if (hasWidgetGrid) item(key = "workspace-widget-gap") { Spacer(Modifier.height(geometry.gapDp.dp)) }
@@ -254,6 +306,43 @@ internal fun WorkspaceHome(
         onEdit = { startEditing(pendingWidgetId) },
         onAdvanced = { sheetOpen = false; pendingWidgetId = null; onOpenWorkspaceAdvanced() },
     )
+    confirmRemoveId?.let { id ->
+        AlertDialog(onDismissRequest = { if (!removing) confirmRemoveId = null },
+            title = { Text("Remove widget?") },
+            text = {
+                Column {
+                    Text("This removes the widget from this screen. Its provider app stays installed.")
+                    if (removeError != null) Text(removeError.orEmpty(),
+                        Modifier.testTag("workspace-widget-remove-error"),
+                        color = MaterialTheme.colorScheme.error)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    removing = true
+                    removeError = null
+                    scope.launch {
+                        val result = runCatching { onRemoveWidget(id) }
+                            .getOrElse { Result.failure(it) }
+                        removing = false
+                        result.onSuccess {
+                            confirmRemoveId = null
+                            selectedWidgetId = null
+                        }.onFailure {
+                            removeError = it.message ?: "Could not remove widget. Try again."
+                        }
+                    }
+                }, enabled = !removing,
+                    modifier = Modifier.testTag("workspace-widget-remove-confirm")) {
+                    Text("Remove")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemoveId = null }, enabled = !removing) {
+                    Text("Cancel")
+                }
+            })
+    }
     }
 }
 

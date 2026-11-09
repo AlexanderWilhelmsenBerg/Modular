@@ -71,8 +71,8 @@ diamond appears only when at least one folder shortcut is eligible.
   physical bottom-left grip to resize column and row spans, keeping the top-right
   corner fixed, including in RTL. Reject overlaps and sizes unsupported by the
   provider; show an error when a save fails. There are no move arrows or size
-  increment buttons. The selected widget has a compact top-right **Remove widget**
-  icon, and the editor retains Done. Remove widget asks for confirmation;
+  increment buttons. The edit header exposes a **Remove widget** icon for the
+  selected widget, alongside Done, keeping small cells clear. Remove widget asks for confirmation;
   cancellation keeps the widget. A successful removal persists the change and
   releases its owned Android widget binding. A failed save keeps the widget and
   shows a retryable error. The provider app stays installed. Home screens settings provide provider configuration,

@@ -2,6 +2,7 @@ package io.github.alexanderwilhelmsenberg.modular.widgets
 
 import android.appwidget.AppWidgetProviderInfo
 import android.appwidget.AppWidgetHostView
+import android.os.Bundle
 import android.widget.ImageView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,12 +22,20 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
+import kotlin.math.roundToInt
 
 /** Provider content owns its touch stream; edit controls live below it, never over it. */
 @Composable
@@ -37,8 +46,8 @@ fun WorkspaceWidgetTile(
     modifier: Modifier = Modifier,
 ) {
     val info = controller.providerInfo(widget)
-    Column(modifier.fillMaxWidth().testTag("workspace-widget:${widget.appWidgetId}")
-        .padding(horizontal = 16.dp, vertical = 6.dp)) {
+    val maxContentWidthDp = controller.layoutLimits(widget)?.maxContentWidthDp ?: Int.MAX_VALUE
+    Column(modifier.fillMaxWidth().testTag("workspace-widget:${widget.appWidgetId}")) {
         if (info == null) {
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -49,15 +58,34 @@ fun WorkspaceWidgetTile(
             }
         } else {
             key(widget.appWidgetId, widget.provider) {
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val widthDp = maxWidth.value.toInt().coerceAtLeast(1)
+                val density = LocalDensity.current.density
+                var hostSize by remember { mutableStateOf(IntSize.Zero) }
+                BoxWithConstraints(Modifier.fillMaxWidth().padding(widget.paddingDp.dp)) {
+                    val contentWidth = minOf(maxWidth, maxContentWidthDp.dp)
                     AndroidView(
-                        factory = { controller.hostView(widget) },
-                        modifier = Modifier.fillMaxWidth().height(widget.heightDp.dp),
+                        factory = { controller.hostView(widget).apply {
+                            // Launcher padding belongs to the allocated cell. Android's
+                            // AppWidgetHostView can otherwise add a second provider inset.
+                            if (this is AppWidgetHostView) setPadding(0, 0, 0, 0)
+                        } },
+                        modifier = Modifier.width(contentWidth).height(widget.heightDp.dp)
+                            .onSizeChanged { hostSize = it },
                         update = { view ->
-                            if (view is AppWidgetHostView) runCatching {
-                                view.updateAppWidgetSize(null, widthDp, widget.heightDp,
-                                    widthDp, widget.heightDp)
+                            if (view is AppWidgetHostView && hostSize.width > 0 && hostSize.height > 0) runCatching {
+                                val widthDp = (hostSize.width / density).roundToInt().coerceAtLeast(1)
+                                val heightDp = (hostSize.height / density).roundToInt().coerceAtLeast(1)
+                                // This overload subtracts provider default padding from its
+                                // arguments. Compensate because this host draws with zero
+                                // padding and these are the measured content bounds.
+                                val providerPadding = AppWidgetHostView.getDefaultPaddingForWidget(
+                                    view.context, info.provider, null)
+                                val widthWithDefaultPadding = widthDp +
+                                    ((providerPadding.left + providerPadding.right) / density).roundToInt()
+                                val heightWithDefaultPadding = heightDp +
+                                    ((providerPadding.top + providerPadding.bottom) / density).roundToInt()
+                                view.updateAppWidgetSize(Bundle(), widthWithDefaultPadding,
+                                    heightWithDefaultPadding, widthWithDefaultPadding,
+                                    heightWithDefaultPadding)
                             }
                         },
                     )

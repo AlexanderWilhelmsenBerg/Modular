@@ -10,13 +10,17 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -28,11 +32,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -51,7 +57,10 @@ import io.github.alexanderwilhelmsenberg.modular.organization.HomePinRef
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePreferences
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceSection
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceWidget
+import io.github.alexanderwilhelmsenberg.modular.workspace.calculateWidgetAreaGeometry
+import io.github.alexanderwilhelmsenberg.modular.workspace.packWidgetRows
 import java.util.Date
+import kotlin.math.roundToInt
 
 /** Scrollable Home and widget-page content. The parent owns the shared rail and navigation. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -62,6 +71,7 @@ internal fun WorkspaceHome(
     preferences: WorkspacePreferences,
     widgets: List<WorkspaceWidget>,
     widgetContent: @Composable (WorkspaceWidget) -> Unit,
+    canFitHalfWidget: (WorkspaceWidget, Int) -> Boolean = { _, _ -> true },
     featuredApps: List<LaunchableApp>?,
     featuredFolders: List<FolderDefinition>,
     featuredMessage: String?,
@@ -100,6 +110,13 @@ internal fun WorkspaceHome(
     }
     val sectionOrder = if (mainHome) preferences.sectionOrder.distinct() else
         listOf(WorkspaceSection.CLOCK, WorkspaceSection.WIDGETS)
+    BoxWithConstraints(modifier) {
+    // The geometry is measured from the physical left edge. The alphabet rail is
+    // reserved on the physical right even when Compose uses RTL layout direction.
+    val geometry = calculateWidgetAreaGeometry(maxWidth.value.roundToInt(), preferences)
+    val widgetRows = packWidgetRows(pageWidgets) { widget ->
+        canFitHalfWidget(widget, geometry.halfCellWidthDp)
+    }
     LaunchedEffect(starJumpSerial) {
         if (mainHome && starJumpSerial > 0) {
             var index = 1 // Empty launcher-owned wallpaper area before the sections.
@@ -107,7 +124,7 @@ internal fun WorkspaceHome(
                 if (section == WorkspaceSection.MOST_USED) break
                 when (section) {
                     WorkspaceSection.CLOCK -> if (preferences.showClock || preferences.showDate || preferences.showBattery) index++
-                    WorkspaceSection.WIDGETS -> index += pageWidgets.size
+                    WorkspaceSection.WIDGETS -> index += widgetRows.size
                     WorkspaceSection.LISTENING -> if (listeningApps.isNotEmpty()) index += listeningApps.size + 1
                     WorkspaceSection.MOST_USED -> Unit
                 }
@@ -117,7 +134,7 @@ internal fun WorkspaceHome(
     }
     LazyColumn(
         state = listState,
-        modifier = modifier.testTag("workspace-home"),
+        modifier = Modifier.fillMaxSize().testTag("workspace-home"),
         contentPadding = PaddingValues(top = 72.dp, bottom = 124.dp),
     ) {
         item(key = "workspace-empty-top") {
@@ -139,9 +156,26 @@ internal fun WorkspaceHome(
                     }
                 }
                 WorkspaceSection.WIDGETS -> {
-                    items(pageWidgets, key = { "widget:${it.appWidgetId}" }) { widget ->
-                        Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 52.dp, bottom = 12.dp)) {
-                            widgetContent(widget)
+                    items(widgetRows, key = { "widget-row:${it.first.appWidgetId}" }) { row ->
+                        Box(Modifier.fillMaxWidth().padding(bottom = geometry.gapDp.dp),
+                            contentAlignment = AbsoluteAlignment.TopLeft) {
+                            Row(
+                                Modifier.absoluteOffset(x = geometry.leftDp.dp)
+                                    .width(geometry.widthDp.dp),
+                                horizontalArrangement = Arrangement.spacedBy(geometry.gapDp.dp),
+                            ) {
+                                val firstWidth = if (row.firstSpansFullWidth) geometry.widthDp
+                                    else geometry.halfCellWidthDp
+                                Box(Modifier.width(firstWidth.dp)) {
+                                    key(row.first.appWidgetId) { widgetContent(row.first) }
+                                }
+                                row.second?.let { second ->
+                                    Box(Modifier.width((geometry.widthDp - geometry.gapDp -
+                                        geometry.halfCellWidthDp).coerceAtLeast(0).dp)) {
+                                        key(second.appWidgetId) { widgetContent(second) }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -205,6 +239,7 @@ internal fun WorkspaceHome(
                 }
             }
         }
+    }
     }
 }
 

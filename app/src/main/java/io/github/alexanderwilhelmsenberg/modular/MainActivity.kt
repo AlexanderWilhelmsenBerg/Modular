@@ -398,6 +398,7 @@ class MainActivity : ComponentActivity() {
                                 onWidgetSurfaceVisible = { widgetSurfaceVisible = it },
                                 listeningApps = listening.visibleApps,
                                 widgetContent = { widget -> WorkspaceWidgetTile(widgetController, widget, editMode = false) },
+                                canFitHalfWidget = widgetController::canFitHalf,
                                 onAddWidget = widgetController::addWidget,
                                 onEditWorkspace = { pageId ->
                                     workspacePageToEdit = pageId
@@ -523,6 +524,9 @@ class MainActivity : ComponentActivity() {
                                     onAddWidget = widgetController::addWidget,
                                     onReconfigureWidget = widgetController::reconfigureWidget,
                                     onResizeWidget = widgetController::resizeWidget,
+                                    widgetLayoutLimits = widgetController::layoutLimits,
+                                    canFitHalfWidget = widgetController::canFitHalf,
+                                    onSaveWidgetLayout = widgetController::saveWidgetLayout,
                                     onRemoveWidget = widgetController::removeWidget,
                                     onMoveWidget = widgetController::moveWidget,
                                     onMoveWidgetBy = widgetController::moveWidgetBy,

@@ -76,6 +76,7 @@ fun OrganizationHomeScreen(
     homeResetToken: Int = 0,
     workspaceMode: Boolean = false,
     widgetContent: @Composable (WorkspaceWidget) -> Unit = {},
+    canFitHalfWidget: (WorkspaceWidget, Int) -> Boolean = { _, _ -> true },
     onWidgetSurfaceVisible: (Boolean) -> Unit = {},
     onAddWidget: (String) -> Unit = {},
     onEditWorkspace: (String) -> Unit = {},
@@ -326,8 +327,11 @@ fun OrganizationHomeScreen(
                         pageTitle = widgetPage?.name,
                         preferences = snapshot.workspacePreferences,
                         widgets = snapshot.widgets,
+                        canFitHalfWidget = canFitHalfWidget,
                         widgetContent = { widget ->
-                            var slotHeightDp by rememberSaveable(widget.appWidgetId, widget.heightDp) { mutableIntStateOf(widget.heightDp) }
+                            var slotHeightDp by rememberSaveable(widget.appWidgetId, widget.heightDp, widget.paddingDp) {
+                                mutableIntStateOf(widget.heightDp + widget.paddingDp * 2)
+                            }
                             if (widgetSurfaceVisible && pageName == pageKey) {
                                 Box(Modifier.fillMaxWidth().onSizeChanged { size ->
                                     if (size.height > 0) slotHeightDp = with(density) { size.height.toDp().value.roundToInt() }

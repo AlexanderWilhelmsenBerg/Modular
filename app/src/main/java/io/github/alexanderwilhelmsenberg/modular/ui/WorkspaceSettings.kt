@@ -46,7 +46,9 @@ import androidx.compose.ui.unit.dp
 import io.github.alexanderwilhelmsenberg.modular.organization.HomePageId
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationBatch
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationEdit
+import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationLimits
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationSnapshot
+import io.github.alexanderwilhelmsenberg.modular.widgets.WidgetLayoutLimits
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePage
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePageId
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspaceSection
@@ -71,6 +73,9 @@ fun WorkspaceSettingsUi(
     widgetLabel: (WorkspaceWidget) -> String = { "Unavailable widget" },
     canConfigureWidget: (WorkspaceWidget) -> Boolean = { false },
     canResizeWidget: (WorkspaceWidget) -> Boolean = { false },
+    widgetLayoutLimits: (WorkspaceWidget) -> WidgetLayoutLimits? = { null },
+    canFitHalfWidget: (WorkspaceWidget, Int) -> Boolean = { _, _ -> false },
+    onSaveWidgetLayout: (suspend (Int, Int, Int, Int) -> Result<Unit>)? = null,
     initialOpenRequest: Int = 0,
     initialPageId: String = WorkspacePageId.HOME,
     onOpenRequestConsumed: () -> Unit = {},
@@ -84,6 +89,8 @@ fun WorkspaceSettingsUi(
     var addPage by remember { mutableStateOf(false) }
     var renameId by remember { mutableStateOf<String?>(null) }
     var deleteId by remember { mutableStateOf<String?>(null) }
+    var editWidgetId by remember { mutableStateOf<Int?>(null) }
+    var editWidgetArea by remember { mutableStateOf(false) }
     var selectedPageId by rememberSaveable { mutableStateOf(WorkspacePageId.HOME) }
     LaunchedEffect(initialOpenRequest) {
         if (initialOpenRequest > 0) {
@@ -167,6 +174,10 @@ fun WorkspaceSettingsUi(
                 WorkspaceToggle("Battery percentage", prefs.showBattery, !busy) {
                     save(OrganizationEdit.SetWorkspacePreferences(prefs.copy(showBattery = it)))
                 }
+                OutlinedButton(onClick = { error = null; editWidgetArea = true }, enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().testTag("workspace-widget-area")) {
+                    Text("Widget area: ${prefs.widgetAreaWidthPercent}% width · ${prefs.widgetMarginDp} dp edge · ${prefs.widgetGapDp} dp gap")
+                }
                 Text("Section order", style = MaterialTheme.typography.titleSmall)
                 prefs.sectionOrder.forEachIndexed { index, section ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -222,10 +233,15 @@ fun WorkspaceSettingsUi(
                                 }) { Text("Move to $name", modifier = Modifier.widthIn(max = 220.dp),
                                     maxLines = 1, overflow = TextOverflow.Ellipsis) }
                             }
-                            onResizeWidget?.takeIf { canResizeWidget(widget) }?.let { resize ->
-                                TextButton(enabled = !busy && widget.heightDp > 48,
+                            if (onSaveWidgetLayout != null && widgetLayoutLimits(widget) != null) {
+                                TextButton(enabled = !busy, onClick = { editWidgetId = widget.appWidgetId },
+                                    modifier = Modifier.testTag("workspace-widget-layout:${widget.appWidgetId}")) {
+                                    Text("Size and layout")
+                                }
+                            } else onResizeWidget?.takeIf { canResizeWidget(widget) }?.let { resize ->
+                                TextButton(enabled = !busy && widget.heightDp > OrganizationLimits.MIN_WIDGET_HEIGHT_DP,
                                     onClick = { resize(widget.appWidgetId, -48) }) { Text("Shorter") }
-                                TextButton(enabled = !busy && widget.heightDp < 2048,
+                                TextButton(enabled = !busy && widget.heightDp < OrganizationLimits.MAX_WIDGET_HEIGHT_DP,
                                     onClick = { resize(widget.appWidgetId, 48) }) { Text("Taller") }
                             }
                             onReconfigureWidget?.takeIf { canConfigureWidget(widget) }?.let { reconfigure ->
@@ -268,6 +284,28 @@ fun WorkspaceSettingsUi(
                 save(OrganizationEdit.DeleteWorkspacePage(page.id)) { deleteId = null }
             }) { Text("Delete screen") } },
             dismissButton = { TextButton(enabled = !busy, onClick = { deleteId = null }) { Text("Cancel") } },
+        )
+    }
+    if (editWidgetArea) WidgetAreaEditor(
+        preferences = snapshot.workspacePreferences,
+        busy = busy,
+        error = error,
+        onDismiss = { editWidgetArea = false },
+        onSave = { preferences, onSuccess ->
+            save(OrganizationEdit.SetWorkspacePreferences(preferences), onSuccess)
+        },
+    )
+    snapshot.widgets.firstOrNull { it.appWidgetId == editWidgetId }?.let { widget ->
+        val limits = widgetLayoutLimits(widget)
+        val saveLayout = onSaveWidgetLayout
+        if (limits != null && saveLayout != null) WidgetSizeEditor(
+            widget = widget,
+            preferences = snapshot.workspacePreferences,
+            limits = limits,
+            canFitHalf = canFitHalfWidget,
+            onDismiss = { editWidgetId = null },
+            onSave = saveLayout,
+            onSaved = { editWidgetId = null },
         )
     }
 }

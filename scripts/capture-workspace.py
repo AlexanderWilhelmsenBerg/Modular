@@ -43,7 +43,8 @@ try:
         subprocess.run(["adb", "pull", "/sdcard/Pictures/ModularWorkspace/.", str(OUT)],
                        check=True, timeout=60)
         direction = "rtl" if rtl else "ltr"
-        for scene in ("home", "all-apps", "widget"):
+        for scene in ("home", "all-apps", "widget", "paired-widgets", "paired-widgets-gap",
+                      "widget-zero-margin", "widget-narrow-area"):
             file = OUT / f"workspace-{scene}-{width}dp-{theme.lower()}-font{font}-{direction}.png"
             if not file.is_file() or file.stat().st_size == 0:
                 raise RuntimeError(f"Missing workspace screenshot: {file}")

@@ -20,8 +20,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -200,6 +202,7 @@ class OrganizationStoreTest {
         val migrated = OrganizationStore(memory)
         assertEquals(before.pageOrder, migrated.currentSnapshot().pageOrder)
         assertEquals(HomePageId.Category("widget:legacy"), migrated.currentSnapshot().pageOrder[1])
+        assertEquals(WorkspacePreferences(), migrated.currentSnapshot().workspacePreferences)
         migrated.update(OrganizationBatch(listOf(
             OrganizationEdit.SetWorkspacePreferences(WorkspacePreferences(showBattery = true)),
         ))).getOrThrow()
@@ -211,12 +214,13 @@ class OrganizationStoreTest {
         val memory = MemoryPreferences()
         val store = OrganizationStore(memory)
         val homeWidget = WorkspaceWidget(1, WorkspacePageId.HOME, "example.home/.Widget", 180,
-            hostToken = "device-local-host-a")
+            hostToken = "device-local-host-a", span = 1, paddingDp = 8)
         val pageWidget = WorkspaceWidget(2, WorkspacePageId.widget("tools"), "example.tools/.Widget", 240,
             hostToken = "device-local-host-a")
         val preferences = WorkspacePreferences(sectionOrder = listOf(
             WorkspaceSection.WIDGETS, WorkspaceSection.CLOCK, WorkspaceSection.MOST_USED,
-            WorkspaceSection.LISTENING))
+            WorkspaceSection.LISTENING), widgetAreaWidthPercent = 75,
+            widgetMarginDp = 0, widgetGapDp = 24)
         val startingRevision = store.currentSnapshot().revision
         store.update(OrganizationBatch(listOf(
             OrganizationEdit.CreateWorkspacePage(WorkspacePage("tools", "Tools")),
@@ -244,6 +248,69 @@ class OrganizationStoreTest {
         assertEquals(listOf(HomePageId.Home), deleted.visiblePageOrder())
         assertEquals(listOf(homeWidget), deleted.widgets)
         assertEquals(listOf(a, b), deleted.listeningPreferences.apps)
+    }
+
+    @Test fun olderVersionTwoWidgetRecordsLoadDefaultsAndPreserveOtherFields() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        val widget = WorkspaceWidget(1, WorkspacePageId.HOME, "example.home/.Widget", 180,
+            hostToken = "old-host", span = 1, paddingDp = 8)
+        store.update(OrganizationBatch(listOf(
+            OrganizationEdit.SetWidgets(listOf(widget)),
+            OrganizationEdit.SetWorkspacePreferences(WorkspacePreferences(
+                showBattery = true, widgetAreaWidthPercent = 75, widgetMarginDp = 0, widgetGapDp = 24)),
+        ), expectedRevision = store.currentSnapshot().revision)).getOrThrow()
+        val raw = requireNotNull(memory.raw("organization_json_v1"))
+        val root = Json.parseToJsonElement(raw).jsonObject
+        val oldPreferences = JsonObject(root.getValue("workspacePreferences").jsonObject.filterKeys {
+            it !in setOf("widgetAreaWidthPercent", "widgetMarginDp", "widgetGapDp")
+        })
+        val oldWidgets = JsonArray((root.getValue("widgets") as JsonArray).map { saved ->
+            JsonObject(saved.jsonObject.filterKeys { it !in setOf("span", "paddingDp") })
+        })
+        memory.setRaw("organization_json_v1", JsonObject(root + mapOf(
+            "workspacePreferences" to oldPreferences, "widgets" to oldWidgets)).toString())
+
+        val restored = OrganizationStore(memory).currentSnapshot()
+        assertEquals(WorkspacePreferences(showBattery = true), restored.workspacePreferences)
+        assertEquals(widget.copy(span = 2, paddingDp = 0), restored.widgets.single())
+        assertEquals(2, root.getValue("version").toString().toInt())
+    }
+
+    @Test fun widgetLayoutSettingsAndPlacementsRejectOutOfRangeValuesAtomically() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        val initial = store.currentSnapshot()
+        val baseWidget = WorkspaceWidget(1, WorkspacePageId.HOME, "example.home/.Widget", 180)
+        val invalidPreferences = listOf(
+            WorkspacePreferences(widgetAreaWidthPercent = 49),
+            WorkspacePreferences(widgetAreaWidthPercent = 101),
+            WorkspacePreferences(widgetMarginDp = -1),
+            WorkspacePreferences(widgetMarginDp = 49),
+            WorkspacePreferences(widgetGapDp = -1),
+            WorkspacePreferences(widgetGapDp = 49),
+        )
+        invalidPreferences.forEach { preferences ->
+            assertTrue(store.update(OrganizationBatch(listOf(
+                OrganizationEdit.SetWorkspacePreferences(preferences)))).isFailure)
+            assertEquals(initial, store.currentSnapshot())
+        }
+        listOf(baseWidget.copy(span = 0), baseWidget.copy(span = 3),
+            baseWidget.copy(paddingDp = -1), baseWidget.copy(paddingDp = 33)).forEach { widget ->
+            assertTrue(store.update(OrganizationBatch(listOf(OrganizationEdit.SetWidgets(listOf(widget))),
+                expectedRevision = initial.revision)).isFailure)
+            assertEquals(initial, store.currentSnapshot())
+        }
+        val boundaryWidget = baseWidget.copy(span = 1, paddingDp = 32)
+        val boundaryPreferences = WorkspacePreferences(widgetAreaWidthPercent = 50,
+            widgetMarginDp = 48, widgetGapDp = 48)
+        store.update(OrganizationBatch(listOf(
+            OrganizationEdit.SetWidgets(listOf(boundaryWidget)),
+            OrganizationEdit.SetWorkspacePreferences(boundaryPreferences),
+        ), expectedRevision = initial.revision)).getOrThrow()
+        val restored = OrganizationStore(memory).currentSnapshot()
+        assertEquals(boundaryWidget, restored.widgets.single())
+        assertEquals(boundaryPreferences, restored.workspacePreferences)
     }
 
     @Test fun invalidWidgetUpdateIsAtomicAndExistingPlacementsRemain() = runBlocking {

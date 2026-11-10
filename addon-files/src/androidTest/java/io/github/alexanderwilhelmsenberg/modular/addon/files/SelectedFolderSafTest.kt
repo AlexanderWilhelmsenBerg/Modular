@@ -1,10 +1,8 @@
 package io.github.alexanderwilhelmsenberg.modular.addon.files
 
-import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
 import android.os.ParcelFileDescriptor
-import android.os.Process
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -33,16 +31,9 @@ class SelectedFolderSafTest {
         val device = UiDevice.getInstance(instrumentation)
         val name = "ModularFilesValidation-${UUID.randomUUID()}"
         val fixture = File(EnvironmentPath.downloads(), name)
-        val appOps = context.getSystemService(AppOpsManager::class.java)
-        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        automation.adoptShellPermissionIdentity("android.permission.GET_APP_OPS_STATS")
-        val originalMode = try { appOps.unsafeCheckOpNoThrow(
-            "android:manage_external_storage", Process.myUid(), context.packageName,
-        ) } finally { automation.dropShellPermissionIdentity() }
         var locationId: String? = null
         var scenario: ActivityScenario<FilesActivity>? = null
         try {
-            shell("appops set ${context.packageName} MANAGE_EXTERNAL_STORAGE ignore")
             assertTrue("Could not create disposable Downloads child",
                 shell("mkdir -p -- '${fixture.absolutePath}' && echo READY").contains("READY"))
             scenario = ActivityScenario.launch(
@@ -88,6 +79,9 @@ class SelectedFolderSafTest {
 
             requireNotNull(scenario).recreate()
             assertTrue(createFilesRepository(context).locations().any { it.id == location.id && it.available })
+            // EXTRA_SETTINGS reopens Settings on Activity recreation; return to the persisted
+            // selected browser before testing its revoked-grant state.
+            (context as FilesApplication).pageController.addedLocation(location.id)
             val grant = context.contentResolver.persistedUriPermissions.single { it.uri.toString().contains(name) }
             context.contentResolver.releasePersistableUriPermission(grant.uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
@@ -103,22 +97,12 @@ class SelectedFolderSafTest {
             context.getSharedPreferences("files-page", 0).edit().clear().commit()
             if (fixture.name == name && fixture.parentFile?.canonicalFile ==
                 EnvironmentPath.downloads().canonicalFile) shell("rm -rf -- '${fixture.absolutePath}'")
-            shell("appops set ${context.packageName} MANAGE_EXTERNAL_STORAGE ${modeName(originalMode)}")
         }
     }
 
     private fun shell(command: String): String {
         val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
         return ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
-    }
-
-    private fun modeName(mode: Int) = when (mode) {
-        AppOpsManager.MODE_ALLOWED -> "allow"
-        AppOpsManager.MODE_IGNORED -> "ignore"
-        AppOpsManager.MODE_ERRORED -> "deny"
-        AppOpsManager.MODE_DEFAULT -> "default"
-        AppOpsManager.MODE_FOREGROUND -> "foreground"
-        else -> error("Unknown original All files access mode: $mode")
     }
 
     private object EnvironmentPath {

@@ -1,17 +1,12 @@
 package io.github.alexanderwilhelmsenberg.modular.addon.files
 
-import android.app.AppOpsManager
 import android.content.Context
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.os.Build
 import android.os.Environment
-import android.os.Process
-import android.os.SystemClock
-import android.os.ParcelFileDescriptor
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import io.github.alexanderwilhelmsenberg.modular.addon.files.documents.PdfDocumentSession
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.StorageLocation
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.createFilesRepository
@@ -30,19 +25,11 @@ import org.junit.runner.RunWith
 class PdfRealDocumentTest {
     @Test fun generatedPdfRendersBoundedPagesAndRestoresUnchangedPosition() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val appOps = context.getSystemService(AppOpsManager::class.java)
-        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        automation.adoptShellPermissionIdentity("android.permission.GET_APP_OPS_STATS")
-        val original = try { appOps.unsafeCheckOpNoThrow("android:manage_external_storage",
-            Process.myUid(), context.packageName) } finally { automation.dropShellPermissionIdentity() }
         val name = "ModularFilesPdf-${UUID.randomUUID()}"
         val fixture = File(Environment.getExternalStorageDirectory(), name)
         try {
-            shell("appops set ${context.packageName} MANAGE_EXTERNAL_STORAGE allow")
-            val deadline = SystemClock.elapsedRealtime() + 10_000
-            while (!Environment.isExternalStorageManager() && SystemClock.elapsedRealtime() < deadline)
-                SystemClock.sleep(100)
-            assertTrue(Environment.isExternalStorageManager())
+            assertTrue("CI must grant broad storage access before instrumentation",
+                Environment.isExternalStorageManager())
             val repo = createFilesRepository(context)
             val root = repo.locations().single { it.kind == StorageLocation.Kind.PHONE }
             val folder = repo.createDirectory(root.rootId, name)
@@ -74,7 +61,6 @@ class PdfRealDocumentTest {
         } finally {
             if (fixture.name == name && fixture.parentFile?.canonicalFile ==
                 Environment.getExternalStorageDirectory().canonicalFile) fixture.deleteRecursively()
-            shell("appops set ${context.packageName} MANAGE_EXTERNAL_STORAGE ${modeName(original)}")
         }
     }
 
@@ -95,17 +81,4 @@ class PdfRealDocumentTest {
         }
     }
 
-    private fun shell(command: String): String {
-        val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
-        return ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
-    }
-
-    private fun modeName(mode: Int) = when (mode) {
-        AppOpsManager.MODE_ALLOWED -> "allow"
-        AppOpsManager.MODE_IGNORED -> "ignore"
-        AppOpsManager.MODE_ERRORED -> "deny"
-        AppOpsManager.MODE_DEFAULT -> "default"
-        AppOpsManager.MODE_FOREGROUND -> "foreground"
-        else -> error("Unknown original All files access mode: $mode")
-    }
 }

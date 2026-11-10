@@ -5,16 +5,22 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -231,11 +237,13 @@ fun FilesPage(
                 }
             }
             if (breadcrumbs.isNotEmpty()) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    breadcrumbs.takeLast(3).forEach { crumb ->
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    breadcrumbs.forEach { crumb ->
                         val action = PageAction(crumb.optJSONObject("action"))
-                        TextButton(onClick = { if (action.id.isNotBlank()) send(action, null) }) {
-                            Text(crumb.optString("name"), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        TextButton(onClick = { if (action.id.isNotBlank()) send(action, null) },
+                            modifier = Modifier.widthIn(max = 170.dp)) {
+                            Text(crumb.optString("name"), maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -252,15 +260,16 @@ fun FilesPage(
             }
             val commandActions = actions.filterNot { it.kind in setOf("trash", "loadMore", "confirm", "cancel", "scroll", "documentCommit", "documentCancel") }
             if (commandActions.isNotEmpty()) {
-                LazyColumn(Modifier.fillMaxWidth().height(if (commandActions.size > 6) 102.dp else 54.dp)) {
-                    items(commandActions.chunked(4)) { row ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            row.forEach { action ->
-                                TextButton(onClick = {
-                                    if (action.input != null) { formAction = action; formValue = action.initial }
-                                    else send(action, null)
-                                }) { Text(action.label, maxLines = 1) }
-                            }
+                FlowRow(Modifier.fillMaxWidth().heightIn(max = 160.dp)
+                    .verticalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    commandActions.forEach { action ->
+                        TextButton(onClick = {
+                            if (action.input != null) { formAction = action; formValue = action.initial }
+                            else send(action, null)
+                        }, modifier = Modifier.widthIn(max = 180.dp)) {
+                            Text(action.label)
                         }
                     }
                 }

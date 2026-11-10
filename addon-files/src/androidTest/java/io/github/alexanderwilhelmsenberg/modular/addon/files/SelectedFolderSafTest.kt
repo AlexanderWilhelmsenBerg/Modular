@@ -45,16 +45,13 @@ class SelectedFolderSafTest {
             requireNotNull(add) { "Files Settings did not expose Add folder" }.click()
             assertTrue("Android system folder picker did not open",
                 device.wait(Until.hasObject(By.pkg(Pattern.compile(".*documentsui.*"))), 10_000))
-            val downloads = device.wait(Until.findObject(By.text("Downloads")), 10_000)
-                ?: run {
-                    device.findObject(By.desc(Pattern.compile("(?i).*roots.*|.*navigation.*|.*menu.*")))?.click()
-                    device.wait(Until.findObject(By.text("Downloads")), 10_000)
-                }
-            requireNotNull(downloads) { "System tree picker did not show Downloads" }.click()
+            navigateToFixture(device, context, name)
             val folder = device.wait(Until.findObject(By.text(name)), 10_000)
-            requireNotNull(folder) { "System tree picker did not show test folder $name" }.click()
+                ?: failPicker(device, context, "System tree picker did not show test folder $name")
+            folder.click()
             val choose = device.wait(Until.findObject(By.text(Pattern.compile("(?i)use this folder"))), 10_000)
-            requireNotNull(choose) { "System tree picker did not show Use this folder" }.click()
+                ?: failPicker(device, context, "System tree picker did not show Use this folder")
+            choose.click()
             device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 5_000)?.click()
 
             val deadline = System.currentTimeMillis() + 15_000
@@ -107,6 +104,48 @@ class SelectedFolderSafTest {
     private fun shell(command: String): String {
         val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
         return ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
+    }
+
+    private fun navigateToFixture(device: UiDevice, context: Context, name: String) {
+        if (device.wait(Until.hasObject(By.text(name)), 2_000)) return
+        val downloadLabel = By.text(Pattern.compile("(?i)^downloads?$"))
+        device.wait(Until.findObject(downloadLabel), 3_000)?.click()
+        if (device.wait(Until.hasObject(By.text(name)), 5_000)) return
+
+        // ACTION_OPEN_DOCUMENT_TREE may hide the Downloads shortcut. Open the
+        // device-storage root, then its real Download directory instead.
+        val drawer = device.findObject(By.desc(Pattern.compile(
+            "(?i).*(show roots|navigation drawer|show navigation|open navigation|open menu).*",
+        ))) ?: listOf(
+            "com.google.android.documentsui:id/navigation_button",
+            "com.android.documentsui:id/navigation_button",
+        ).firstNotNullOfOrNull { device.findObject(By.res(it)) }
+        (drawer ?: failPicker(device, context, "System tree picker has no roots navigation button")).click()
+        val storageRoot = device.wait(Until.findObject(By.text(Pattern.compile(
+            "(?i).*(internal|phone|device|sdk_gphone|pixel).*",
+        ))), 5_000) ?: failPicker(device, context, "System tree picker did not show device storage")
+        storageRoot.click()
+        val download = device.wait(Until.findObject(downloadLabel), 10_000)
+            ?: failPicker(device, context, "Device storage did not show Download")
+        download.click()
+        if (!device.wait(Until.hasObject(By.text(name)), 10_000))
+            failPicker(device, context, "Download did not show test folder $name")
+    }
+
+    private fun failPicker(device: UiDevice, context: Context, reason: String): Nothing {
+        val folder = requireNotNull(context.getExternalFilesDir("saf-picker"))
+        folder.mkdirs()
+        val hierarchy = File(folder, "hierarchy.xml")
+        val screenshot = File(folder, "screenshot.png")
+        val hierarchyError = runCatching { device.dumpWindowHierarchy(hierarchy) }.exceptionOrNull()
+        val screenshotError = runCatching { check(device.takeScreenshot(screenshot)) }.exceptionOrNull()
+        shell("mkdir -p /sdcard/Pictures/ModularFilesValidation")
+        if (hierarchy.isFile) shell("cp ${hierarchy.absolutePath} /sdcard/Pictures/ModularFilesValidation/hierarchy.xml")
+        if (screenshot.isFile) shell("cp ${screenshot.absolutePath} /sdcard/Pictures/ModularFilesValidation/screenshot.png")
+        val labels = if (hierarchy.isFile) Regex("text=\"([^\"]+)\"").findAll(hierarchy.readText())
+            .map { it.groupValues[1] }.filter { it.isNotBlank() }.distinct().take(40).toList() else emptyList()
+        throw AssertionError("$reason; picker labels=$labels; hierarchy error=$hierarchyError; " +
+            "screenshot error=$screenshotError; diagnostics=/sdcard/Pictures/ModularFilesValidation/")
     }
 
     private object EnvironmentPath {

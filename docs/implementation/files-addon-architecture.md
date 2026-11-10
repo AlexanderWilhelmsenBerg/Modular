@@ -45,10 +45,11 @@ as unverified until tested; see the validation ledger for exact evidence.
 
 ## Archive dependencies and compatibility
 
-The archive reader is `me.zhanghai.android.libarchive:library:1.1.4`
+The archive reader is `me.zhanghai.android.libarchive:library:1.1.6`
 ([source](https://github.com/zhanghai/libarchive-android)), an Apache-2.0 Android
 wrapper around BSD-licensed libarchive. It ships arm64-v8a, armeabi-v7a, x86, and
-x86_64 native libraries. No UnRAR-licensed dependency is used.
+x86_64 native libraries. The 64-bit libraries in 1.1.6 use 16 KiB ELF load-segment
+alignment for modern Android devices. No UnRAR-licensed dependency is used.
 
 | Format | v1 extraction | Passwords / volumes |
 | --- | --- | --- |

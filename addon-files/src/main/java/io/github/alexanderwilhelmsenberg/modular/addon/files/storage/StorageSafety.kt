@@ -17,4 +17,10 @@ internal object StorageSafety {
 
     fun reviewedChildrenUnchanged(expected: Map<String, Set<String>>, actual: Map<String, Set<String>>): Boolean =
         expected.keys == actual.keys && expected.all { (folder, children) -> actual[folder] == children }
+
+    /** Offline records remain known; connected records need sidecar or payload evidence. */
+    fun retainTrashRecord(locationId: String, id: String, onlineLocations: Set<String>, metadataIds: Set<String>, payloadIds: Set<String>): Boolean {
+        val key = "$locationId:$id"
+        return locationId !in onlineLocations || key in metadataIds || key in payloadIds
+    }
 }

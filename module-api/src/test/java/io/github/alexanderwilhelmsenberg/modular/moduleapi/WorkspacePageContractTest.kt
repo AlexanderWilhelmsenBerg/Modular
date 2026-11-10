@@ -9,7 +9,13 @@ class WorkspacePageContractTest {
         assertEquals("modular.workspace.page/v1", StandardCapabilities.WorkspacePage.wireValue)
         WorkspacePageContract.validateFilesPage("""{"version":1,"kind":"files","items":[]}""")
         WorkspacePageContract.validatePageRequest("""{"version":1,"pageSize":100,"cursor":null}""")
+        WorkspacePageContract.validatePageRequest(
+            """{"version":1,"restoreScroll":{"key":"${"a".repeat(64)}","anchor":3,"offset":24}}""",
+        )
         rejects { WorkspacePageContract.validatePageRequest("""{"version":1,"pageSize":101}""") }
+        rejects { WorkspacePageContract.validatePageRequest(
+            """{"version":1,"restoreScroll":{"key":"path/to/folder","anchor":3,"offset":24}}""",
+        ) }
         rejects { WorkspacePageContract.validateFilesPage("""{"version":2,"kind":"files"}""") }
         rejects { WorkspacePageContract.validateFilesPage("""{"version":1,"kind":"web"}""") }
         val oversizedPage = """{"version":1,"kind":"files","items":[""" +

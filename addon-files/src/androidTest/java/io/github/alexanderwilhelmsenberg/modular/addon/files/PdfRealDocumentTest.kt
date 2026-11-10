@@ -31,8 +31,10 @@ class PdfRealDocumentTest {
     @Test fun generatedPdfRendersBoundedPagesAndRestoresUnchangedPosition() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appOps = context.getSystemService(AppOpsManager::class.java)
-        val original = appOps.unsafeCheckOpNoThrow("android:manage_external_storage",
-            Process.myUid(), context.packageName)
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        automation.adoptShellPermissionIdentity("android.permission.GET_APP_OPS_STATS")
+        val original = try { appOps.unsafeCheckOpNoThrow("android:manage_external_storage",
+            Process.myUid(), context.packageName) } finally { automation.dropShellPermissionIdentity() }
         val name = "ModularFilesPdf-${UUID.randomUUID()}"
         val fixture = File(Environment.getExternalStorageDirectory(), name)
         try {

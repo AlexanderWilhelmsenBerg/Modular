@@ -362,7 +362,10 @@ private fun validate(snapshot: OrganizationSnapshot) {
         moduleComponents.distinct().size == moduleComponents.size &&
         snapshot.modulePages.all { page ->
             page.component.length in 3..512 && page.component.contains('/') &&
-                page.providerId.length in 3..160 && validName(page.name) &&
+                page.providerId.length in 3..160 && page.name.isNotBlank() &&
+                page.name == page.name.trim() &&
+                page.name.codePointCount(0, page.name.length) <= 120 &&
+                page.name.none { it.isISOControl() } &&
                 (page.signerKey.isEmpty() || (page.signerKey.length in 68..512 &&
                     page.signerKey.startsWith(page.component.substringBefore('/') + "|") &&
                     page.signerKey.substringAfter('|').split(',').all {

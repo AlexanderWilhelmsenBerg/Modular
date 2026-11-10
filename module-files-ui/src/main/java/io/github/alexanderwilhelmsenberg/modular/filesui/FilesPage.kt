@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -61,8 +65,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.FlowPreview
 
 /** Trusted native renderer. Module data is text and typed actions; it is never executable UI code. */
+@OptIn(FlowPreview::class)
 @Composable
 fun FilesPage(
     pageJson: String,
@@ -72,6 +78,7 @@ fun FilesPage(
     documentLoader: suspend (String, String) -> ParcelFileDescriptor? = { _, _ -> null },
     documentCommit: suspend (String) -> Boolean = { false },
     documentCancel: suspend (String) -> Unit = { },
+    onScrollState: (String, Int, Int) -> Unit = { _, _, _ -> },
 ) {
     val page = remember(pageJson) { runCatching { JSONObject(pageJson) }.getOrNull() }
     if (page == null || page.optInt("version") != 1 || page.optString("kind") != "files") {
@@ -84,10 +91,6 @@ fun FilesPage(
     val breadcrumbs = remember(pageJson) { page.optJSONArray("breadcrumbs").objects() }
     val listState = rememberLazyListState()
     val pageKey = page.optString("locationId") + "/" + page.optString("folderId") + "/" + view
-    LaunchedEffect(pageKey) {
-        val anchor = page.optInt("scrollAnchor", 0)
-        if (anchor > 0 && anchor < items.size) listState.scrollToItem(anchor, page.optInt("scrollOffset", 0))
-    }
     val send: (PageAction, JSONObject?) -> Unit = { action, args ->
         val request = JSONObject().put("version", 1).put("actionId", action.id)
             .put("operationToken", UUID.randomUUID().toString())
@@ -95,10 +98,53 @@ fun FilesPage(
         onAction(request.toString())
     }
     val scrollAction = actions.firstOrNull { it.kind == "scroll" }
+    val scrollKey = page.optString("scrollKey")
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val latestScrollAction by rememberUpdatedState(scrollAction)
+    val latestSend by rememberUpdatedState(send)
+    val latestOnScrollState by rememberUpdatedState(onScrollState)
+    DisposableEffect(pageKey, lifecycleOwner) {
+        val capturedAction = scrollAction
+        val capturedSend = send
+        val flushLocal = {
+            if (view == "browser" || view == "search") {
+                if (scrollKey.matches(Regex("[0-9a-f]{64}"))) latestOnScrollState(scrollKey,
+                    listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            }
+        }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) {
+            flushLocal()
+            latestScrollAction?.let { action ->
+                latestSend(action, JSONObject().put("anchor", listState.firstVisibleItemIndex)
+                    .put("offset", listState.firstVisibleItemScrollOffset))
+            }
+        } }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            flushLocal()
+            capturedAction?.let { action ->
+                capturedSend(action, JSONObject().put("anchor", listState.firstVisibleItemIndex)
+                    .put("offset", listState.firstVisibleItemScrollOffset))
+            }
+        }
+    }
+    LaunchedEffect(pageKey, scrollKey) {
+        if (view == "browser" || view == "search") {
+            val requestedAnchor = page.optInt("scrollAnchor", 0)
+            val validAnchor = requestedAnchor in items.indices
+            listState.scrollToItem(if (validAnchor) requestedAnchor else 0,
+                if (validAnchor) page.optInt("scrollOffset", 0) else 0)
+        }
+        if ((view == "browser" || view == "search") && scrollKey.matches(Regex("[0-9a-f]{64}"))) {
+            snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+                .collect { (anchor, offset) -> latestOnScrollState(scrollKey, anchor, offset) }
+        }
+    }
     LaunchedEffect(pageKey, scrollAction?.id) {
         if ((view == "browser" || view == "search") && scrollAction != null) {
             snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-                .debounce(900).drop(1).collect { (anchor, offset) ->
+                .debounce(250).drop(1).collect { (anchor, offset) ->
                     send(scrollAction, JSONObject().put("anchor", anchor).put("offset", offset))
                 }
         }
@@ -124,7 +170,7 @@ fun FilesPage(
         }
         return
     }
-    if (view == "movePicker") {
+    if (view == "movePicker" || view == "restoreDestination") {
         FilesDestinationPicker(page, onAction = { onAction(it.toString()) }, modifier = modifier)
         return
     }
@@ -225,10 +271,11 @@ fun FilesPage(
                     "unavailable" -> "Storage unavailable. Reconnect it to continue.";
                     "loading" -> "Loading…"; else -> "Unable to load files" }, Modifier.padding(12.dp))
             }
-            if (view == "review" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview") {
+            if (view == "review" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview" || view == "restoreReview") {
                 Text(when (view) {
                     "pasteReview" -> "Review sources and destination conflicts"
                     "archiveReview" -> "Review archive contents and extraction choices"
+                    "restoreReview" -> "Review restore destinations and conflicts"
                     else -> "Review every affected file before moving to trash"
                 }, style = MaterialTheme.typography.titleMedium)
                 if (!page.optBoolean("complete", true)) Text("Review incomplete — action unavailable", color = MaterialTheme.colorScheme.error)
@@ -262,7 +309,7 @@ fun FilesPage(
                     }
                 }
             }
-            if (view == "review" || view == "emptyTrashReview" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview") {
+            if (view == "review" || view == "emptyTrashReview" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview" || view == "restoreReview") {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     actions.firstOrNull { it.kind == "cancel" }?.let { action ->
                         OutlinedButton(onClick = { send(action, null) }, Modifier.weight(1f).testTag("files.review.cancel")) { Text("Cancel") }
@@ -330,7 +377,7 @@ private fun FileRow(item: JSONObject, view: String, send: (PageAction, JSONObjec
             val subtitle = item.optString("subtitle").ifBlank { item.optString("path") }
             if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-            if (view == "review" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview" || view == "trash" || view == "emptyTrashReview" || view == "properties") {
+            if (view == "review" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview" || view == "restoreReview" || view == "trash" || view == "emptyTrashReview" || view == "properties") {
                 val size = if (item.isNull("sizeBytes")) "Size unavailable" else formatBytes(item.optLong("sizeBytes"))
                 val modified = date(item, "modifiedAt")
                 val created = date(item, "createdAt")

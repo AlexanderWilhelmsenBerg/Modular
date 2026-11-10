@@ -6,6 +6,7 @@ import android.graphics.Matrix
 import android.graphics.pdf.LoadParams
 import android.graphics.pdf.PdfRenderer
 import android.os.Build
+import androidx.annotation.RequiresApi
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FilesRepository
 import java.io.Closeable
 import java.io.IOException
@@ -55,7 +56,7 @@ class PdfDocumentSession private constructor(
 
     /** API 35+ exposes PDF text. An empty result can mean an image-only page. */
     @Synchronized fun pageText(index: Int, maxCharacters: Int = 100_000): String? {
-        if (!textFeaturesAvailable) return null
+        if (Build.VERSION.SDK_INT < 35) return null
         require(index in 0 until pageCount)
         require(maxCharacters in 1..100_000)
         return renderer.openPage(index).use { PdfApi35.pageText(it, maxCharacters) }
@@ -63,7 +64,7 @@ class PdfDocumentSession private constructor(
 
     /** Search only requested pages so large PDFs are not scanned or retained at once. */
     @Synchronized fun searchPage(index: Int, query: String, maxMatches: Int = 100): List<PdfTextMatch>? {
-        if (!textFeaturesAvailable) return null
+        if (Build.VERSION.SDK_INT < 35) return null
         require(index in 0 until pageCount)
         require(query.length in 1..200 && maxMatches in 1..100)
         return renderer.openPage(index).use { PdfApi35.search(it, index, query, maxMatches) }
@@ -110,6 +111,7 @@ class PdfDocumentSession private constructor(
 }
 
 /** Isolates Android 15-only symbols from the API 29–34 renderer path. */
+@RequiresApi(35)
 private object PdfApi35 {
     fun open(descriptor: android.os.ParcelFileDescriptor, password: String?): PdfRenderer =
         PdfRenderer(descriptor, LoadParams.Builder().apply { password?.let { setPassword(it) } }.build())

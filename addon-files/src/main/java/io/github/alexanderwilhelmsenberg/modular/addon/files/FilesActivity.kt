@@ -138,15 +138,17 @@ open class FilesActivity : ComponentActivity() {
                 val content = withContext(Dispatchers.IO) {
                     (application as FilesApplication).repository.scopedContent(documentId)
                 }
-                if (share) startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND)
-                    .setType(content.mimeType ?: "application/octet-stream")
-                    .putExtra(Intent.EXTRA_STREAM, content.uri)
-                    .setClipData(ClipData.newUri(contentResolver, "Shared file", content.uri))
-                    .addFlags(content.grantFlags or Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share file"))
-                else startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(content.uri,
-                    content.mimeType ?: "application/octet-stream")
-                    .setClipData(ClipData.newUri(contentResolver, "Opened file", content.uri))
-                    .addFlags(content.grantFlags or Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                if (share) startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                    type = content.mimeType ?: "application/octet-stream"
+                    putExtra(Intent.EXTRA_STREAM, content.uri)
+                    clipData = ClipData.newUri(contentResolver, "Shared file", content.uri)
+                    addFlags(content.grantFlags or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }, "Share file"))
+                else startActivity(Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(content.uri, content.mimeType ?: "application/octet-stream")
+                    clipData = ClipData.newUri(contentResolver, "Opened file", content.uri)
+                    addFlags(content.grantFlags or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                })
             }
             result.exceptionOrNull()?.let { Toast.makeText(this@FilesActivity,
                 it.message ?: "No compatible app could open this file", Toast.LENGTH_LONG).show() }

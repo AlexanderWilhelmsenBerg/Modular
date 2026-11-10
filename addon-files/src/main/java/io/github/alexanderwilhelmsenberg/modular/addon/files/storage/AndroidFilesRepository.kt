@@ -440,15 +440,28 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         mutationLock.lock()
         try {
         val cached = readTrashCache().associateBy { it.id }.toMutableMap()
+        val online = HashSet<String>()
+        val metadataIds = HashSet<String>()
+        val payloadIds = HashSet<String>()
         for (root in roots()) {
             try {
-                val folder = findTrash(root) ?: continue
-                children(folder).filter { it.name.endsWith(".meta.json") }.forEach { meta ->
+                resolveInternal(rootId(root)) // A revoked grant or unplugged drive must remain offline.
+                val folder = findTrash(root)
+                val stored = folder?.let(::children).orEmpty()
+                online.add(root.key)
+                stored.forEach { item ->
+                    when {
+                        item.name.endsWith(".payload") -> payloadIds.add("${root.key}:${item.name.removeSuffix(".payload")}")
+                        item.name.endsWith(".folder") -> payloadIds.add("${root.key}:${item.name.removeSuffix(".folder")}")
+                    }
+                }
+                stored.filter { it.name.endsWith(".meta.json") }.forEach { meta ->
                     try {
                         val record = readJson(meta)
                         val id = record.getString("id")
+                        metadataIds.add("${root.key}:$id")
                         val payloadName = record.getString("payload")
-                        val payload = children(folder).firstOrNull { it.name == payloadName }
+                        val payload = stored.firstOrNull { it.name == payloadName }
                         if (payload != null || runCatching { resolve(record.optString("originalId")); false }.getOrDefault(true)) {
                             cached[id] = recordToTrash(record, root.key, payload != null)
                         } else cached.remove(id)
@@ -456,14 +469,18 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                 }
             } catch (_: Exception) { /* Offline records stay in cache. */ }
         }
-        val result = cached.values.map { it.copy(available = try { locatePayload(it) != null } catch (_: Exception) { false }) }.sortedByDescending { it.trashedAtMillis }
+        val result = cached.values.filter { StorageSafety.retainTrashRecord(it.locationId, it.id, online, metadataIds, payloadIds) }
+            .map { it.copy(available = it.locationId in online && "${it.locationId}:${it.id}" in payloadIds) }
+            .sortedByDescending { it.trashedAtMillis }
         saveTrashCache(result)
         return result
         } finally { mutationLock.unlock() }
     }
 
     override fun trashSummary(): TrashSummary {
-        val entries = trashEntries()
+        val entries = if (mutationLock.tryLock()) {
+            try { trashEntries() } finally { mutationLock.unlock() }
+        } else readTrashCache()
         return TrashSummary(entries.count { !it.isDirectory }.toLong(), entries.count { it.isDirectory }.toLong(), entries.sumOf { it.sizeBytes ?: 0L }, entries.count { !it.available }.toLong())
     }
 

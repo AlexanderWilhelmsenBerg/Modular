@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.net.Uri
 import android.util.Base64
+import androidx.annotation.RequiresApi
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,6 +50,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
@@ -195,7 +197,8 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
         if (status.isNotBlank()) Text(status, color = if (conflict) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         if (mode == "edit") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { scope.launch { save() } }, enabled = dirty && !conflict && original != null) { Text("Save") }
+                Button(onClick = { scope.launch { save() } }, enabled = dirty && !conflict && original != null,
+                    modifier = Modifier.testTag("files.document.markdown.save")) { Text("Save") }
                 OutlinedButton(onClick = { saveAsLauncher.launch("Markdown-copy.md") }, enabled = original != null) { Text("Save as") }
                 TextButton(onClick = { val next = undo.undo(); if (next != null) { draftResolved.set(false); text = next } }, enabled = undo.canUndo) { Text("Undo") }
                 TextButton(onClick = { val next = undo.redo(); if (next != null) { draftResolved.set(false); text = next } }, enabled = undo.canRedo) { Text("Redo") }
@@ -205,7 +208,7 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
             if (query.isNotEmpty()) Text("${Regex(Regex.escape(query), RegexOption.IGNORE_CASE).findAll(text).count()} matches")
             OutlinedTextField(text, { next ->
                 if (next.length <= MAX_TEXT_CHARS) { draftResolved.set(false); undo.edit(next); text = next }
-            }, modifier = Modifier.fillMaxWidth().weight(1f), label = { Text("Markdown") })
+            }, modifier = Modifier.fillMaxWidth().weight(1f).testTag("files.document.markdown.editor"), label = { Text("Markdown") })
         } else {
             MarkdownPreview(text, id, loader, Modifier.weight(1f))
         }
@@ -440,9 +443,11 @@ private fun PdfViewer(id: String, fingerprint: String, loader: suspend (String, 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = onClose) { Text("Back") }
             OutlinedButton(onClick = { page = (page - 1).coerceAtLeast(0) }, enabled = page > 0) { Text("Previous") }
-            OutlinedButton(onClick = { page = (page + 1).coerceAtMost(pageCount - 1) }, enabled = page + 1 < pageCount) { Text("Next") }
+            OutlinedButton(onClick = { page = (page + 1).coerceAtMost(pageCount - 1) }, enabled = page + 1 < pageCount,
+                modifier = Modifier.testTag("files.document.pdf.next")) { Text("Next") }
         }
-        Text("Page ${if (pageCount > 0) page + 1 else 0} of $pageCount · Zoom ${(zoom * 100).toInt()}%")
+        Text("Page ${if (pageCount > 0) page + 1 else 0} of $pageCount · Zoom ${(zoom * 100).toInt()}%",
+            modifier = Modifier.testTag("files.document.pdf.page"))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(jump, { jump = it.filter(Char::isDigit).take(6) }, label = { Text("Page") }, modifier = Modifier.weight(1f), singleLine = true)
             Button(onClick = { jump.toIntOrNull()?.let { page = (it - 1).coerceIn(0, (pageCount - 1).coerceAtLeast(0)) } }) { Text("Go") }
@@ -491,6 +496,7 @@ private suspend fun findNextPdfMatch(loader: suspend (String, String) -> ParcelF
 }
 
 /** Kept in a separate class so API 29–34 never resolve Android 15-only PDF symbols. */
+@RequiresApi(35)
 private object PdfAdvanced {
     fun open(descriptor: ParcelFileDescriptor, password: String): PdfRenderer =
         PdfRenderer(descriptor, LoadParams.Builder().apply { if (password.isNotBlank()) setPassword(password) }.build())

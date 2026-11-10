@@ -9,7 +9,7 @@ Status: acceptance plan; execution results are **pending**. Source of truth: [Fi
 - **D**: device/manual acceptance, with recorded device, Android/One UI version, filesystem/provider, permission state, result, and evidence. Required for SD and USB unplug/reconnect, read-only volumes, Samsung permission UI, and provider-specific behaviors that the emulator cannot represent. Mark these **unverified**, never pass by inference.
 - **S**: captured UI evidence from the installed APKs. Save only screenshots actually produced by a named instrumentation test; validate output files are nonempty. Avoid recording user filenames or content in shared artifacts.
 
-The existing `.github/workflows/android.yml` uses API 35, installs release Core then debug Core, and runs cross-APK instrumentation. The Files APK must be installed independently before the Files tests; the root build owner wires its Gradle tasks, installation, and `scripts/capture-files.py` into CI. Tests should report exact class names and result counts, not infer success from APK assembly. The capture script runs a small theme/font matrix using `FilesCrossApkHomeTest` and checks each actual output file. No capture result exists until that script has run successfully.
+The existing `.github/workflows/android.yml` uses API 35, installs release Core then debug Core, and runs cross-APK instrumentation. The Files APK must be installed independently before the Files tests; the root build owner wires its Gradle tasks, installation, and `scripts/capture-files.py` into CI. Tests should report exact class names and result counts, not infer success from APK assembly. The capture script runs a small theme/font matrix using `FilesCrossApkHomeTest` for the real installed add-on overview and `FilesPageVisualFixtureTest` for populated native browser/review/trash/map states. Fixture captures verify renderer layout; they are not evidence of completed storage operations. No capture result exists until that script has run successfully.
 
 ## Traceability matrix
 
@@ -54,9 +54,9 @@ The existing `.github/workflows/android.yml` uses API 35, installs release Core 
 | JVM protocol/planner/adapter tests | Tests added; execution pending | Exact test reports, source revision |
 | API 35 direct-storage safety instrumentation | Test source compiles; execution pending | `DirectStorageSafetyTest` connected XML, clean fixture teardown |
 | API 35 actual SAF picker and grant | Test source compiles; execution pending | `SelectedFolderSafTest` connected XML, real DocumentsUI grant/revoke |
-| API 35 Markdown/PDF/archive files | Test sources compile; execution pending | `MarkdownRealDocumentTest`, `PdfRealDocumentTest`, `ArchiveRealStorageTest` connected XML |
+| API 35 Markdown/PDF/archive files | Helper test sources compile; native UI test added; execution pending | `MarkdownRealDocumentTest`, `PdfRealDocumentTest`, `ArchiveRealStorageTest`, `FilesNativeDocumentUiTest` connected XML |
 | API 35 cross-APK Files instrumentation | Test source compiles; execution pending | Separate APK install plus connected test XML |
-| API 35 Files captures | Capture script added; execution pending | Actual nonempty PNGs and capture log |
+| API 35 Files captures | Real-overview and populated-renderer capture sources added; execution pending | Actual nonempty PNGs and capture log |
 | Samsung One UI selected-folder/full-access flows | Unverified | Device/version, permission path, outcomes |
 | SD/USB unplug/read-only/provider matrix | Unverified | Device/media/provider, failure and recovery outcomes |
 

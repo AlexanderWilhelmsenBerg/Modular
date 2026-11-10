@@ -35,9 +35,11 @@ class SelectedFolderSafTest {
         val name = "ModularFilesValidation-${UUID.randomUUID()}"
         val fixture = File(EnvironmentPath.downloads(), name)
         val appOps = context.getSystemService(AppOpsManager::class.java)
-        val originalMode = appOps.unsafeCheckOpNoThrow(
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        automation.adoptShellPermissionIdentity("android.permission.GET_APP_OPS_STATS")
+        val originalMode = try { appOps.unsafeCheckOpNoThrow(
             "android:manage_external_storage", Process.myUid(), context.packageName,
-        )
+        ) } finally { automation.dropShellPermissionIdentity() }
         var locationId: String? = null
         var scenario: ActivityScenario<FilesActivity>? = null
         try {

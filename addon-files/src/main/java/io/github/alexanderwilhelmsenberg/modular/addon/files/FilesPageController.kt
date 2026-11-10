@@ -16,6 +16,7 @@ import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Progress
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FilesRepository
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.SearchFilter
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.TrashEntry
+import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.RestoreChoice
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.createFilesRepository
 import io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerEngine
 import io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerRepositoryAdapter
@@ -25,6 +26,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.Base64
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -59,6 +61,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private val favorites = LinkedHashSet<String>(preferences.getStringSet("favorites", emptySet()) ?: emptySet())
     private val recent = LinkedHashSet<String>((preferences.getString("recent", "") ?: "").split(',').filter { it.isNotBlank() })
     private var propertyEntryId: String? = null
+    private var historyDetailId: String? = null
     private var clipboard: List<String> = emptyList()
     private var clipboardMove = false
     private var destinationFolderId: String? = null
@@ -71,6 +74,14 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private var pasteChoice = CollisionChoice.SKIP
     private var review: DeletionPlan? = null
     private var emptyTrashReview: EmptyTrashPlan? = null
+    private var offlineTrashPending = 0
+    private var restoreEntries: List<TrashEntry> = emptyList()
+    private var restoreConflicts: Map<String, FileEntry> = emptyMap()
+    private var restoreMissingParents: Set<String> = emptySet()
+    private var restorePlans: Map<String, DeletionPlan> = emptyMap()
+    private val restoreChoices = linkedMapOf<String, RestoreChoice>()
+    private var restoreTargetTrashId: String? = null
+    private var restoreDestinationFolderId: String? = null
     private var reviewReturnView = "browser"
     private var message: String? = null
     private var mapFolderId: String? = null
@@ -80,6 +91,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private var documentFingerprint = preferences.getString("documentFingerprint", null)
     private var documentSaveStatus: String? = null
     private val stagedDocumentWrites = mutableMapOf<String, String>()
+    private val pendingSafWrites = mutableSetOf<String>()
     private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "files-worker").apply { isDaemon = true } }
     private val pendingTotals = mutableSetOf<String>()
     private val totalCancelFlags = mutableMapOf<String, AtomicBoolean>()
@@ -124,6 +136,15 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     fun getPage(requestJson: String): String = synchronized(lock) {
         val request = JSONObject(requestJson)
         require(request.optInt("version") == 1) { "Unsupported page version" }
+        request.optJSONObject("restoreScroll")?.let { restored ->
+            if (view == "browser" || view == "search") {
+                if (restored.optString("key") == scrollKey()) {
+                    scrollAnchor = restored.optInt("anchor", 0).coerceIn(0, 100)
+                    scrollOffset = restored.optInt("offset", 0).coerceIn(0, 100_000)
+                    persist()
+                }
+            }
+        }
         val offset = request.optString("cursor").toIntOrNull()?.coerceAtLeast(0) ?: currentOffset
         val pageSize = request.optInt("pageSize", 100).coerceIn(1, 100)
         currentOffset = offset
@@ -148,8 +169,12 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             preferences.edit().putStringSet("pendingTokens", pendingTokens.toSet()).commit()
         }
         val oldView = view
+        val oldFolderId = folderId
+        val oldLocationId = locationId
         val outcome = runCatching { command.handler(request.optJSONObject("args") ?: JSONObject()) }
-        if (view != oldView) { currentOffset = 0; scrollAnchor = 0; scrollOffset = 0 }
+        if (view != oldView || folderId != oldFolderId || locationId != oldLocationId) {
+            currentOffset = 0; scrollAnchor = 0; scrollOffset = 0
+        }
         if (outcome.isSuccess && command.hostAction != null) {
             val nonce = UUID.randomUUID().toString().replace("-", "")
             handoffs.entries.removeIf { it.value.expiresAt < System.currentTimeMillis() }
@@ -224,7 +249,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             val location = repository.locations().firstOrNull { it.id == entry.locationId }
                 ?: throw IllegalStateException("Storage location unavailable")
             if (location.kind == io.github.alexanderwilhelmsenberg.modular.addon.files.storage.StorageLocation.Kind.SELECTED_FOLDER) {
-                repository.openWrite(documentId, expected)
+                repository.openWrite(documentId, expected).also { pendingSafWrites.add(documentId) }
             } else {
                 require(documentId !in stagedDocumentWrites) { "A save is already pending; review or cancel it" }
                 repository.beginStagedWrite(documentId, expected).also {
@@ -250,17 +275,20 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .put("title", when (view) { "trash" -> "Trash"; "review" -> "Review deletion";
                 "emptyTrashReview" -> "Empty trash"; "map" -> "Storage map"; "clean" -> "Clean folder";
                 "settings" -> "Files settings"; "cleanReview" -> "Review cleanup";
-            "history" -> "Operation history"; "markdown" -> "Markdown"; "pdf" -> "PDF";
+            "history", "historyDetail" -> "Operation history"; "markdown" -> "Markdown"; "pdf" -> "PDF";
             "keeper" -> "Choose which to keep"; "filters" -> "Search filters";
             "archive" -> "Extract archive";
             "archiveReview" -> "Review extraction"; "archiveDestination" -> "Choose destination";
             "archiveReport" -> "Extraction result";
-            "movePicker" -> "Move destination"; "pasteReview" -> "Review paste";
-            "properties" -> "Properties"; else -> "Files" })
+            "movePicker", "moveLocations" -> "Move destination"; "pasteReview" -> "Review paste";
+            "properties" -> "Properties"; "restoreReview" -> "Review restore";
+            "restoreDestination", "restoreLocations" -> "Restore destination";
+            "archiveLocations" -> "Archive destination"; else -> "Files" })
             .put("view", view).put("locationId", locationId).put("folderId", folderId)
             .put("layout", if (grid) "grid" else "list")
             .put("scrollAnchor", scrollAnchor).put("scrollOffset", scrollOffset)
             .put("state", "ready")
+        if (view == "browser" || view == "search") page.put("scrollKey", scrollKey())
         message?.let { page.put("message", it) }
         documentSaveStatus?.let { page.put("documentSaveStatus", it) }
         pendingHostLaunch?.let { page.put("hostLaunch", it); pendingHostLaunch = null }
@@ -282,6 +310,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             "cleanReview" -> renderCleanReview(page, actions, items, offset, limit)
             "settings" -> renderSettings(page, actions)
             "history" -> renderHistory(page, actions, items, offset, limit)
+            "historyDetail" -> renderHistoryDetail(page, actions, items, offset, limit)
             "markdown", "pdf" -> renderDocument(page, actions)
             "progress" -> renderProgress(page, actions)
             "archive" -> renderArchive(page, actions)
@@ -292,6 +321,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             "movePicker" -> renderMovePicker(page, actions, items, offset, limit)
             "pasteReview" -> renderPasteReview(page, actions, items, offset, limit)
             "properties" -> renderProperties(page, actions, items)
+            "restoreReview" -> renderRestoreReview(page, actions, items, offset, limit)
+            "restoreDestination" -> renderRestoreDestination(page, actions, items, offset, limit)
+            "moveLocations", "restoreLocations", "archiveLocations" -> renderDestinationLocations(page, actions, items, offset, limit)
             else -> { view = "overview"; renderOverview(page, actions, items, offset, limit) }
         }
         page.put("actions", actions).put("items", items)
@@ -382,18 +414,23 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         if (view == "search") {
             action(actions, if (includeSubfolders) "Subfolders on" else "Subfolders off", "toggle") { includeSubfolders = !includeSubfolders }
             action(actions, "Delete all results", "review") {
-                val ids = linkedSetOf<String>()
-                var searchOffset = 0
-                do {
-                    val batch = repository.searchPage(searchRoots(folder), searchFilter(), searchOffset, 100)
-                    require(batch.complete && batch.errors.isEmpty()) { "Search coverage incomplete; review cannot begin" }
-                    ids.addAll(batch.entries.map { it.id })
-                    val next = batch.nextOffset ?: break
-                    require(next > searchOffset) { "Search pagination did not advance" }
-                    searchOffset = next
-                } while (true)
-                review = repository.prepareDeletion(ids.toList())
-                reviewReturnView = "search"; view = "review"
+                val roots = searchRoots(folder)
+                val filter = searchFilter()
+                startJob("Preparing all search results", "review") { cancel, _ ->
+                    val ids = linkedSetOf<String>()
+                    var searchOffset = 0
+                    do {
+                        val batch = repository.searchPage(roots, filter, searchOffset, 100, cancel)
+                        require(batch.complete && batch.errors.isEmpty()) { "Search coverage incomplete; review cannot begin" }
+                        ids.addAll(batch.entries.map { it.id })
+                        val next = batch.nextOffset ?: break
+                        require(next > searchOffset) { "Search pagination did not advance" }
+                        searchOffset = next
+                    } while (true)
+                    val plan = repository.prepareDeletion(ids.toList(), cancel)
+                    synchronized(lock) { review = plan; reviewReturnView = "search" }
+                    "${plan.fileCount} affected files captured for review"
+                }
             }
         }
         action(actions, "Sort ${sort.name.lowercase()}", "sort") { sort = FileSort.entries[(sort.ordinal + 1) % FileSort.entries.size] }
@@ -522,17 +559,19 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         page.put("summary", "${summary.fileCount} files · ${formatBytes(summary.knownBytes)} in trash")
         action(actions, "Back", "back") { view = if (folderId == null) "overview" else "browser"; selected.clear() }
         if (all.isNotEmpty()) {
-            action(actions, "Restore all", "restore", destructive = true) {
-                val result = repository.restore(all.map { it.id }, emptyMap())
-                message = "Restored ${result.outcomes.count { it.status.name == "SUCCESS" }} items"
+            action(actions, "Restore all", "restore") { prepareRestoreReview(all.map { it.id }) }
+            action(actions, "Empty trash", "review") {
+                val online = all.filter { it.available }
+                offlineTrashPending = all.size - online.size
+                if (online.isEmpty()) message = "Trash is on unavailable storage; reconnect before emptying"
+                else startJob("Preparing permanent trash review", "emptyTrashReview") { _, _ ->
+                    val plan = repository.prepareEmptyTrash(online.map { it.id })
+                    synchronized(lock) { emptyTrashReview = plan }
+                    "${plan.entries.size} available trash entries ready for review; $offlineTrashPending offline remain pending"
+                }
             }
-            action(actions, "Empty trash", "review") { emptyTrashReview = repository.prepareEmptyTrash(all.map { it.id }); view = "emptyTrashReview" }
         }
-        if (selected.isNotEmpty()) action(actions, "Restore selected", "restore", destructive = true) {
-            val result = repository.restore(selected.toList(), emptyMap())
-            message = "Restored ${result.outcomes.count { it.status.name == "SUCCESS" }} items"
-            selected.clear()
-        }
+        if (selected.isNotEmpty()) action(actions, "Restore selected", "restore") { prepareRestoreReview(selected.toList()) }
         all.drop(offset).take(limit).forEach { item ->
             val json = JSONObject().put("id", item.id).put("name", item.originalName)
                 .put("kind", "trash").put("path", item.originalPath)
@@ -540,28 +579,149 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                 .put("createdAt", item.createdAtMillis)
                 .put("subtitle", if (item.available) "Trashed ${java.util.Date(item.trashedAtMillis)}" else "Drive unavailable")
             val row = JSONArray()
-            action(row, "Restore", "restore", destructive = true) {
-                val result = repository.restore(listOf(item.id), emptyMap())
-                message = result.outcomes.firstOrNull()?.message ?: "Restore complete"
-            }
+            action(row, "Restore", "restore") { prepareRestoreReview(listOf(item.id)) }
             action(row, "Select", "select") { if (!selected.add(item.id)) selected.remove(item.id) }
             items.put(json.put("actions", row))
         }
         next(page, actions, offset, limit, all.size)
     }
 
+    private fun prepareRestoreReview(ids: List<String>) {
+        startJob("Preparing restore review", "restoreReview") { cancel, _ ->
+            val records = repository.trashEntries().filter { it.id in ids.toSet() }
+            val conflicts = linkedMapOf<String, FileEntry>()
+            val missing = linkedSetOf<String>()
+            val plans = linkedMapOf<String, DeletionPlan>()
+            for (record in records) {
+                if (cancel.isCanceled()) throw IllegalStateException("Restore review canceled")
+                val parent = runCatching { repository.get(record.originalParentId) }.getOrNull()
+                if (parent == null || !parent.isDirectory || !parent.writable) { missing.add(record.id); continue }
+                var offset = 0
+                while (true) {
+                    val page = repository.list(parent.id, offset, 100)
+                    val existing = page.entries.firstOrNull { it.name == record.originalName }
+                    if (existing != null) {
+                        conflicts[record.id] = existing
+                        plans[record.id] = repository.prepareDeletion(listOf(existing.id))
+                        break
+                    }
+                    val next = page.nextOffset ?: break
+                    require(next > offset && page.complete) { "Restore destination enumeration incomplete" }
+                    offset = next
+                }
+            }
+            synchronized(lock) {
+                restoreEntries = records
+                restoreConflicts = conflicts
+                restoreMissingParents = missing
+                restorePlans = plans
+                restoreChoices.clear()
+            }
+            "${records.size} trash entries · ${conflicts.size} name collisions · ${missing.size} destinations need reconnect"
+        }
+    }
+
+    private fun renderRestoreReview(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
+        val records = restoreEntries
+        val replacements = restoreChoices.filterValues { it.collision == CollisionChoice.REPLACE }.keys
+            .flatMap { restorePlans[it]?.let { plan -> plan.roots + plan.descendants } ?: emptyList() }.distinctBy { it.id }
+        val ready = records.isNotEmpty() && records.all { record ->
+            val choice = restoreChoices[record.id]
+            when {
+                record.id in restoreMissingParents -> choice?.alternateParentId != null
+                record.id in restoreConflicts -> choice != null &&
+                    (choice.collision != CollisionChoice.REPLACE || restorePlans[record.id]?.let { it.complete && it.errors.isEmpty() } == true)
+                else -> true
+            }
+        }
+        page.put("summary", "${records.size} trash entries · ${restoreConflicts.size} name collisions · Restore keeps failures in trash")
+            .put("complete", ready)
+        action(actions, "Cancel", "cancel") { view = "trash"; restoreEntries = emptyList() }
+        action(actions, "Back", "back") { view = "trash"; restoreEntries = emptyList() }
+        if (ready) action(actions, "Restore", "confirm", destructive = true) {
+            val ids = records.map { it.id }
+            val choices = restoreChoices.toMap()
+            startJob("Restoring reviewed trash", "trash") { cancel, _ ->
+                val result = repository.restore(ids, choices, cancel)
+                synchronized(lock) { restoreEntries = emptyList(); selected.clear() }
+                "Restored ${result.outcomes.count { it.status.name == "SUCCESS" }} of ${ids.size}; ${result.outcomes.count { it.status.name != "SUCCESS" }} remain in trash"
+            }
+        }
+        records.drop(offset).take(limit).forEach { record ->
+            val conflict = restoreConflicts[record.id]
+            val missing = record.id in restoreMissingParents
+            val choice = restoreChoices[record.id]
+            val row = JSONArray()
+            if (conflict != null) {
+                action(row, "Keep both", "restoreChoice") {
+                    restoreChoices[record.id] = RestoreChoice(CollisionChoice.KEEP_BOTH)
+                }
+                action(row, "Replace reviewed", "restoreChoice") {
+                    val plan = restorePlans[record.id] ?: throw IllegalStateException("Replacement needs review")
+                    require(plan.complete && plan.errors.isEmpty()) { "Replacement review incomplete" }
+                    restoreChoices[record.id] = RestoreChoice(CollisionChoice.REPLACE,
+                        replacementPlans = mapOf(conflict.id to plan))
+                }
+            }
+            if (missing || conflict != null) action(row, "Another folder", "destination") {
+                restoreTargetTrashId = record.id
+                restoreDestinationFolderId = folderId ?: repository.locations().firstOrNull { it.available }?.rootId
+                view = "restoreDestination"
+            }
+            items.put(JSONObject().put("id", record.id).put("name", record.originalName)
+                .put("kind", "trash").put("path", record.originalPath)
+                .put("subtitle", when {
+                    missing -> "Original destination unavailable; choose another folder"
+                    conflict != null -> "Collision: ${conflict.relativePath} · ${choice?.collision?.name ?: "choose action"}"
+                    else -> "Restore to original location"
+                })
+                .put("sizeBytes", record.sizeBytes).put("modifiedAt", record.modifiedAtMillis)
+                .put("createdAt", record.createdAtMillis).put("actions", row))
+        }
+        val replacementOffset = (offset - records.size).coerceAtLeast(0)
+        replacements.drop(replacementOffset).take((limit - (records.size - offset).coerceIn(0, limit)).coerceAtLeast(0)).forEach { item ->
+            items.put(entryJson(item, false).put("subtitle", "Existing destination moved to trash if replaced"))
+        }
+        next(page, actions, offset, limit, records.size + replacements.size)
+    }
+
+    private fun renderRestoreDestination(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
+        val targetId = restoreTargetTrashId ?: run { view = "restoreReview"; return }
+        val current = restoreDestinationFolderId ?: run { view = "restoreReview"; return }
+        val folder = repository.get(current)
+        page.put("summary", "Choose a writable destination for ${restoreEntries.firstOrNull { it.id == targetId }?.originalName ?: "item"}")
+            .put("currentFolderPath", folder.relativePath).put("destinationWritable", folder.writable)
+        action(actions, "Back", "back") { view = "restoreReview" }
+        action(actions, "Locations", "locations") { view = "restoreLocations" }
+        if (folder.parentId != null) action(actions, "Up", "up") { restoreDestinationFolderId = folder.parentId }
+        if (folder.writable) action(actions, "Choose destination", "chooseDestination") {
+            restoreChoices[targetId] = RestoreChoice(CollisionChoice.KEEP_BOTH, alternateParentId = folder.id)
+            view = "restoreReview"
+        }
+        val listing = repository.list(folder.id, offset, limit)
+        listing.entries.filter { it.isDirectory }.forEach { child ->
+            val row = JSONArray()
+            action(row, "Open", "nav") { restoreDestinationFolderId = child.id }
+            items.put(JSONObject().put("id", child.id).put("name", child.name)
+                .put("kind", "folder").put("path", child.relativePath).put("actions", row))
+        }
+        next(page, actions, offset, limit, listing.totalCount ?: offset + listing.entries.size)
+    }
+
     private fun renderEmptyTrashReview(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
         val plan = emptyTrashReview ?: run { view = "trash"; return }
-        page.put("summary", "Permanently remove ${plan.entries.size} trash entries")
+        page.put("summary", "Permanently remove ${plan.entries.size} available trash entries · $offlineTrashPending offline remain pending")
             .put("complete", plan.complete && plan.errors.isEmpty())
         plan.descendants.drop(offset).take(limit).forEach { items.put(entryJson(it, false)) }
         next(page, actions, offset, limit, plan.descendants.size)
         action(actions, "Cancel", "cancel") { emptyTrashReview = null; view = "trash" }
         action(actions, "Back", "back") { emptyTrashReview = null; view = "trash" }
         if (plan.complete && plan.errors.isEmpty()) action(actions, "Empty permanently", "confirm", destructive = true) {
-            val result = repository.emptyTrash(plan)
-            message = "Removed ${result.outcomes.count { it.status.name == "SUCCESS" }} entries"
-            emptyTrashReview = null; view = "trash"
+            startJob("Emptying reviewed trash", "trash") { cancel, _ ->
+                val result = repository.emptyTrash(plan, cancel)
+                synchronized(lock) { emptyTrashReview = null }
+                "Permanently removed ${result.outcomes.count { it.status.name == "SUCCESS" }} entries; ${result.outcomes.count { it.status.name != "SUCCESS" }} retained for retry"
+            }
         }
     }
 
@@ -868,6 +1028,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val folder = repository.get(currentId)
         page.put("summary", "Choose existing destination folder · ${folder.relativePath}")
         action(actions, "Back to archive", "back") { view = "archive" }
+        action(actions, "Locations", "locations") { view = "archiveLocations" }
         if (folder.parentId != null) action(actions, "Up", "navigate") { archiveDestinationFolderId = folder.parentId }
         action(actions, "Use this folder", "chooseDestination") { archives.setDestination(currentId); view = "archive" }
         val listed = repository.list(currentId, offset, limit).entries.filter { it.isDirectory }
@@ -921,6 +1082,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .put("summary", "Moving ${clipboard.size} staged items")
         action(actions, "Back", "back") { view = "browser" }
         action(actions, "Cancel", "cancel") { clipboard = emptyList(); view = "browser" }
+        action(actions, "Locations", "locations") { view = "moveLocations" }
         if (folder.parentId != null) action(actions, "Up", "up") { destinationFolderId = folder.parentId }
         if (folder.writable) action(actions, "Choose destination", "chooseDestination") { preparePaste(destination) }
         val listing = repository.list(destination, offset, limit)
@@ -931,6 +1093,30 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                 .put("kind", "folder").put("path", child.relativePath).put("actions", row))
         }
         next(page, actions, offset, limit, listing.totalCount ?: offset + listing.entries.size)
+    }
+
+    private fun renderDestinationLocations(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
+        val mode = view
+        page.put("summary", "Choose a connected phone, SD card, USB drive, or granted folder")
+        action(actions, "Back", "back") {
+            view = when (mode) { "moveLocations" -> "movePicker"; "restoreLocations" -> "restoreDestination"; else -> "archiveDestination" }
+        }
+        val locations = repository.locations()
+        locations.drop(offset).take(limit).forEach { location ->
+            val row = JSONArray()
+            if (location.available && location.writable) action(row, "Open", "open") {
+                when (mode) {
+                    "moveLocations" -> { destinationFolderId = location.rootId; view = "movePicker" }
+                    "restoreLocations" -> { restoreDestinationFolderId = location.rootId; view = "restoreDestination" }
+                    else -> { archiveDestinationFolderId = location.rootId; view = "archiveDestination" }
+                }
+            }
+            items.put(JSONObject().put("id", location.id).put("name", location.title)
+                .put("kind", "location").put("subtitle", if (location.available) {
+                    if (location.writable) "Writable" else "Read only"
+                } else "Reconnect required").put("actions", row))
+        }
+        next(page, actions, offset, limit, locations.size)
     }
 
     private fun renderPasteReview(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
@@ -990,7 +1176,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     }
 
     private fun renderSettings(page: JSONObject, actions: JSONArray) {
-        page.put("summary", "Manage selected folders and optional full storage access. Android still protects other apps’ private data.")
+        page.put("summary", "Manage selected folders and optional full storage access. Android still protects other apps’ private data. Files moved to this module’s same-storage trash still occupy space until Empty trash; no automatic expiry is set. Reconnect or regrant removable/selected locations after a drive change or reinstall. Provider trash and uninstall recovery vary by storage provider; unavailable entries remain listed until reconnected.")
         action(actions, "Back", "back") { view = if (folderId == null) "overview" else "browser" }
         action(actions, "Add folder", "setup", hostAction = "pickFolder") { }
         action(actions, if (android.os.Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) "Full access enabled" else "Enable full storage access", "setup",
@@ -1062,13 +1248,17 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         if (view == "markdown") {
             action(actions, "Commit save", "documentCommit", destructive = true) {
                 val staged = stagedDocumentWrites[id]
-                if (staged != null) repository.commitStagedWrite(staged)
-                stagedDocumentWrites.remove(id)
+                when {
+                    staged != null -> { repository.commitStagedWrite(staged); stagedDocumentWrites.remove(id) }
+                    id in pendingSafWrites -> pendingSafWrites.remove(id)
+                    else -> throw IllegalStateException("No pending document write to commit")
+                }
                 documentSaveStatus = "saved"
                 documentFingerprint = repository.fingerprint(id)
             }
             action(actions, "Cancel pending save", "documentCancel", destructive = true) {
                 stagedDocumentWrites.remove(id)?.let(repository::cancelStagedWrite)
+                pendingSafWrites.remove(id)
                 documentSaveStatus = "failed"
             }
         }
@@ -1081,17 +1271,52 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val history = repository.history()
         page.put("summary", "Recent file operations and per-item results")
         action(actions, "Back", "back") { view = if (folderId == null) "overview" else "browser" }
-        if (history.any { !it.undone }) action(actions, "Undo last supported action", "undo", destructive = true) {
-            val outcome = repository.undoLast()
-            message = "Undo: ${outcome.outcomes.count { it.status.name == "SUCCESS" }} items restored"
+        if (history.any { !it.undone && it.kind in setOf("rename", "move", "trash") }) action(actions, "Undo last supported action", "undo", destructive = true) {
+            startJob("Undoing last supported operation", "history") { cancel, _ ->
+                if (cancel.isCanceled()) throw IllegalStateException("Undo canceled before it started")
+                val outcome = repository.undoLast()
+                "Undo: ${outcome.outcomes.count { it.status.name == "SUCCESS" }} succeeded; ${outcome.outcomes.count { it.status.name != "SUCCESS" }} need review"
+            }
         }
         history.drop(offset).take(limit).forEach { entry ->
+            val row = JSONArray()
+            action(row, "Details", "open") { historyDetailId = entry.id; view = "historyDetail" }
             items.put(JSONObject().put("id", entry.id).put("name", entry.kind)
                 .put("kind", "history").put("subtitle", "${java.util.Date(entry.atMillis)} · ${entry.outcomes.size} outcomes" +
                     if (entry.undone) " · undone" else "")
-                .put("path", entry.outcomes.take(2).joinToString("; ") { "${it.status}: ${it.message ?: it.id}" }))
+                .put("actions", row))
         }
         next(page, actions, offset, limit, history.size)
+    }
+
+    private fun renderHistoryDetail(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
+        val entry = repository.history().firstOrNull { it.id == historyDetailId }
+            ?: run { view = "history"; return }
+        page.put("summary", "${entry.kind} · ${java.util.Date(entry.atMillis)} · ${entry.outcomes.size} item outcomes${if (entry.undone) " · undone" else ""}")
+        action(actions, "Back to history", "back") { view = "history" }
+        entry.outcomes.drop(offset).take(limit).forEachIndexed { index, outcome ->
+            val row = JSONArray()
+            action(row, "Review current state", "retry") {
+                val candidate = listOfNotNull(outcome.resultingId, outcome.id).firstNotNullOfOrNull { id ->
+                    runCatching { repository.get(id) }.getOrNull()
+                }
+                if (candidate != null) {
+                    locationId = candidate.locationId
+                    folderId = if (candidate.isDirectory) candidate.id else candidate.parentId
+                    view = "browser"
+                    message = "Review current files before starting a new operation; history is never replayed automatically"
+                } else {
+                    view = "trash"
+                    message = "Source unavailable. Reconnect its location or review Trash before retrying"
+                }
+            }
+            items.put(JSONObject().put("id", "${entry.id}:${offset + index}")
+                .put("name", outcome.id).put("kind", "outcome")
+                .put("subtitle", "${outcome.status} · ${outcome.message ?: "No further detail"}" +
+                    (outcome.resultingId?.let { " · Result $it" } ?: ""))
+                .put("actions", row))
+        }
+        next(page, actions, offset, limit, entry.outcomes.size)
     }
 
     private fun next(page: JSONObject, actions: JSONArray, offset: Int, limit: Int, count: Int) {
@@ -1125,7 +1350,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
 
     private fun persist() {
         preferences.edit().putString("view", when (view) {
-            "review", "emptyTrashReview", "cleanReview", "keeper", "progress", "archiveReview", "archiveReport", "archiveDestination" -> if (folderId == null) "overview" else "browser"
+            "review", "emptyTrashReview", "cleanReview", "keeper", "progress", "archiveReview", "archiveReport", "archiveDestination", "historyDetail" -> if (folderId == null) "overview" else "browser"
             else -> view
         })
             .putString("location", locationId).putString("folder", folderId).putString("query", query)
@@ -1157,4 +1382,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         do { number /= 1024; unit++ } while (number >= 1024 && unit < units.lastIndex)
         return "%.1f %s".format(number, units[unit])
     }
+
+    private fun scrollKey(): String = MessageDigest.getInstance("SHA-256")
+        .digest("${locationId.orEmpty()}|${folderId.orEmpty()}|$view".toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }

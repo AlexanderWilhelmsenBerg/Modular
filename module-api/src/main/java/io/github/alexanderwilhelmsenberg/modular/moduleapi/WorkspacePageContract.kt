@@ -42,6 +42,14 @@ object WorkspacePageContract {
                 "Invalid workspace page cursor"
             }
         }
+        value["restoreScroll"]?.let { scroll ->
+            require(scroll is JsonObject &&
+                scroll["key"]?.jsonPrimitive?.contentOrNull?.matches(Regex("[0-9a-f]{64}")) == true &&
+                scroll["anchor"]?.jsonPrimitive?.intOrNull?.let { it in 0..100 } == true &&
+                scroll["offset"]?.jsonPrimitive?.intOrNull?.let { it in 0..100_000 } == true) {
+                "Invalid workspace scroll state"
+            }
+        }
     }
 
     fun validateActionRequest(raw: String): JsonObject = parseRequest(raw).also { value ->

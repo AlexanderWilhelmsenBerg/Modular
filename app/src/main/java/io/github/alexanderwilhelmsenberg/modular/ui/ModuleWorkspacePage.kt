@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -48,6 +49,7 @@ import java.util.concurrent.Semaphore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -116,13 +118,23 @@ fun ModuleWorkspacePage(
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
+    val scrollStore = remember(context) { WorkspacePageScrollStore(context) }
+    val moduleComponent = module?.component?.flattenToString()
+    val currentActive by rememberUpdatedState(active)
     var resumeGeneration by remember { mutableIntStateOf(0) }
-    DisposableEffect(lifecycle) {
+    DisposableEffect(lifecycle, moduleComponent) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) resumeGeneration++
+            if (event == Lifecycle.Event.ON_STOP && moduleComponent != null) scrollStore.flush(moduleComponent)
         }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycle.removeObserver(observer)
+            if (moduleComponent != null) scrollStore.flush(moduleComponent)
+        }
+    }
+    DisposableEffect(active, moduleComponent) {
+        onDispose { if (moduleComponent != null) scrollStore.flush(moduleComponent) }
     }
     var pageJson by remember(module?.component) { mutableStateOf<String?>(null) }
     var loadedSessionId by remember(module?.component) { mutableStateOf<String?>(null) }
@@ -147,9 +159,12 @@ fun ModuleWorkspacePage(
 
     suspend fun capability(): IWorkspacePageCapability {
         val active = route ?: error("Module page provider is unavailable")
-        val binder = router.acquireModuleBinder(
-            active, instanceId = "workspace-page", configurationJson = "{}",
-        ).getOrThrow()
+        val binder = WorkspaceBinderCalls.run(10_000) {
+            runBlocking {
+                router.acquireModuleBinder(active, instanceId = "workspace-page",
+                    configurationJson = "{}").getOrThrow()
+            }
+        }
         return IWorkspacePageCapability.Stub.asInterface(binder)
             ?: error("Module page capability is unavailable")
     }
@@ -178,7 +193,7 @@ fun ModuleWorkspacePage(
 
     fun launchHostAction(hostAction: String, nonce: String) {
         val current = module ?: error("Module is unavailable")
-        check(active && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+        check(currentActive && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
             "Return to Files to open this activity"
         }
         require(hostAction in setOf(WorkspacePageContract.HOST_PICK_FOLDER,
@@ -192,7 +207,8 @@ fun ModuleWorkspacePage(
         check(expectedSignerKey != null && signer == expectedSignerKey) {
             "Module signing identity changed. Remove and add this screen again."
         }
-        check(current.status == ModuleConnectionStatus.CONNECTED && route != null) {
+        check(current.status == ModuleConnectionStatus.CONNECTED && route != null &&
+            route in router.routes.value) {
             "Module page is no longer connected"
         }
         val declaration = current.descriptor?.managementActivity
@@ -253,6 +269,7 @@ fun ModuleWorkspacePage(
         val back = when {
             dialog != null -> dialogActions.firstOrNull { it.optString("kind") == "cancel" }
             selectionActive -> options.firstOrNull { it.optString("label") == "Clear selection" }
+            page.optString("view") == "map" -> options.firstOrNull { it.optString("label") == "Up" }
             else -> null
         } ?: options.firstOrNull { it.optString("kind") == "back" }
         val id = back?.optString("id")?.takeIf { it.isNotBlank() }
@@ -267,13 +284,18 @@ fun ModuleWorkspacePage(
         if (loadedSessionId == module?.sessionId && currentView in setOf("markdown", "pdf")) {
             return@LaunchedEffect
         }
-        pageJson = null
+        if (loadedSessionId != module?.sessionId) pageJson = null
         if (module?.status != ModuleConnectionStatus.CONNECTED || route == null) return@LaunchedEffect
         busy = true
         try {
             val remote = capability()
+            val request = JSONObject().put("version", 1).put("pageSize", 100)
+            moduleComponent?.let(scrollStore::restore)?.let { saved ->
+                request.put("restoreScroll", JSONObject().put("key", saved.key)
+                    .put("anchor", saved.anchor).put("offset", saved.offset))
+            }
             val raw = WorkspaceBinderCalls.run(10_000) {
-                remote.getPage("{\"version\":1,\"pageSize\":100}")
+                remote.getPage(request.toString())
             }
             pageJson = validatedPage(raw)
             loadedSessionId = module.sessionId
@@ -287,6 +309,9 @@ fun ModuleWorkspacePage(
 
     if (pageJson != null && module?.status == ModuleConnectionStatus.CONNECTED && route != null) {
         FilesPage(pageJson = requireNotNull(pageJson), modifier = modifier,
+            onScrollState = { key, anchor, offset ->
+                moduleComponent?.let { scrollStore.record(it, key, anchor, offset) }
+            },
             documentCancel = { request ->
                 WorkspacePageContract.validateActionRequest(request)
                 val remote = capability()

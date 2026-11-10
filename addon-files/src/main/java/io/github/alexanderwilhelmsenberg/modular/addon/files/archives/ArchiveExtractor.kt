@@ -229,9 +229,14 @@ class ArchiveExtractor(private val context: Context, private val repository: Fil
         var sizesKnown = true
         val paths = mutableSetOf<List<String>>()
         withReader(staged, password) { reader ->
+            var checkedFormat = false
             while (true) {
                 if (cancel.isCanceled()) throw ExtractionCanceled()
                 val entry = Archive.readNextHeader(reader)
+                if (!checkedFormat) {
+                    require(matchesFormat(reader, format)) { "Archive content does not match ${format.name} format" }
+                    checkedFormat = true
+                }
                 if (entry == 0L) break
                 require(members.size < MAX_ENTRIES) { "Archive has too many entries" }
                 val name = ArchiveEntry.pathnameUtf8(entry) ?: throw IllegalArgumentException("Archive entry has no UTF-8 path")
@@ -267,6 +272,19 @@ class ArchiveExtractor(private val context: Context, private val repository: Fil
             problems += "Split ZIP requires all volumes and is unsupported"
         if (staged.length() > 0 && total / staged.length() > MAX_EXPANSION_RATIO) problems += "Archive expansion ratio exceeds limit"
         return ArchiveInspection(source, format, members, if (sizesKnown) total else null, problems, fingerprint)
+    }
+
+    private fun matchesFormat(reader: Long, expected: ArchiveFormat): Boolean {
+        val actual = Archive.format(reader) and Archive.FORMAT_BASE_MASK
+        val expectedBase = when (expected) {
+            ArchiveFormat.ZIP -> actual == Archive.FORMAT_ZIP
+            ArchiveFormat.SEVEN_Z -> actual == Archive.FORMAT_7ZIP
+            ArchiveFormat.RAR -> actual == Archive.FORMAT_RAR || actual == Archive.FORMAT_RAR_V5
+            ArchiveFormat.TAR, ArchiveFormat.TAR_GZ -> actual == Archive.FORMAT_TAR
+        }
+        if (!expectedBase) return false
+        if (expected == ArchiveFormat.TAR_GZ) return (0 until Archive.filterCount(reader)).any { Archive.filterCode(reader, it) == Archive.FILTER_GZIP }
+        return true
     }
 
     private inline fun <T> withReader(staged: File, password: String?, block: (Long) -> T): T {

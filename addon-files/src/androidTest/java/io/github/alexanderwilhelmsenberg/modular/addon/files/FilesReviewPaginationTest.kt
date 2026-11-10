@@ -26,6 +26,7 @@ import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.StorageLoca
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.TrashEntry
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.TrashSummary
 import org.json.JSONObject
+import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -45,7 +46,9 @@ class FilesReviewPaginationTest {
             val browser = page(controller)
             val search = action(controller, browser, "Search", JSONObject().put("query", "item"))
             assertEquals("search", search.getString("view"))
-            val review = action(controller, search, "Delete all results")
+            val preparing = action(controller, search, "Delete all results")
+            assertEquals("progress", preparing.getString("view"))
+            val review = awaitView(controller, "review")
             assertEquals("review", review.getString("view"))
             assertTrue(review.getBoolean("complete"))
             assertEquals(100, review.getJSONArray("items").length())
@@ -62,14 +65,18 @@ class FilesReviewPaginationTest {
             assertEquals("search", canceled.getString("view"))
             assertEquals(0, repository.moveCalls)
 
-            val secondReview = action(controller, canceled, "Delete all results")
+            val secondPreparing = action(controller, canceled, "Delete all results")
+            assertEquals("progress", secondPreparing.getString("view"))
+            val secondReview = awaitView(controller, "review")
             val confirm = (0 until secondReview.getJSONArray("actions").length())
                 .map { secondReview.getJSONArray("actions").getJSONObject(it) }
                 .single { it.getString("label") == "Delete" }
             val confirmRequest = JSONObject().put("version", 1)
                 .put("actionId", confirm.getString("id"))
-                .put("operationToken", "reviewed-once-token-12345").toString()
-            val deleted = JSONObject(controller.performAction(confirmRequest))
+                .put("operationToken", UUID.randomUUID().toString()).toString()
+            val deleting = JSONObject(controller.performAction(confirmRequest))
+            assertEquals("progress", deleting.getString("view"))
+            val deleted = awaitView(controller, "search")
             assertEquals("search", deleted.getString("view"))
             assertEquals(1, repository.moveCalls)
             assertEquals(105, repository.lastPlanSize)
@@ -85,8 +92,19 @@ class FilesReviewPaginationTest {
         controller.getPage("""{"version":1,"pageSize":100}"""),
     )
 
+    private fun awaitView(controller: FilesPageController, expected: String): JSONObject {
+        val deadline = System.currentTimeMillis() + 10_000
+        var last = page(controller)
+        while (last.optString("view") != expected && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25)
+            last = page(controller)
+        }
+        assertEquals("Timed out waiting for $expected; last page=$last", expected, last.optString("view"))
+        return last
+    }
+
     private fun action(controller: FilesPageController, from: JSONObject, label: String,
-        args: JSONObject? = null, token: String = "test-token-${System.nanoTime()}"): JSONObject {
+        args: JSONObject? = null, token: String = UUID.randomUUID().toString()): JSONObject {
         val actions = from.getJSONArray("actions")
         val command = (0 until actions.length()).map { actions.getJSONObject(it) }
             .single { it.getString("label") == label }

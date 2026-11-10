@@ -45,4 +45,13 @@ class StorageSafetyTest {
         assertThrows(IllegalArgumentException::class.java) { VerifiedCopy.verify(ByteArrayInputStream(corrupt), expected) }
         assertArrayEquals("Source remains untouched after failed verification", "the only intact copy".toByteArray(), source)
     }
+
+    @Test fun onlineTrashCacheCannotResurrectDeletedEntryButOfflineRecordRemains() {
+        val id = "trashed-1"
+        assertFalse(StorageSafety.retainTrashRecord("phone", id, setOf("phone"), emptySet(), emptySet()))
+        assertTrue(StorageSafety.retainTrashRecord("usb", id, emptySet(), emptySet(), emptySet()))
+        assertTrue(StorageSafety.retainTrashRecord("phone", id, setOf("phone"), setOf("phone:$id"), emptySet()))
+        assertTrue(StorageSafety.retainTrashRecord("phone", id, setOf("phone"), emptySet(), setOf("phone:$id")))
+        assertFalse(StorageSafety.retainTrashRecord("phone", id, setOf("phone"), setOf("usb:$id"), emptySet()))
+    }
 }

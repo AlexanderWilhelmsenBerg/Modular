@@ -29,8 +29,10 @@ class MarkdownRealDocumentTest {
     @Test fun draftSurvivesServiceRecreationAndExternalEditCannotBeOverwritten() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appOps = context.getSystemService(AppOpsManager::class.java)
-        val originalMode = appOps.unsafeCheckOpNoThrow("android:manage_external_storage",
-            Process.myUid(), context.packageName)
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        automation.adoptShellPermissionIdentity("android.permission.GET_APP_OPS_STATS")
+        val originalMode = try { appOps.unsafeCheckOpNoThrow("android:manage_external_storage",
+            Process.myUid(), context.packageName) } finally { automation.dropShellPermissionIdentity() }
         val name = "ModularFilesMarkdown-${UUID.randomUUID()}"
         val fixture = File(Environment.getExternalStorageDirectory(), name)
         try {

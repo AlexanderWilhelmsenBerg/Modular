@@ -40,7 +40,7 @@ fun FileThumbnail(
         bitmap = runCatching {
             withContext(Dispatchers.IO) {
                 val descriptor = documentLoader(documentId, "r") ?: return@withContext null
-                val bytes = descriptor.use { FileInputStream(it.fileDescriptor).use { input ->
+                val bytes = ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
                     val output = ByteArrayOutputStream()
                     val chunk = ByteArray(8192)
                     while (true) {
@@ -51,7 +51,7 @@ fun FileThumbnail(
                         output.write(chunk, 0, count)
                     }
                     output.toByteArray()
-                } }
+                }
                 currentCoroutineContext().ensureActive()
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)

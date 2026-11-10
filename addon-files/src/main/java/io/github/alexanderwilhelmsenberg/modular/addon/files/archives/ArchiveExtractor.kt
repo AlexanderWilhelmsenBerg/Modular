@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.addon.files.archives
 
 import android.content.Context
+import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Cancellation
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.CollisionChoice
@@ -172,8 +173,7 @@ class ArchiveExtractor(private val context: Context, private val repository: Fil
                             val selectedFolder = repository.locations().firstOrNull { it.id == output.locationId }?.kind == StorageLocation.Kind.SELECTED_FOLDER
                             val stagedWrite = if (selectedFolder) null else repository.beginStagedWrite(output.id, repository.fingerprint(output.id))
                             try {
-                                (stagedWrite?.descriptor ?: repository.openWrite(output.id, repository.fingerprint(output.id))).use { descriptor ->
-                                    FileOutputStream(descriptor.fileDescriptor).use { stream ->
+                                ParcelFileDescriptor.AutoCloseOutputStream(stagedWrite?.descriptor ?: repository.openWrite(output.id, repository.fingerprint(output.id))).use { stream ->
                                         val buffer = ByteBuffer.allocateDirect(64 * 1024)
                                         while (true) {
                                             if (cancel.isCanceled()) throw ExtractionCanceled()
@@ -191,7 +191,6 @@ class ArchiveExtractor(private val context: Context, private val repository: Fil
                                         }
                                         stream.flush()
                                         stream.fd.sync()
-                                    }
                                 }
                                 stagedWrite?.let { repository.commitStagedWrite(it.token) }
                             } catch (error: Exception) { stagedWrite?.let { repository.cancelStagedWrite(it.token) }; throw error }
@@ -301,8 +300,7 @@ class ArchiveExtractor(private val context: Context, private val repository: Fil
     private inline fun <T> withStagedSource(id: String, cancel: Cancellation, block: (File) -> T): T {
         val stage = File.createTempFile("archive-", ".stage", context.cacheDir)
         try {
-            repository.openRead(id).use { descriptor ->
-                FileInputStream(descriptor.fileDescriptor).use { input ->
+            ParcelFileDescriptor.AutoCloseInputStream(repository.openRead(id)).use { input ->
                     FileOutputStream(stage).use { output ->
                         val buffer = ByteArray(64 * 1024)
                         var copied = 0L
@@ -316,7 +314,6 @@ class ArchiveExtractor(private val context: Context, private val repository: Fil
                         }
                         output.fd.sync()
                     }
-                }
             }
             return block(stage)
         } finally { stage.delete() }
@@ -362,8 +359,7 @@ class ArchiveExtractor(private val context: Context, private val repository: Fil
     private fun verifyOutput(id: String, expectedDigest: ByteArray, expectedSize: Long?): Boolean {
         val digest = MessageDigest.getInstance("SHA-256")
         var actualSize = 0L
-        repository.openRead(id).use { descriptor ->
-            FileInputStream(descriptor.fileDescriptor).use { input ->
+        ParcelFileDescriptor.AutoCloseInputStream(repository.openRead(id)).use { input ->
                 val buffer = ByteArray(64 * 1024)
                 while (true) {
                     val count = input.read(buffer)
@@ -371,7 +367,6 @@ class ArchiveExtractor(private val context: Context, private val repository: Fil
                     actualSize += count
                     digest.update(buffer, 0, count)
                 }
-            }
         }
         return (expectedSize == null || actualSize == expectedSize) && digest.digest().contentEquals(expectedDigest)
     }

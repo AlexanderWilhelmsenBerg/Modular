@@ -1,6 +1,6 @@
 # Modular Files v1 validation
 
-Status: acceptance plan; execution results are **pending**. Source of truth: [Files and cleaner module v1](../product/file-manager-cleaner-v1.md). This plan covers the whole accepted v1 scope. A passing unit test or API 35 emulator run is evidence for its stated case only; it does not imply that removable media, OEM behavior, or every document provider passed.
+Status: implementation complete; local unit/build/lint checks passed. Device acceptance remains **pending** until the CI and manual checks below pass. Source of truth: [Files and cleaner module v1](../product/file-manager-cleaner-v1.md). This plan covers the whole accepted v1 scope. A passing unit test or API 35 emulator run is evidence for its stated case only; it does not imply that removable media, OEM behavior, or every document provider passed.
 
 ## Test boundaries and evidence
 
@@ -51,10 +51,10 @@ The existing `.github/workflows/android.yml` uses API 35, installs release Core 
 
 | Gate | Current result | Evidence needed |
 | --- | --- | --- |
-| JVM protocol/planner/adapter tests | Tests added; execution pending | Exact test reports, source revision |
+| JVM protocol/planner/adapter tests | Passed: 244 tests across Core, API, SDK, Files UI and Files; 10 signing-verifier tests | Local release gate and CI verify run [42807186291](https://github.com/AlexanderWilhelmsenBerg/Modular/actions/runs/42807186291), commit `a0064ac` |
 | API 35 direct-storage safety instrumentation | Test source compiles; execution pending | `DirectStorageSafetyTest` connected XML, clean fixture teardown |
 | API 35 actual SAF picker and grant | Test source compiles; execution pending | `SelectedFolderSafTest` connected XML, real DocumentsUI grant/revoke |
-| API 35 Markdown/PDF/archive files | Helper test sources compile; native UI test added; execution pending | `MarkdownRealDocumentTest`, `PdfRealDocumentTest`, `ArchiveRealStorageTest`, `FilesNativeDocumentUiTest` connected XML |
+| API 35 Markdown/PDF/archive files | Sources compile; first device run exposed a descriptor ownership failure; corrected and awaiting rerun | `MarkdownRealDocumentTest`, `PdfRealDocumentTest`, `ArchiveRealStorageTest`, `FilesNativeDocumentUiTest` connected XML |
 | API 35 cross-APK Files instrumentation | Test source compiles; execution pending | Separate APK install plus connected test XML |
 | API 35 Files captures | Real-overview and populated-renderer capture sources added; execution pending | Actual nonempty PNGs and capture log |
 | Samsung One UI selected-folder/full-access flows | Unverified | Device/version, permission path, outcomes |
@@ -88,3 +88,9 @@ The product spec explicitly leaves these choices open. Record the implemented ch
 | File collision defaults | Copy/move/restore/extraction choices and whether any reviewed Replace path is offered. |
 | Page schema | Final native map/editor/PDF sub-schemas, payload and paging limits, scoped document transport, revision/token persistence. |
 | Storage providers | Phone, SD, USB, SAF provider/read-only matrix, with limitations recorded per adapter. |
+
+## Build evidence and remaining acceptance
+
+At commit `a0064ac`, production/test APK assembly, lint, SDK 0.3.0 publication and an independent SDK consumer build passed. The persistent signing workflow verified Core and Files debug/release package IDs against the configured public certificates. Native arm64/x86_64 libraries and APK ZIP alignment passed 16 KB alignment checks. These results establish build compatibility, not complete device acceptance.
+
+The initial API 35 Files instrumentation process stopped during its first archive case. File-descriptor streams were found to have two owners; the follow-up uses Android auto-closing descriptor streams and captures logcat plus raw test results on failure. Final CI results and screenshots are recorded on PR #36. Samsung permission behavior, physical SD/USB removal, read-only media, and third-party providers remain manual acceptance checks.

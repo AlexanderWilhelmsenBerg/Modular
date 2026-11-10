@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Environment
 import android.os.Process
 import android.os.SystemClock
+import android.os.ParcelFileDescriptor
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -15,7 +16,6 @@ import io.github.alexanderwilhelmsenberg.modular.addon.files.documents.PdfDocume
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.StorageLocation
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.createFilesRepository
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.UUID
 import org.junit.Assert.assertEquals
@@ -97,8 +97,7 @@ class PdfRealDocumentTest {
 
     private fun shell(command: String): String {
         val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
-        return try { FileInputStream(descriptor.fileDescriptor).bufferedReader().use { it.readText() } }
-        finally { descriptor.close() }
+        return ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
     }
 
     private fun modeName(mode: Int) = when (mode) {

@@ -171,7 +171,7 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
             writeStarted = true
             withContext(Dispatchers.IO) {
                 val descriptor = loader(id, "rw:$fingerprint") ?: throw IllegalStateException("Write permission unavailable")
-                descriptor.use { FileOutputStream(it.fileDescriptor).use { stream -> stream.write(bytes); stream.flush(); stream.fd.sync() } }
+                ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { stream -> stream.write(bytes); stream.flush(); stream.fd.sync() }
             }
             check(onCommit()) { "Staged save was not committed" }
             val verified = withContext(Dispatchers.IO) { loadMarkdown(loader, id) }
@@ -294,12 +294,12 @@ private fun LocalMarkdownImage(documentId: String, path: String, alt: String, lo
             require(imageId.length <= 512) { "Image path is too long" }
             val bytes = withContext(Dispatchers.IO) {
                 val descriptor = loader(imageId, "r") ?: throw IllegalStateException("Image permission unavailable")
-                descriptor.use { FileInputStream(it.fileDescriptor).use { stream ->
+                ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { stream ->
                     val output = ByteArrayOutputStream()
                     val buffer = ByteArray(8192)
                     while (true) { val count = stream.read(buffer); if (count < 0) break; require(output.size() + count <= 8 * 1024 * 1024) { "Image exceeds preview limit" }; output.write(buffer, 0, count) }
                     output.toByteArray()
-                } }
+                }
             }
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
@@ -316,12 +316,12 @@ private fun LocalMarkdownImage(documentId: String, path: String, alt: String, lo
 
 private suspend fun loadMarkdown(loader: suspend (String, String) -> ParcelFileDescriptor?, id: String): MarkdownContent {
     val descriptor = loader(id, "r") ?: throw IllegalStateException("Read permission unavailable")
-    val bytes = descriptor.use { FileInputStream(it.fileDescriptor).use { stream ->
+    val bytes = ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { stream ->
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(8192)
         while (true) { val count = stream.read(buffer); if (count < 0) break; if (output.size() + count > MAX_TEXT_BYTES) throw IllegalArgumentException("Document exceeds 4 MiB"); output.write(buffer, 0, count) }
         output.toByteArray()
-    } }
+    }
     val (offset, charset, encoding) = when {
         bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte() -> Triple(3, StandardCharsets.UTF_8, "utf8bom")
         bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() -> Triple(2, StandardCharsets.UTF_16LE, "utf16le")

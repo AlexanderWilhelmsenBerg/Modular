@@ -7,6 +7,7 @@ import android.graphics.pdf.PdfDocument
 import android.os.Environment
 import android.os.Process
 import android.os.SystemClock
+import android.os.ParcelFileDescriptor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,7 +24,6 @@ import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.StorageLoca
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.createFilesRepository
 import io.github.alexanderwilhelmsenberg.modular.filesui.FilesPage
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -151,8 +151,7 @@ class FilesNativeDocumentUiTest {
 
     private fun shell(command: String): String {
         val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
-        return try { FileInputStream(descriptor.fileDescriptor).bufferedReader().use { it.readText() } }
-        finally { descriptor.close() }
+        return ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
     }
 
     private fun modeName(mode: Int) = when (mode) {

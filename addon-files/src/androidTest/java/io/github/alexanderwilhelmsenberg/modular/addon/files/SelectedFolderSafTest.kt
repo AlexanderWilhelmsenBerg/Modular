@@ -15,7 +15,6 @@ import androidx.test.uiautomator.Until
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.StorageLocation
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.createFilesRepository
 import java.io.File
-import java.io.FileInputStream
 import java.util.UUID
 import java.util.regex.Pattern
 import org.json.JSONObject
@@ -80,12 +79,11 @@ class SelectedFolderSafTest {
             val document = repo.createFile(location.rootId, "hello.md", "text/markdown")
             assertTrue(document.readable)
             val fingerprint = repo.fingerprint(document.id)
-            repo.openWrite(document.id, fingerprint).use { descriptor ->
-                ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { it.write("# After\n".toByteArray()) }
+            ParcelFileDescriptor.AutoCloseOutputStream(repo.openWrite(document.id, fingerprint)).use {
+                it.write("# After\n".toByteArray())
             }
-            val read = repo.openRead(document.id).use { descriptor ->
-                ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
-            }
+            val read = ParcelFileDescriptor.AutoCloseInputStream(repo.openRead(document.id))
+                .bufferedReader().use { it.readText() }
             assertEquals("# After\n", read)
 
             requireNotNull(scenario).recreate()
@@ -111,8 +109,7 @@ class SelectedFolderSafTest {
 
     private fun shell(command: String): String {
         val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
-        return try { FileInputStream(descriptor.fileDescriptor).bufferedReader().use { it.readText() } }
-        finally { descriptor.close() }
+        return ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
     }
 
     private fun modeName(mode: Int) = when (mode) {

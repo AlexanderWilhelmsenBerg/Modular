@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.addon.files.documents
 
 import android.content.Context
+import android.os.ParcelFileDescriptor
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FilesRepository
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.StorageLocation
 import java.io.ByteArrayOutputStream
@@ -45,9 +46,7 @@ class MarkdownDocumentService(private val context: Context, private val reposito
     fun open(fileId: String): MarkdownSnapshot {
         val entry = repository.get(fileId)
         require(!entry.isDirectory) { "A directory is not a Markdown document" }
-        val bytes = repository.openRead(fileId).use { descriptor ->
-            FileInputStream(descriptor.fileDescriptor).use { readLimited(it, MAX_BYTES) }
-        }
+        val bytes = ParcelFileDescriptor.AutoCloseInputStream(repository.openRead(fileId)).use { readLimited(it, MAX_BYTES) }
         val (text, encoding) = decode(bytes)
         val lineEnding = detectLineEnding(text)
         return MarkdownSnapshot(fileId, text, repository.fingerprint(fileId), encoding, lineEnding, readDraft(fileId), entry.writable)
@@ -73,11 +72,11 @@ class MarkdownDocumentService(private val context: Context, private val reposito
             val entry = repository.get(snapshot.fileId)
             val selectedFolder = repository.locations().firstOrNull { it.id == entry.locationId }?.kind == StorageLocation.Kind.SELECTED_FOLDER
             if (selectedFolder) {
-                repository.openWrite(snapshot.fileId, snapshot.fingerprint).use { descriptor -> writeBytes(descriptor, bytes) }
+                writeBytes(repository.openWrite(snapshot.fileId, snapshot.fingerprint), bytes)
             } else {
                 val staged = repository.beginStagedWrite(snapshot.fileId, snapshot.fingerprint)
                 try {
-                    staged.descriptor.use { writeBytes(it, bytes) }
+                    writeBytes(staged.descriptor, bytes)
                     repository.commitStagedWrite(staged.token)
                 } catch (error: Exception) { repository.cancelStagedWrite(staged.token); throw error }
             }
@@ -93,8 +92,8 @@ class MarkdownDocumentService(private val context: Context, private val reposito
         }
     }
 
-    private fun writeBytes(descriptor: android.os.ParcelFileDescriptor, bytes: ByteArray) {
-        FileOutputStream(descriptor.fileDescriptor).use { output ->
+    private fun writeBytes(descriptor: ParcelFileDescriptor, bytes: ByteArray) {
+        ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { output ->
             output.write(bytes)
             output.flush()
             output.fd.sync()

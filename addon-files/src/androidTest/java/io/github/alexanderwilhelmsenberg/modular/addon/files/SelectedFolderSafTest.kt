@@ -31,11 +31,13 @@ class SelectedFolderSafTest {
         val device = UiDevice.getInstance(instrumentation)
         val name = "ModularFilesValidation-${UUID.randomUUID()}"
         val fixture = File(EnvironmentPath.downloads(), name)
+        val existingGrants = context.contentResolver.persistedUriPermissions.map { it.uri }.toSet()
         var locationId: String? = null
         var scenario: ActivityScenario<FilesActivity>? = null
         try {
-            assertTrue("Could not create disposable Downloads child",
-                shell("mkdir -p -- '${fixture.absolutePath}' && echo READY").contains("READY"))
+            shell("mkdir -p ${fixture.absolutePath}")
+            assertEquals("Could not create disposable Downloads child", fixture.absolutePath,
+                shell("ls -d ${fixture.absolutePath}").trim())
             scenario = ActivityScenario.launch(
                 Intent(context, FilesActivity::class.java).putExtra(FilesActivity.EXTRA_SETTINGS, true),
             )
@@ -82,7 +84,9 @@ class SelectedFolderSafTest {
             // EXTRA_SETTINGS reopens Settings on Activity recreation; return to the persisted
             // selected browser before testing its revoked-grant state.
             (context as FilesApplication).pageController.addedLocation(location.id)
-            val grant = context.contentResolver.persistedUriPermissions.single { it.uri.toString().contains(name) }
+            val grant = context.contentResolver.persistedUriPermissions.single {
+                it.uri !in existingGrants && it.isReadPermission && it.isWritePermission
+            }
             context.contentResolver.releasePersistableUriPermission(grant.uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             val disconnected = createFilesRepository(context).locations().single { it.id == location.id }
@@ -96,7 +100,7 @@ class SelectedFolderSafTest {
             locationId?.let { createFilesRepository(context).removeSelectedFolder(it) }
             context.getSharedPreferences("files-page", 0).edit().clear().commit()
             if (fixture.name == name && fixture.parentFile?.canonicalFile ==
-                EnvironmentPath.downloads().canonicalFile) shell("rm -rf -- '${fixture.absolutePath}'")
+                EnvironmentPath.downloads().canonicalFile) shell("rm -rf ${fixture.absolutePath}")
         }
     }
 

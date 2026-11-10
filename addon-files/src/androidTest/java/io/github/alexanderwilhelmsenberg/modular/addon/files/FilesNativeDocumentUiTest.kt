@@ -9,9 +9,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ApplicationProvider
@@ -84,6 +87,11 @@ class FilesNativeDocumentUiTest {
             rule.onNodeWithTag("files.document.markdown.editor").performTextReplacement("# Second\n")
             rule.onNodeWithTag("files.document.markdown.save").performClick()
             rule.waitUntil(15_000) { noteFile.readText() == "# Second\r\n" }
+            rule.waitUntil(15_000) {
+                runCatching { rule.onNodeWithText("Saved").assertExists() }.isSuccess &&
+                    runCatching { JSONObject(page).optJSONObject("document")?.optString("baseFingerprint") ==
+                        repository.fingerprint(markdown.id) }.getOrDefault(false)
+            }
             assertArrayEquals("# Second\r\n".toByteArray(), noteFile.readBytes())
 
             val back = JSONObject(controller.getPage("""{"version":1,"pageSize":100}"""))
@@ -94,14 +102,19 @@ class FilesNativeDocumentUiTest {
             val pdfPage = openItem(controller, pdf.id)
             assertTrue(JSONObject(pdfPage).getString("view") == "pdf")
             rule.runOnIdle { page = pdfPage }
-            rule.waitUntil(15_000) {
-                runCatching { rule.onNodeWithTag("files.document.pdf.page")
-                    .assertTextContains("Page 1 of 2") }.isSuccess
+            try {
+                rule.waitUntil(15_000) {
+                    runCatching { rule.onNodeWithTag("files.document.pdf.page")
+                        .assertTextContains("Page 1 of 2", substring = true) }.isSuccess
+                }
+            } catch (timeout: ComposeTimeoutException) {
+                throw AssertionError("PDF viewer never reached page 1. Current page JSON: ${page.take(3000)}. " +
+                    "Compose semantics: ${rule.onRoot().printToString().take(6000)}", timeout)
             }
             rule.onNodeWithTag("files.document.pdf.next").performClick()
             rule.waitUntil(15_000) {
                 runCatching { rule.onNodeWithTag("files.document.pdf.page")
-                    .assertTextContains("Page 2 of 2") }.isSuccess
+                    .assertTextContains("Page 2 of 2", substring = true) }.isSuccess
             }
         } finally {
             context.getSharedPreferences("files-page", 0).edit().clear().commit()

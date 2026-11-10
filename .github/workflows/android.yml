@@ -178,7 +178,7 @@ jobs:
             adb shell am force-stop com.google.android.apps.nexuslauncher
             python3 scripts/capture-module-settings.py
             adb install -r addon-files/build/outputs/apk/androidTest/debug/addon-files-debug-androidTest.apk
-            python3 scripts/run-files-device-tests.py || { result=$?; mkdir -p build/reports/device; adb logcat -d -b crash -v threadtime -t 4000 > build/reports/device/logcat-crash.txt 2>&1 || true; adb logcat -d -b main -v threadtime -t 3000 2>/dev/null | awk '/AndroidRuntime|FATAL EXCEPTION|Fatal signal|TestRunner|InstrumentationResultPrinter|io[.]github[.]alexanderwilhelmsenberg[.]modular/' > build/reports/device/logcat-relevant.txt || true; exit "$result"; }
+            python3 scripts/run-files-device-tests.py || { result=$?; mkdir -p build/reports/device; adb logcat -d -b crash -v threadtime -t 4000 > build/reports/device/logcat-crash.txt 2>&1 || true; adb logcat -d -b main -v threadtime -t 3000 2>/dev/null | awk '/AndroidRuntime|FATAL EXCEPTION|Fatal signal|TestRunner|InstrumentationResultPrinter|io[.]github[.]alexanderwilhelmsenberg[.]modular/' > build/reports/device/logcat-relevant.txt || true; touch build/reports/device/files-tests-failed; }
             gradle :addon-most-used:connectedDebugAndroidTest :reference-sort-alphabetical:connectedDebugAndroidTest --stacktrace || { result=$?; mkdir -p build/reports/device; adb logcat -d -b crash -v threadtime -t 4000 > build/reports/device/logcat-crash.txt 2>&1 || true; adb logcat -d -b main -v threadtime -t 3000 2>/dev/null | awk '/AndroidRuntime|FATAL EXCEPTION|Fatal signal|TestRunner|InstrumentationResultPrinter|io[.]github[.]alexanderwilhelmsenberg[.]modular/' > build/reports/device/logcat-relevant.txt || true; exit "$result"; }
             adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
             adb install -r addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
@@ -203,6 +203,7 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell pm path io.github.alexanderwilhelmsenberg.modular
             adb shell pm path io.github.alexanderwilhelmsenberg.modular.debug
+            test ! -f build/reports/device/files-tests-failed
 
       - name: Remove disposable keystore
         if: always()

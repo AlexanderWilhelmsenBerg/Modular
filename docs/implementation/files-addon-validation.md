@@ -52,9 +52,9 @@ The existing `.github/workflows/android.yml` uses API 35, installs release Core 
 | Gate | Current result | Evidence needed |
 | --- | --- | --- |
 | JVM protocol/planner/adapter tests | Passed: 244 tests across Core, API, SDK, Files UI and Files; 10 signing-verifier tests | Local release gate and CI verify run [42807186291](https://github.com/AlexanderWilhelmsenBerg/Modular/actions/runs/42807186291), commit `a0064ac` |
-| API 35 direct-storage safety instrumentation | Test source compiles; execution pending | `DirectStorageSafetyTest` connected XML, clean fixture teardown |
-| API 35 actual SAF picker and grant | Test source compiles; execution pending | `SelectedFolderSafTest` connected XML, real DocumentsUI grant/revoke |
-| API 35 Markdown/PDF/archive files | Sources compile; descriptor ownership corrected; device harness permission transitions corrected and awaiting rerun | `MarkdownRealDocumentTest`, `PdfRealDocumentTest`, `ArchiveRealStorageTest`, `FilesNativeDocumentUiTest` connected XML |
+| API 35 direct-storage safety instrumentation | Passed on `38cf6cd`: reviewed-child checks, copy-source protection, trash boundaries | `build/reports/device/addon-files-DirectStorageSafetyTest.log` in CI run 42811914169 |
+| API 35 actual SAF picker and grant | Test source compiles; execution pending | `build/reports/device/addon-files-SelectedFolderSafTest.log`, real DocumentsUI grant/revoke |
+| API 35 Markdown/PDF/archive files | Markdown/PDF/archive helper tests passed on `38cf6cd`; native UI assertion corrected and awaiting rerun | Per-test raw logs under `build/reports/device/addon-files-*.log` |
 | API 35 cross-APK Files instrumentation | Test source compiles; execution pending | Separate APK install plus connected test XML |
 | API 35 Files captures | Real-overview and populated-renderer capture sources added; execution pending | Actual nonempty PNGs and capture log |
 | Samsung One UI selected-folder/full-access flows | Unverified | Device/version, permission path, outcomes |
@@ -94,3 +94,5 @@ The product spec explicitly leaves these choices open. Record the implemented ch
 At commit `a0064ac`, production/test APK assembly, lint, SDK 0.3.0 publication and an independent SDK consumer build passed. The persistent signing workflow verified Core and Files debug/release package IDs against the configured public certificates. Native arm64/x86_64 libraries and APK ZIP alignment passed 16 KB alignment checks. These results establish build compatibility, not complete device acceptance.
 
 The initial API 35 Files instrumentation process stopped during its first archive case. Review found file-descriptor streams with two owners, which were replaced by Android auto-closing descriptor streams. Captured device logs then showed the process ending during storage-permission restoration. Permission setup now runs outside instrumentation, with separate full-access and selected-folder phases; CI preserves raw results and device logs. Final CI results and screenshots are recorded on PR #36. Samsung permission behavior, physical SD/USB removal, read-only media, and third-party providers remain manual acceptance checks.
+
+API 35 run [42811914169](https://github.com/AlexanderWilhelmsenBerg/Modular/actions/runs/42811914169), commit `38cf6cd`, completed all eight Files instrumentation cases: six passed. The native document UI assertion and selected-folder fixture setup failed; their corrections retain the original behavioral checks. The external runner records every test separately and fails CI if any case fails.

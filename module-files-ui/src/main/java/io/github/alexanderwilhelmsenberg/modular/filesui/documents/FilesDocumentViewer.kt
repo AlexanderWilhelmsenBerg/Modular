@@ -164,6 +164,7 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
     suspend fun save() {
         val source = original ?: return
         var writeStarted = false
+        status = "Saving…"
         try {
             val current = withContext(Dispatchers.IO) { loadMarkdown(loader, id) }
             if (current.hash != source.hash) { conflict = true; status = "Original changed outside Files. Reload or save a copy."; return }

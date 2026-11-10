@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
@@ -162,22 +163,28 @@ fun FilesPage(
         }
     }
     if (view == "map") {
-        FilesStorageMap(page, onAction = { send(PageAction(it), null) }, modifier = modifier)
+        Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            FilesStorageMap(page, onAction = { send(PageAction(it), null) })
+        }
         return
     }
     if (view == "filters") {
         val apply = actions.firstOrNull { it.kind == "applyFilter" }
-        Column(modifier.fillMaxSize()) {
-            actions.firstOrNull { it.kind == "back" }?.let { back ->
-                TextButton(onClick = { send(back, null) }) { Text("Back to files") }
+        Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize()) {
+                actions.firstOrNull { it.kind == "back" }?.let { back ->
+                    TextButton(onClick = { send(back, null) }) { Text("Back to files") }
+                }
+                if (apply != null) FilesFilterForm(page.optJSONObject("filter") ?: JSONObject(),
+                    onApply = { send(apply, it) }, modifier = Modifier.weight(1f))
             }
-            if (apply != null) FilesFilterForm(page.optJSONObject("filter") ?: JSONObject(),
-                onApply = { send(apply, it) }, modifier = Modifier.weight(1f))
         }
         return
     }
     if (view == "movePicker" || view == "restoreDestination") {
-        FilesDestinationPicker(page, onAction = { onAction(it.toString()) }, modifier = modifier)
+        Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            FilesDestinationPicker(page, onAction = { onAction(it.toString()) })
+        }
         return
     }
     if (view == "markdown" || view == "pdf") {
@@ -187,18 +194,22 @@ fun FilesPage(
         val latestCommit by rememberUpdatedState(actions.firstOrNull { it.kind == "documentCommit" })
         val latestCancel by rememberUpdatedState(actions.firstOrNull { it.kind == "documentCancel" })
         if (document != null && back != null) {
-            FilesDocumentViewer(documentId = document.optString("id"), kind = view,
-                baseFingerprint = document.optString("baseFingerprint"), documentLoader = documentLoader,
-                onCommit = {
-                    val commit = latestCommit
-                    if (commit == null) false else documentCommit(JSONObject().put("version", 1)
-                        .put("actionId", commit.id).put("operationToken", UUID.randomUUID().toString()).toString())
-                }, onCancel = {
-                    val cancel = latestCancel
-                    if (cancel != null) documentCancel(JSONObject().put("version", 1)
-                        .put("actionId", cancel.id).put("operationToken", UUID.randomUUID().toString()).toString())
-                }, onClose = { latestBack?.let { send(it, null) } }, modifier = modifier)
-        } else Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Document unavailable") }
+            Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                FilesDocumentViewer(documentId = document.optString("id"), kind = view,
+                    baseFingerprint = document.optString("baseFingerprint"), documentLoader = documentLoader,
+                    onCommit = {
+                        val commit = latestCommit
+                        if (commit == null) false else documentCommit(JSONObject().put("version", 1)
+                            .put("actionId", commit.id).put("operationToken", UUID.randomUUID().toString()).toString())
+                    }, onCancel = {
+                        val cancel = latestCancel
+                        if (cancel != null) documentCancel(JSONObject().put("version", 1)
+                            .put("actionId", cancel.id).put("operationToken", UUID.randomUUID().toString()).toString())
+                    }, onClose = { latestBack?.let { send(it, null) } })
+            }
+        } else Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Document unavailable") }
+        }
         return
     }
     var formAction by remember(pageJson) { mutableStateOf<PageAction?>(null) }
@@ -214,8 +225,7 @@ fun FilesPage(
                 if (trashAction != null) {
                     val count = trash?.optLong("fileCount", 0L) ?: 0L
                     val folders = trash?.optLong("emptyFolderCount", 0L) ?: 0L
-                    val color = when { count > 20 -> Color(0xFFC33B42); count > 0 || folders > 0 -> Color(0xFF3178CE)
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant }
+                    val color = filesTrashColor(count, folders)
                     TextButton(onClick = { send(trashAction, null) }, modifier = Modifier.testTag("files.trash.badge")) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Canvas(Modifier.size(22.dp)) {
@@ -420,6 +430,16 @@ private class PageAction(value: JSONObject?) {
     val kind: String = value?.optString("kind") ?: ""
     val input: String? = value?.optString("input")?.takeIf { it.isNotBlank() }
     val initial: String = value?.optString("initial") ?: ""
+}
+
+@Composable
+internal fun filesTrashColor(count: Long, emptyFolders: Long = 0): Color {
+    val light = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    return when {
+        count > 20 -> if (light) Color(0xFFAD2F39) else Color(0xFFFF737B)
+        count > 0 || emptyFolders > 0 -> if (light) Color(0xFF1D64B0) else Color(0xFF6AA9FF)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
 }
 
 private fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else

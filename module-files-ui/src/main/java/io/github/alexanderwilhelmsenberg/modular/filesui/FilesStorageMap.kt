@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -183,11 +184,8 @@ fun FilesStorageMap(
             }
             actions.firstOrNull { it.optString("kind") == "trash" }?.let { action ->
                 val count = page.optJSONObject("trash")?.optLong("fileCount", 0L) ?: 0L
-                val color = when {
-                    count > 20L -> Color(0xFFC33B42)
-                    count > 0L -> Color(0xFF3178CE)
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
+                val color = filesTrashColor(count,
+                    page.optJSONObject("trash")?.optLong("emptyFolderCount", 0L) ?: 0L)
                 TextButton(onClick = { onAction(action) }) { Text("Trash $count", color = color) }
             }
         }
@@ -230,7 +228,8 @@ fun FilesStorageMap(
                             .testTag("files-map-tile:${node.id}"),
                     ) {
                         if (rect.width >= 54f && rect.height >= 32f) {
-                            Text(node.name, Modifier.padding(5.dp), color = Color.White,
+                            Text(node.name, Modifier.padding(5.dp),
+                                color = if (node.type.color.luminance() > 0.179f) Color.Black else Color.White,
                                 maxLines = 2, overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.labelSmall)
                         }

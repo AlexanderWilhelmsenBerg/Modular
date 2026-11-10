@@ -76,8 +76,10 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         val info = query(rootUri)
         require(info.directory) { "Selected location must be a folder" }
         require(info.name != trashName) { "Module trash cannot be added as a normal location" }
-        prefs.edit().putString("tree.$key", uri.toString()).putString("label.$key", info.name)
-            .putBoolean("write.$key", flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0).apply()
+        check(prefs.edit().putString("tree.$key", uri.toString()).putString("label.$key", info.name)
+            .putBoolean("write.$key", flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0).commit()) {
+            "Could not persist selected folder"
+        }
         listings.clear()
         return locations().first { it.id == key }
         } finally { mutationLock.unlock() }
@@ -88,9 +90,11 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         try {
         val raw = prefs.getString("tree.$locationId", null) ?: return
         val tree = Uri.parse(raw)
+        check(prefs.edit().remove("tree.$locationId").remove("label.$locationId").remove("write.$locationId").commit()) {
+            "Could not remove selected folder"
+        }
         try { resolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
         try { resolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } catch (_: Exception) { }
-        prefs.edit().remove("tree.$locationId").remove("label.$locationId").remove("write.$locationId").apply()
         listings.clear()
         } finally { mutationLock.unlock() }
     }

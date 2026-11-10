@@ -34,7 +34,7 @@ import io.github.alexanderwilhelmsenberg.modular.organization.HomePageId
 import kotlin.math.roundToInt
 
 internal fun workspacePageOrder(order: List<HomePageId>): List<HomePageId> =
-    order.filter { it == HomePageId.Home || it is HomePageId.Widget }
+    order.filter { it == HomePageId.Home || it is HomePageId.Widget || it is HomePageId.Module }
 
 internal fun categoryPageOrder(order: List<HomePageId>): List<HomePageId> =
     order.filter { it == HomePageId.Home || it is HomePageId.Category }

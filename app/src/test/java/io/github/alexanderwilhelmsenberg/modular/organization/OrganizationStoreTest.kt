@@ -30,6 +30,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OrganizationStoreTest {
+    @Test fun moduleScreenPlacementPersistsWithoutChangingWidgetOrCategoryState() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        val before = store.currentSnapshot()
+        val page = ModuleHomePage("example.files/.FilesService", "example.files", "Files")
+        val left = before.pageOrder.indexOf(HomePageId.Home)
+        store.update(OrganizationBatch(listOf(OrganizationEdit.AddModulePage(page, left)))).getOrThrow()
+        val restored = OrganizationStore(memory).currentSnapshot()
+        assertEquals(HomePageId.Module(page.component), restored.visiblePageOrder().first())
+        assertEquals(before.categories, restored.categories)
+        assertEquals(before.workspacePages, restored.workspacePages)
+        assertEquals(before.widgets, restored.widgets)
+        store.update(OrganizationBatch(listOf(
+            OrganizationEdit.SetModulePageEnabled(page.component, false),
+        ))).getOrThrow()
+        assertFalse(HomePageId.Module(page.component) in store.currentSnapshot().visiblePageOrder())
+        assertTrue(HomePageId.Module(page.component) in store.currentSnapshot().pageOrder)
+        store.update(OrganizationBatch(listOf(OrganizationEdit.RemoveModulePage(page.component)))).getOrThrow()
+        assertEquals(before.pageOrder, store.currentSnapshot().pageOrder)
+    }
+
     private val a = AppKey("example.a", "A", 1)
     private val b = AppKey("example.b", "B", 2)
 

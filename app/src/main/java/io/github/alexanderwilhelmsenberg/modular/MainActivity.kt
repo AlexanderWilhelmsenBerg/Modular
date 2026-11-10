@@ -367,15 +367,21 @@ class MainActivity : ComponentActivity() {
                         grantStore.loadError.collectAsState()
 
                     val managementEvents by moduleRegistry.managementStore.events.collectAsState()
+                    var activeWorkspaceModuleComponent by remember { mutableStateOf<String?>(null) }
                     // Settings requests inspection sessions. Home needs only providers selected
                     // by its persisted context; the built-in launcher requires no module.
-                    LaunchedEffect(settingsVisible, modules, activeContext.context, instances) {
+                    LaunchedEffect(settingsVisible, modules, activeContext.context, instances,
+                        organizationSnapshot.modulePages, activeWorkspaceModuleComponent) {
                         val providerIds = activeContext.context?.bindings.orEmpty().mapNotNull { binding ->
                             instances.firstOrNull { it.id == binding.instanceId }?.providerId
                         }.toSet()
                         moduleRegistry.setConnectionDemand(
                             if (settingsVisible) null else modules.filter { module ->
                                 (module.moduleId ?: moduleRegistry.managementStore.knownProviderId(module.component)) in providerIds
+                                    || (module.component.flattenToString() == activeWorkspaceModuleComponent &&
+                                        organizationSnapshot.modulePages.any { page ->
+                                            page.enabled && page.component == activeWorkspaceModuleComponent
+                                        })
                             }.map { it.component }.toSet(),
                         )
                     }
@@ -398,6 +404,23 @@ class MainActivity : ComponentActivity() {
                             OrganizationHomeScreen(
                                 workspaceMode = true,
                                 onWidgetSurfaceVisible = { widgetSurfaceVisible = it },
+                                modulePageContent = { component, active, onInteractionActiveChange, onReturnHome ->
+                                    val module = modules.firstOrNull { it.component.flattenToString() == component }
+                                    io.github.alexanderwilhelmsenberg.modular.ui.ModuleWorkspacePage(
+                                        module = module, router = capabilityRouter,
+                                        active = active,
+                                        onInteractionActiveChange = onInteractionActiveChange,
+                                        onReturnHome = onReturnHome,
+                                        onOpenModuleSettings = {
+                                            if (module != null) {
+                                                selectedModuleComponent = module.component.flattenToString()
+                                                settingsVisible = true
+                                            }
+                                        },
+                                        onRetry = { module?.let { moduleRegistry.retry(it.component) } },
+                                    )
+                                },
+                                onActiveModuleChanged = { activeWorkspaceModuleComponent = it },
                                 listeningApps = listening.visibleApps,
                                 widgetContent = { widget, onLongPress ->
                                     WorkspaceWidgetTile(widgetController, widget, editMode = false, onLongPress = onLongPress)
@@ -538,6 +561,10 @@ class MainActivity : ComponentActivity() {
                                     showEntry = false,
                                     onOpenGridSettings = openGridSettings,
                                     snapshot = organizationSnapshot,
+                                    pageModules = modules,
+                                    onOpenModuleSettings = { module ->
+                                        selectedModuleComponent = module.component.flattenToString()
+                                    },
                                     onUpdate = organization.runtime::update,
                                     onAddWidget = widgetController::addWidget,
                                     onReconfigureWidget = widgetController::reconfigureWidget,

@@ -4,11 +4,11 @@ Modular add-ons are separately installed Android APKs. They expose a service ove
 
 ## Obtain the API
 
-The version 0.2.0 Android libraries use Maven coordinates:
+The version 0.3.0 Android libraries use Maven coordinates:
 
 ```kotlin
-implementation("io.github.alexanderwilhelmsenberg.modular:module-api:0.2.0")
-implementation("io.github.alexanderwilhelmsenberg.modular:module-sdk:0.2.0")
+implementation("io.github.alexanderwilhelmsenberg.modular:module-api:0.3.0")
+implementation("io.github.alexanderwilhelmsenberg.modular:module-sdk:0.3.0")
 ```
 
 Android CI publishes the release API/SDK libraries as the Maven-layout `modular-addon-sdk` artifact. Download it from a successful Android CI run and extract it into a directory such as `sdk-repository`. Point a Maven repository in your add-on's Gradle settings at the extracted directory. The standalone example takes it through `-PmodularSdkRepository=/absolute/path/to/sdk-repository`. This is a local artifact source; no Core source checkout or `project(":module-api")` dependency is needed. Android Gradle Plugin 9.4.1, Gradle 9.6, Java 17, compile SDK 37, and min SDK 29 match this release.
@@ -86,4 +86,28 @@ Core independently verifies the add-on's current package and certificate for gra
 
 Build the example with `gradle -p examples/standalone-sort-addon -PmodularSdkRepository=/absolute/path/to/sdk-repository :app:assembleDebug`. Install the add-on APK as a separate package. In Core Settings, inspect and enable its service, create two instances of its provider with `{"reverse":false}` and `{"reverse":true}`, and bind each to `modular.apps.sort/v1` in separate contexts. Switching contexts should change order while Core Home remains usable if the add-on is disabled or fails. Only one context is active at a time.
 
-The APK install is handled by Android; Core does not silently sideload packages. The baseline Home and Settings work with no add-ons. External Home/Drawer rendering, external themes, automation, scripting, MCP transport, and terminal capabilities are later contracts.
+The APK install is handled by Android; Core does not silently sideload packages. The baseline Home and Settings work with no add-ons. Native Files Home pages use the optional `modular.workspace.page/v1` contract described below. Arbitrary external UI rendering, external themes, automation, scripting, MCP transport, and terminal capabilities remain later contracts.
+
+## Native workspace pages (SDK 0.3.0)
+
+`modular.workspace.page/v1` is an optional protocol-v4 capability. It does not
+change existing sort/featured parcel layouts. The first trusted renderer is
+`kind: files`; this is a bounded native data contract, not permission to execute
+add-on UI code inside Core. New renderer kinds need Core support and a defined
+contract before a module can use them.
+
+Implement `IWorkspacePageCapability`: `getPage(requestJson)`,
+`performAction(requestJson)`, and `openDocument(documentId, mode)`. Every call
+must authenticate the live Core instance. JSON envelopes carry `version: 1`;
+`WorkspacePageContract` defines byte, page, field, and action-token bounds. Use
+opaque document identities, frozen server-owned action plans, and durable
+idempotency for destructive actions. Never put passwords, file contents, or raw
+filesystem authority into page metadata. Scoped descriptors must be closed by
+the receiver.
+
+Core discovers the page capability in the packaged descriptor. Users enable the
+module and add its page through Home screen Settings; the organizer persists the
+component identity and order. Module Settings owns access onboarding. Core owns
+Home/Apps navigation, page timeouts and unavailable-provider recovery. The Files
+implementation and [architecture plan](implementation/files-addon-architecture.md)
+show the complete integration.

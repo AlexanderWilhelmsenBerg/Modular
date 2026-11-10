@@ -20,6 +20,8 @@ include(":module-api")
 include(":module-sdk")
 include(":reference-sort-alphabetical")
 include(":addon-most-used")
+include(":addon-files")
+include(":module-files-ui")
 
 // Independent APK used only by catalog visibility instrumentation tests.
 include(":test-launcher-app")

@@ -48,6 +48,9 @@ import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationBatch
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationEdit
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationLimits
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationSnapshot
+import io.github.alexanderwilhelmsenberg.modular.organization.ModuleHomePage
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
+import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
 import io.github.alexanderwilhelmsenberg.modular.widgets.WidgetLayoutLimits
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePage
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePageId
@@ -83,6 +86,8 @@ fun WorkspaceSettingsUi(
     initialPageId: String = WorkspacePageId.HOME,
     onOpenRequestConsumed: () -> Unit = {},
     showEntry: Boolean = true,
+    pageModules: List<ModuleRecord> = emptyList(),
+    onOpenModuleSettings: (ModuleRecord) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val dialogScroll = rememberScrollState()
@@ -90,6 +95,7 @@ fun WorkspaceSettingsUi(
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var addPage by remember { mutableStateOf(false) }
+    var addModule by remember { mutableStateOf<ModuleRecord?>(null) }
     var renameId by remember { mutableStateOf<String?>(null) }
     var deleteId by remember { mutableStateOf<String?>(null) }
     var editWidgetId by remember { mutableStateOf<Int?>(null) }
@@ -160,6 +166,16 @@ fun WorkspaceSettingsUi(
                     onClick = { addPage = true }, enabled = !busy,
                     modifier = Modifier.fillMaxWidth().testTag("workspace-add-page"),
                 ) { Text("Add widget screen") }
+                pageModules.filter { module ->
+                    StandardCapabilities.WorkspacePage.wireValue in
+                        (module.descriptor?.providedCapabilities ?: module.capabilities) &&
+                        snapshot.modulePages.none { it.component == module.component.flattenToString() }
+                }.forEach { module ->
+                    OutlinedButton(onClick = { addModule = module }, enabled = !busy && module.enabled,
+                        modifier = Modifier.fillMaxWidth().testTag("workspace-add-module:${module.component.flattenToString()}")) {
+                        Text("Add ${module.label} to Home screens")
+                    }
+                }
                 Text("Screens", style = MaterialTheme.typography.titleMedium)
                 homeOrder.forEach { page ->
                     when (page) {
@@ -180,6 +196,20 @@ fun WorkspaceSettingsUi(
                                 onRename = { renameId = custom.id },
                                 onDelete = { deleteId = custom.id },
                             )
+                        }
+                        is HomePageId.Module -> {
+                            val modulePage = snapshot.modulePages.firstOrNull { it.component == page.component }
+                            if (modulePage != null) WorkspaceScreenRow(
+                                modulePage.name,
+                                if (modulePage.enabled) "Module screen" else "Module screen · off",
+                                !busy, modulePage.enabled,
+                                onToggle = { save(OrganizationEdit.SetModulePageEnabled(page.component, it)) },
+                                onDelete = { save(OrganizationEdit.RemoveModulePage(page.component)) },
+                                deleteLabel = "Remove screen",
+                            )
+                            pageModules.firstOrNull { it.component.flattenToString() == page.component }?.let { module ->
+                                TextButton(onClick = { onOpenModuleSettings(module) }) { Text("${module.label} settings") }
+                            }
                         }
                     }
                 }
@@ -331,6 +361,27 @@ fun WorkspaceSettingsUi(
             }
         },
     )
+    addModule?.let { module ->
+        AlertDialog(onDismissRequest = { addModule = null },
+            title = { Text("Add ${module.label}") },
+            text = { Text("Choose which side of Home to place this screen. You can move it later.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val home = snapshot.pageOrder.indexOf(HomePageId.Home).coerceAtLeast(0)
+                    save(OrganizationEdit.AddModulePage(ModuleHomePage(
+                        module.component.flattenToString(), module.moduleId ?: module.component.flattenToString(), module.label,
+                    ), home + 1), afterSuccess = { addModule = null })
+                }) { Text("Right of Home") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    val home = snapshot.pageOrder.indexOf(HomePageId.Home).coerceAtLeast(0)
+                    save(OrganizationEdit.AddModulePage(ModuleHomePage(
+                        module.component.flattenToString(), module.moduleId ?: module.component.flattenToString(), module.label,
+                    ), home), afterSuccess = { addModule = null })
+                }) { Text("Left of Home") }
+            })
+    }
     snapshot.workspacePages.firstOrNull { it.id == renameId }?.let { page ->
         WorkspacePageEditor(page, snapshot, busy, error, onDismiss = { renameId = null },
             onSave = { name, _ -> save(OrganizationEdit.UpdateWorkspacePage(page.copy(name = name))) { renameId = null } })
@@ -442,11 +493,13 @@ private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, order: List<HomeP
                     HomePageId.Home -> "Home"
                     is HomePageId.Category -> snapshot.categories.firstOrNull { it.id == page.id }?.name ?: "Removed"
                     is HomePageId.Widget -> snapshot.workspacePages.firstOrNull { it.id == page.id }?.name ?: "Removed"
+                    is HomePageId.Module -> snapshot.modulePages.firstOrNull { it.component == page.component }?.name ?: "Removed"
                 }
                 val active = when (page) {
                     HomePageId.Home -> true
                     is HomePageId.Category -> snapshot.categoriesEnabled && snapshot.categories.any { it.id == page.id && it.enabled }
                     is HomePageId.Widget -> snapshot.workspacePages.any { it.id == page.id && it.enabled }
+                    is HomePageId.Module -> snapshot.modulePages.any { it.component == page.component && it.enabled }
                 }
                 var drag by remember(page) { mutableFloatStateOf(0f) }
                 val dragModifier = if (enabled && page != HomePageId.Home) Modifier.pointerInput(order, page) {
@@ -466,6 +519,7 @@ private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, order: List<HomeP
                         HomePageId.Home -> "home"
                         is HomePageId.Category -> "category:${page.id}"
                         is HomePageId.Widget -> "widget:${page.id}"
+                        is HomePageId.Module -> "module:${page.component}"
                     }}"),
                     colors = CardDefaults.outlinedCardColors(containerColor =
                         if (drag != 0f || page == HomePageId.Home) MaterialTheme.colorScheme.primaryContainer
@@ -488,6 +542,7 @@ private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, order: List<HomeP
         val name = when (page) {
             is HomePageId.Category -> snapshot.categories.firstOrNull { it.id == page.id }?.name
             is HomePageId.Widget -> snapshot.workspacePages.firstOrNull { it.id == page.id }?.name
+            is HomePageId.Module -> snapshot.modulePages.firstOrNull { it.component == page.component }?.name
             HomePageId.Home -> null
         } ?: return@forEachIndexed
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -506,6 +561,7 @@ private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, order: List<HomeP
 private fun WorkspaceScreenRow(
     title: String, description: String, editable: Boolean, checked: Boolean?,
     onToggle: ((Boolean) -> Unit)? = null, onRename: (() -> Unit)? = null, onDelete: (() -> Unit)? = null,
+    deleteLabel: String = "Delete",
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -517,7 +573,7 @@ private fun WorkspaceScreenRow(
         }
         if (editable) Row {
             onRename?.let { TextButton(onClick = it) { Text("Rename") } }
-            onDelete?.let { TextButton(onClick = it) { Text("Delete") } }
+            onDelete?.let { TextButton(onClick = it) { Text(deleteLabel) } }
         }
     }
 }

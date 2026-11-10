@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "moduleId": "io.github.alexanderwilhelmsenberg.modular.files",
+  "moduleVersion": "0.1.0",
+  "displayName": "Modular Files",
+  "description": "File browser, storage map and reviewed cleanup on a Home page.",
+  "coreProtocol": {"min": 4, "max": 4},
+  "providedCapabilities": ["modular.workspace.page/v1"],
+  "requestedCoreCapabilities": [],
+  "managementActivity": ".FilesSettingsActivity",
+  "instanceConfiguration": {"schemaVersion": 1, "fields": []}
+}

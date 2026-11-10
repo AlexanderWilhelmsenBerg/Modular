@@ -47,6 +47,7 @@ object OrganizationLimits {
     const val MAX_ID_LENGTH = 128
     const val MAX_CONDITIONS_PER_FOLDER = 16
     const val MAX_WORKSPACE_PAGES = 32
+    const val MAX_MODULE_PAGES = 16
     const val MAX_WIDGETS = 128
     const val MAX_LISTENING_APPS = 64
     const val MIN_WIDGET_HEIGHT_DP = 48
@@ -277,6 +278,25 @@ class OrganizationStore internal constructor(private val dataStore: DataStore<Pr
                 pageOrder = state.pageOrder - HomePageId.Widget(edit.id),
                 widgets = state.widgets.filterNot { it.pageId == WorkspacePageId.widget(edit.id) })
         }
+        is OrganizationEdit.AddModulePage -> {
+            require(state.modulePages.none { it.component == edit.page.component }) { "Module page already exists" }
+            val order = state.pageOrder.toMutableList()
+            val position = edit.position ?: (order.indexOf(HomePageId.Home) + 1)
+            require(position in 0..order.size) { "Invalid page position" }
+            order.add(position, HomePageId.Module(edit.page.component))
+            state.copy(modulePages = state.modulePages + edit.page, pageOrder = order)
+        }
+        is OrganizationEdit.SetModulePageEnabled -> {
+            require(state.modulePages.any { it.component == edit.component }) { "Module page no longer exists" }
+            state.copy(modulePages = state.modulePages.map {
+                if (it.component == edit.component) it.copy(enabled = edit.enabled) else it
+            })
+        }
+        is OrganizationEdit.RemoveModulePage -> {
+            require(state.modulePages.any { it.component == edit.component }) { "Module page no longer exists" }
+            state.copy(modulePages = state.modulePages.filterNot { it.component == edit.component },
+                pageOrder = state.pageOrder - HomePageId.Module(edit.component))
+        }
         is OrganizationEdit.SetWorkspacePreferences -> state.copy(workspacePreferences = edit.preferences)
         is OrganizationEdit.SetWidgets -> state.copy(widgets = edit.widgets)
         is OrganizationEdit.SetListeningPreferences -> state.copy(listeningPreferences = edit.preferences)
@@ -337,6 +357,21 @@ private fun validate(snapshot: OrganizationSnapshot) {
         }
     }) { "Duplicate category name" }
     val workspaceIds = snapshot.workspacePages.map { it.id }
+    val moduleComponents = snapshot.modulePages.map { it.component }
+    require(moduleComponents.size <= OrganizationLimits.MAX_MODULE_PAGES &&
+        moduleComponents.distinct().size == moduleComponents.size &&
+        snapshot.modulePages.all { page ->
+            page.component.length in 3..512 && page.component.contains('/') &&
+                page.providerId.length in 3..160 && page.name.isNotBlank() &&
+                page.name == page.name.trim() &&
+                page.name.codePointCount(0, page.name.length) <= 120 &&
+                page.name.none { it.isISOControl() } &&
+                (page.signerKey.isEmpty() || (page.signerKey.length in 68..512 &&
+                    page.signerKey.startsWith(page.component.substringBefore('/') + "|") &&
+                    page.signerKey.substringAfter('|').split(',').all {
+                        it.matches(Regex("[0-9a-f]{64}"))
+                    }))
+        }) { "Invalid module pages" }
     require(workspaceIds.size <= OrganizationLimits.MAX_WORKSPACE_PAGES &&
         workspaceIds.distinct().size == workspaceIds.size &&
         snapshot.workspacePages.all { validId(it.id) && validName(it.name) &&
@@ -346,10 +381,11 @@ private fun validate(snapshot: OrganizationSnapshot) {
             collator.compare(snapshot.workspacePages[index].name, snapshot.workspacePages[it].name) == 0
         }
     }) { "Duplicate workspace page name" }
-    require(snapshot.pageOrder.size == snapshot.categories.size + workspaceIds.size + 1 &&
+    require(snapshot.pageOrder.size == snapshot.categories.size + workspaceIds.size + moduleComponents.size + 1 &&
         snapshot.pageOrder.count { it == HomePageId.Home } == 1 &&
         snapshot.pageOrder.toSet() == categoryIds.map(HomePageId::Category).toSet() +
-            workspaceIds.map(HomePageId::Widget).toSet() + HomePageId.Home) {
+            workspaceIds.map(HomePageId::Widget).toSet() +
+            moduleComponents.map(HomePageId::Module).toSet() + HomePageId.Home) {
         "Invalid page order"
     }
     require(snapshot.workspacePreferences.sectionOrder.size == WorkspaceSection.entries.size &&
@@ -464,6 +500,17 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
     fun public() = WorkspacePage(id, name, enabled)
     companion object { fun from(page: WorkspacePage) = SavedWorkspacePage(page.id, page.name, page.enabled) }
 }
+@Serializable private data class SavedModuleHomePage(
+    val component: String, val providerId: String, val name: String, val enabled: Boolean,
+    val signerKey: String = "",
+) {
+    fun public() = ModuleHomePage(component, providerId, name, enabled, signerKey)
+    companion object {
+        fun from(page: ModuleHomePage) = SavedModuleHomePage(
+            page.component, page.providerId, page.name, page.enabled, page.signerKey,
+        )
+    }
+}
 @Serializable private data class SavedWorkspacePreferences(
     val showClock: Boolean = true,
     val showDate: Boolean = true,
@@ -513,6 +560,7 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
     val pageOrder: List<String> = listOf("home") + BuiltInCategories.ids,
     val memberships: List<SavedMembership> = emptyList(),
     val workspacePages: List<SavedWorkspacePage> = emptyList(),
+    val modulePages: List<SavedModuleHomePage> = emptyList(),
     val workspacePreferences: SavedWorkspacePreferences = SavedWorkspacePreferences(),
     val widgets: List<SavedWidget> = emptyList(),
     val listeningPreferences: SavedListeningPreferences = SavedListeningPreferences(),
@@ -522,18 +570,21 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
         require(pairs.distinct().size == pairs.size) { "Duplicate membership pair" }
         val categoryIds = categories.mapTo(HashSet()) { it.id }
         val widgetIds = workspacePages.mapTo(HashSet()) { WorkspacePageId.widget(it.id) }
+        val moduleIds = modulePages.mapTo(HashSet()) { "module:${it.component}" }
         return OrganizationSnapshot(revision = revision, categoriesEnabled = categoriesEnabled,
             categories = categories.map { it.public() }, folders = folders.map { it.public() },
             pageOrder = pageOrder.map { key -> when {
                 key == WorkspacePageId.HOME -> HomePageId.Home
                 key in categoryIds || version == 1 -> HomePageId.Category(key)
                 key in widgetIds -> HomePageId.Widget(key.removePrefix(WorkspacePageId.WIDGET_PREFIX))
+                key in moduleIds -> HomePageId.Module(key.removePrefix("module:"))
                 else -> HomePageId.Category(key)
             } },
             overrides = memberships.filter { it.override != MembershipOverride.AUTO }
                 .associate { it.pair() to it.override },
             membershipTokens = memberships.associate { it.pair() to it.token },
             workspacePages = workspacePages.map { it.public() },
+            modulePages = modulePages.map { it.public() },
             workspacePreferences = workspacePreferences.public(),
             widgets = widgets.map { it.public() },
             listeningPreferences = listeningPreferences.public())
@@ -549,11 +600,13 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
                     HomePageId.Home -> "home"
                     is HomePageId.Category -> it.id
                     is HomePageId.Widget -> WorkspacePageId.widget(it.id)
+                    is HomePageId.Module -> "module:${it.component}"
                 } },
                 memberships = pairs.map { pair -> SavedMembership(pair.categoryId,
                     SavedKey.from(pair.appKey), snapshot.overrides[pair] ?: MembershipOverride.AUTO,
                     snapshot.membershipTokens[pair] ?: 0L) },
                 workspacePages = snapshot.workspacePages.map(SavedWorkspacePage::from),
+                modulePages = snapshot.modulePages.map(SavedModuleHomePage::from),
                 workspacePreferences = SavedWorkspacePreferences.from(snapshot.workspacePreferences),
                 widgets = snapshot.widgets.map(SavedWidget::from),
                 listeningPreferences = SavedListeningPreferences.from(snapshot.listeningPreferences))

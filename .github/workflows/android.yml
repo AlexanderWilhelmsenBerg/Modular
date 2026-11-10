@@ -9,10 +9,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -39,6 +43,8 @@ jobs:
           :module-sdk:testDebugUnitTest
           :app:testDebugUnitTest
           :reference-sort-alphabetical:testDebugUnitTest
+          :addon-files:testDebugUnitTest
+          :module-files-ui:testDebugUnitTest
           :addon-most-used:testDebugUnitTest
           --stacktrace
 
@@ -50,6 +56,8 @@ jobs:
           :test-community-module:lintDebug
           :app:lintDebug
           :reference-sort-alphabetical:lintDebug
+          :addon-files:lintDebug
+          :module-files-ui:lintDebug
           :addon-most-used:lintDebug
           --stacktrace
 
@@ -59,6 +67,8 @@ jobs:
           :app:assembleDebug
           :app:assembleDebugAndroidTest
           :reference-sort-alphabetical:assembleDebug
+          :addon-files:assembleDebug
+          :addon-files:assembleDebugAndroidTest
           :addon-most-used:assembleDebug
           :test-community-module:assembleDebug
           --stacktrace
@@ -101,13 +111,15 @@ jobs:
             module-sdk/build/reports/
             test-community-module/build/reports/
             reference-sort-alphabetical/build/reports/
+            addon-files/build/reports/
+            module-files-ui/build/reports/
             addon-most-used/build/reports/
 
   ipc-smoke:
     env:
       MODULAR_KEYSTORE_PASSWORD: modular-ci-only
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -153,8 +165,9 @@ jobs:
             -no-boot-anim
             -camera-back none
           script: |
-            gradle :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease :addon-most-used:assembleDebug :addon-most-used:assembleRelease :test-launcher-app:assembleDebug :test-community-module:assembleDebug :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --stacktrace
-            python3 scripts/verify-signed-apks.py --expected-certificates "$RUNNER_TEMP/modular-ci-certificates.json"
+            gradle :addon-files:assembleDebug :addon-files:assembleRelease :addon-files:assembleDebugAndroidTest :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease :addon-most-used:assembleDebug :addon-most-used:assembleRelease :test-launcher-app:assembleDebug :test-community-module:assembleDebug :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --stacktrace
+            python3 scripts/verify-signed-apks.py --expected-certificates "$RUNNER_TEMP/modular-ci-certificates.json" --include-files
+            adb install -r addon-files/build/outputs/apk/debug/addon-files-debug.apk
             adb install -r app/build/outputs/apk/release/app-release.apk
             adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
             adb install -r addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
@@ -164,10 +177,15 @@ jobs:
             adb shell cmd package set-home-activity io.github.alexanderwilhelmsenberg.modular.debug/io.github.alexanderwilhelmsenberg.modular.MainActivity
             adb shell am force-stop com.google.android.apps.nexuslauncher
             python3 scripts/capture-module-settings.py
-            gradle :addon-most-used:connectedDebugAndroidTest :reference-sort-alphabetical:connectedDebugAndroidTest --stacktrace
+            adb install -r addon-files/build/outputs/apk/androidTest/debug/addon-files-debug-androidTest.apk
+            python3 scripts/run-files-device-tests.py || { result=$?; mkdir -p build/reports/device; adb logcat -d -b crash -v threadtime -t 4000 > build/reports/device/logcat-crash.txt 2>&1 || true; adb logcat -d -b main -v threadtime -t 3000 2>/dev/null | awk '/AndroidRuntime|FATAL EXCEPTION|Fatal signal|TestRunner|InstrumentationResultPrinter|io[.]github[.]alexanderwilhelmsenberg[.]modular/' > build/reports/device/logcat-relevant.txt || true; mkdir -p build/reports/device/saf-picker; adb pull /sdcard/Pictures/ModularFilesValidation/. build/reports/device/saf-picker/ || true; touch build/reports/device/files-tests-failed; }
+            gradle :addon-most-used:connectedDebugAndroidTest :reference-sort-alphabetical:connectedDebugAndroidTest --stacktrace || { result=$?; mkdir -p build/reports/device; adb logcat -d -b crash -v threadtime -t 4000 > build/reports/device/logcat-crash.txt 2>&1 || true; adb logcat -d -b main -v threadtime -t 3000 2>/dev/null | awk '/AndroidRuntime|FATAL EXCEPTION|Fatal signal|TestRunner|InstrumentationResultPrinter|io[.]github[.]alexanderwilhelmsenberg[.]modular/' > build/reports/device/logcat-relevant.txt || true; exit "$result"; }
             adb install -r reference-sort-alphabetical/build/outputs/apk/debug/reference-sort-alphabetical-debug.apk
             adb install -r addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
-            gradle :app:connectedDebugAndroidTest --stacktrace || { echo "=== Instrumentation XML ==="; find app/build/outputs/androidTest-results/connected -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true; echo "=== Recent logcat ==="; adb logcat -d -t 500 || true; mkdir -p build/ui-screenshots/home-v2 build/ui-screenshots/organization build/ui-screenshots/settings build/ui-screenshots/workspace; adb pull /sdcard/Pictures/ModularHomeV2/. build/ui-screenshots/home-v2/ || true; adb pull /sdcard/Pictures/ModularOrganization/. build/ui-screenshots/organization/ || true; adb pull /sdcard/Pictures/ModularSettings/. build/ui-screenshots/settings/ || true; adb pull /sdcard/Pictures/ModularWorkspace/. build/ui-screenshots/workspace/ || true; exit 1; }
+            adb install -r addon-files/build/outputs/apk/debug/addon-files-debug.apk
+            adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            python3 scripts/check-grant-lifecycle.py || touch build/reports/device/grant-lifecycle-failed
+            gradle :app:connectedDebugAndroidTest --stacktrace || { result=$?; mkdir -p build/reports/device build/ui-screenshots/home-v2 build/ui-screenshots/organization build/ui-screenshots/settings build/ui-screenshots/workspace build/ui-screenshots/files; adb logcat -d -b crash -v threadtime -t 4000 > build/reports/device/logcat-crash.txt 2>&1 || true; adb logcat -d -b main -v threadtime -t 3000 2>/dev/null | awk '/AndroidRuntime|FATAL EXCEPTION|Fatal signal|TestRunner|InstrumentationResultPrinter|io[.]github[.]alexanderwilhelmsenberg[.]modular/' > build/reports/device/logcat-relevant.txt || true; adb pull /sdcard/Pictures/ModularHomeV2/. build/ui-screenshots/home-v2/ || true; adb pull /sdcard/Pictures/ModularOrganization/. build/ui-screenshots/organization/ || true; adb pull /sdcard/Pictures/ModularSettings/. build/ui-screenshots/settings/ || true; adb pull /sdcard/Pictures/ModularWorkspace/. build/ui-screenshots/workspace/ || true; adb pull /sdcard/Pictures/ModularFiles/. build/ui-screenshots/files/ || true; exit "$result"; }
 
             mkdir -p build/ui-screenshots/organization
             adb pull /sdcard/Pictures/ModularOrganization/. build/ui-screenshots/organization/
@@ -181,11 +199,14 @@ jobs:
             python3 scripts/capture-home-v2.py
             python3 scripts/capture-workspace.py
             python3 scripts/capture-settings.py
+            python3 scripts/capture-files.py
 
             adb install -r reference-sort-alphabetical/build/outputs/apk/release/reference-sort-alphabetical-release.apk
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell pm path io.github.alexanderwilhelmsenberg.modular
             adb shell pm path io.github.alexanderwilhelmsenberg.modular.debug
+            test ! -f build/reports/device/files-tests-failed
+            test ! -f build/reports/device/grant-lifecycle-failed
 
       - name: Remove disposable keystore
         if: always()
@@ -198,8 +219,16 @@ jobs:
           name: device-test-reports
           path: |
             app/build/reports/androidTests/
+            addon-files/build/reports/
+            module-files-ui/build/reports/
+            addon-files/build/reports/androidTests/
+            addon-files/build/outputs/androidTest-results/
+            app/build/outputs/androidTest-results/
+            addon-most-used/build/outputs/androidTest-results/
+            reference-sort-alphabetical/build/outputs/androidTest-results/
             addon-most-used/build/reports/androidTests/
             reference-sort-alphabetical/build/reports/androidTests/
+            build/reports/device/
             build/reports/search-transitions.log
 
       - name: Upload settings screen captures

@@ -40,11 +40,12 @@ private fun HomePageId.savedKey(): String = when (this) {
     HomePageId.Home -> "home"
     is HomePageId.Category -> "category:$id"
     is HomePageId.Widget -> "widget:$id"
+    is HomePageId.Module -> "module:$component"
 }
 
 /** Keep the persisted relative order while giving each vertical surface its own pages. */
 internal fun OrganizationSnapshot.workspaceSurfacePages(): List<HomePageId> =
-    visiblePageOrder().filter { it == HomePageId.Home || it is HomePageId.Widget }
+    visiblePageOrder().filter { it == HomePageId.Home || it is HomePageId.Widget || it is HomePageId.Module }
 
 internal fun OrganizationSnapshot.drawerSurfacePages(): List<HomePageId> =
     visiblePageOrder().filter { it == HomePageId.Home || it is HomePageId.Category }

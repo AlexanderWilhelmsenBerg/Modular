@@ -89,6 +89,8 @@ fun OrganizationHomeScreen(
     onEditWorkspace: (String) -> Unit = {},
     onOpenWorkspaceAdvanced: (String) -> Unit = onEditWorkspace,
     listeningApps: List<LaunchableApp> = emptyList(),
+    modulePageContent: @Composable (String, Boolean, (Boolean) -> Unit, () -> Unit) -> Unit = { _, _, _, _ -> },
+    onActiveModuleChanged: (String?) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -105,6 +107,11 @@ fun OrganizationHomeScreen(
     var setupSorter by remember { mutableStateOf(false) }
     var categoryMembers by remember { mutableStateOf<String?>(null) }
     var pageName by rememberSaveable { mutableStateOf("home") }
+    LaunchedEffect(pageName, workspaceMode) {
+        onActiveModuleChanged(pageName.removePrefix("module:")
+            .takeIf { workspaceMode && pageName.startsWith("module:") })
+    }
+    DisposableEffect(Unit) { onDispose { onActiveModuleChanged(null) } }
     var drawerPageName by rememberSaveable { mutableStateOf("home") }
     var savedAppsOpen by rememberSaveable { mutableStateOf(false) }
     val vertical = remember { WorkspaceVerticalState(savedAppsOpen) }
@@ -126,9 +133,10 @@ fun OrganizationHomeScreen(
     var searchOriginDrawerPage by rememberSaveable { mutableStateOf("home") }
     var activeWorkspaceList by remember { mutableStateOf<LazyListState?>(null) }
     var activeDrawerList by remember { mutableStateOf<LazyListState?>(null) }
+    var moduleInteractionActive by remember { mutableStateOf(false) }
     val homeWorkspaceList = rememberLazyListState()
     var retainedListeningApps by remember { mutableStateOf(listeningApps) }
-    val workspacePage = pageName == "home" || pageName.startsWith("widget:")
+    val workspacePage = pageName == "home" || pageName.startsWith("widget:") || pageName.startsWith("module:")
     val widgetSurfaceVisible = workspaceMode && workspacePage && vertical.progress < 1f
     val currentWidgetVisibilityCallback by rememberUpdatedState(onWidgetSurfaceVisible)
     SideEffect { onWidgetSurfaceVisible(widgetSurfaceVisible) }
@@ -136,7 +144,7 @@ fun OrganizationHomeScreen(
         onDispose { currentWidgetVisibilityCallback(false) }
     }
     val workspaceGesturesEnabled = workspaceMode && workspacePage && searchQuery.isBlank() &&
-        sorterController == null && !editingSearch && !editingWidgetGrid
+        sorterController == null && !editingSearch && !editingWidgetGrid && !moduleInteractionActive
     fun settle(open: Boolean, immediate: Boolean = false) {
         transitionJob?.cancel()
         savedAppsOpen = open
@@ -287,6 +295,7 @@ fun OrganizationHomeScreen(
     val initialPage = when {
         pageName == "home" -> HomePageId.Home
         pageName.startsWith("widget:") -> HomePageId.Widget(pageName.removePrefix("widget:"))
+        pageName.startsWith("module:") -> HomePageId.Module(pageName.removePrefix("module:"))
         pageName.startsWith("category:") -> HomePageId.Category(pageName.removePrefix("category:"))
         else -> HomePageId.Category(pageName)
     }
@@ -324,15 +333,19 @@ fun OrganizationHomeScreen(
                 (if (sorter != null) snapshot.copy(categoriesEnabled = false) else snapshot).visiblePageOrder(),
             gesturesEnabled = !editingSearch && searchQuery.isBlank() && sorter == null &&
                 openFolderId == null && organizeApp == null && folderAction == null &&
-                categoryMembers == null && editingFolderId == null && !setupSorter && !editingWidgetGrid && vertical.progress == 0f,
+                categoryMembers == null && editingFolderId == null && !setupSorter && !editingWidgetGrid &&
+                !moduleInteractionActive && vertical.progress == 0f,
             homeResetToken = homeResetToken, initialPageId = initialPage,
             requestedPage = requestedPage, pageRequestSerial = pageRequestSerial,
             modifier = Modifier.offset { IntOffset(0, if (workspaceMode && workspacePage) (-vertical.progress * viewportHeight).roundToInt() else 0) },
             onScrollingChange = { pagerScrolling = it },
-            onPageChanged = { pageName = when (it) {
+            onPageChanged = {
+                if (it !is HomePageId.Module) moduleInteractionActive = false
+                pageName = when (it) {
                 HomePageId.Home -> "home"
                 is HomePageId.Category -> "category:${it.id}"
                 is HomePageId.Widget -> "widget:${it.id}"
+                is HomePageId.Module -> "module:${it.component}"
             } },
             renderPage = { page ->
                 val category = (page as? HomePageId.Category)?.let { id -> snapshot.categories.firstOrNull { it.id == id.id } }
@@ -352,7 +365,14 @@ fun OrganizationHomeScreen(
                 }
                 DisposableEffect(page) { onDispose { scrollingPages.remove(page) } }
                 val featured = if (category == null && sorter == null) featuredApps?.let(projection::filterDirectStarred) else null
-                if (workspaceMode && (page == HomePageId.Home || page is HomePageId.Widget) && sorter == null) {
+                if (workspaceMode && page is HomePageId.Module && sorter == null) {
+                    if (pageName == "module:${page.component}") SideEffect { activeWorkspaceList = null }
+                    Box(Modifier.fillMaxSize().padding(bottom = 72.dp, end = 28.dp)) {
+                        modulePageContent(page.component, pageName == "module:${page.component}",
+                            { moduleInteractionActive = it },
+                            { requestedPage = HomePageId.Home; pageRequestSerial += 1 })
+                    }
+                } else if (workspaceMode && (page == HomePageId.Home || page is HomePageId.Widget) && sorter == null) {
                     val pageKey = if (page == HomePageId.Home) "home" else "widget:${(page as HomePageId.Widget).id}"
                     if (pageName == pageKey) SideEffect { activeWorkspaceList = pageList }
                     WorkspaceHome(
@@ -462,6 +482,7 @@ fun OrganizationHomeScreen(
                         HomePageId.Home -> "home"
                         is HomePageId.Category -> "category:${it.id}"
                         is HomePageId.Widget -> "home"
+                        is HomePageId.Module -> "home"
                     } },
                     renderPage = { page ->
                         val category = (page as? HomePageId.Category)?.let { id ->

@@ -128,6 +128,7 @@ class MainActivity : ComponentActivity() {
 
     private var settingsVisible by mutableStateOf(false)
     private var selectedModuleComponent by mutableStateOf<String?>(null)
+    private var moduleIdentityRevision by mutableStateOf(0)
     private var pendingUninstallPackage: String? = null
 
     private val appUninstallLauncher = registerForActivityResult(
@@ -330,6 +331,10 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 ModularTheme(appearanceTheme) {
+                    val identityRevision = moduleIdentityRevision
+                    val modulePageIdentityResolver = remember {
+                        AndroidModuleIdentityResolver(this@MainActivity)
+                    }
                     val modules by moduleRegistry.modules.collectAsState()
                     val appCatalog by appRepository.catalog.collectAsState()
                     val visibleCatalog = remember(appCatalog, appCustomizations) {
@@ -367,15 +372,27 @@ class MainActivity : ComponentActivity() {
                         grantStore.loadError.collectAsState()
 
                     val managementEvents by moduleRegistry.managementStore.events.collectAsState()
+                    var activeWorkspaceModuleComponent by remember { mutableStateOf<String?>(null) }
                     // Settings requests inspection sessions. Home needs only providers selected
                     // by its persisted context; the built-in launcher requires no module.
-                    LaunchedEffect(settingsVisible, modules, activeContext.context, instances) {
+                    LaunchedEffect(settingsVisible, modules, activeContext.context, instances,
+                        organizationSnapshot.modulePages, activeWorkspaceModuleComponent,
+                        identityRevision) {
                         val providerIds = activeContext.context?.bindings.orEmpty().mapNotNull { binding ->
                             instances.firstOrNull { it.id == binding.instanceId }?.providerId
                         }.toSet()
                         moduleRegistry.setConnectionDemand(
                             if (settingsVisible) null else modules.filter { module ->
                                 (module.moduleId ?: moduleRegistry.managementStore.knownProviderId(module.component)) in providerIds
+                                    || (module.component.flattenToString() == activeWorkspaceModuleComponent &&
+                                        organizationSnapshot.modulePages.any { page ->
+                                            page.enabled && page.component == activeWorkspaceModuleComponent &&
+                                                page.matchesInstalledProvider(
+                                                    module.component.flattenToString(), module.moduleId,
+                                                    modulePageIdentityResolver.resolve(module.component.packageName)
+                                                        .getOrNull()?.key,
+                                                )
+                                        })
                             }.map { it.component }.toSet(),
                         )
                     }
@@ -398,6 +415,39 @@ class MainActivity : ComponentActivity() {
                             OrganizationHomeScreen(
                                 workspaceMode = true,
                                 onWidgetSurfaceVisible = { widgetSurfaceVisible = it },
+                                modulePageContent = { component, active, onInteractionActiveChange, onReturnHome ->
+                                    val module = modules.firstOrNull { it.component.flattenToString() == component }
+                                    val page = organizationSnapshot.modulePages.firstOrNull { it.component == component }
+                                    val installedSignerKey = remember(module, identityRevision) {
+                                        module?.let {
+                                            modulePageIdentityResolver.resolve(it.component.packageName).getOrNull()?.key
+                                        }
+                                    }
+                                    val verifiedModule = module?.takeIf { record ->
+                                        page?.matchesInstalledProvider(
+                                            record.component.flattenToString(), record.moduleId,
+                                            installedSignerKey,
+                                        ) == true
+                                    }
+                                    io.github.alexanderwilhelmsenberg.modular.ui.ModuleWorkspacePage(
+                                        module = verifiedModule, router = capabilityRouter,
+                                        expectedSignerKey = page?.signerKey,
+                                        unavailableReason = if (module != null && verifiedModule == null)
+                                            "Module signing identity changed. Remove this screen and add it again to trust the installed module."
+                                        else null,
+                                        active = active,
+                                        onInteractionActiveChange = onInteractionActiveChange,
+                                        onReturnHome = onReturnHome,
+                                        onOpenModuleSettings = {
+                                            if (module != null) {
+                                                selectedModuleComponent = module.component.flattenToString()
+                                                settingsVisible = true
+                                            }
+                                        },
+                                        onRetry = { verifiedModule?.let { moduleRegistry.retry(it.component) } },
+                                    )
+                                },
+                                onActiveModuleChanged = { activeWorkspaceModuleComponent = it },
                                 listeningApps = listening.visibleApps,
                                 widgetContent = { widget, onLongPress ->
                                     WorkspaceWidgetTile(widgetController, widget, editMode = false, onLongPress = onLongPress)
@@ -538,6 +588,10 @@ class MainActivity : ComponentActivity() {
                                     showEntry = false,
                                     onOpenGridSettings = openGridSettings,
                                     snapshot = organizationSnapshot,
+                                    pageModules = modules,
+                                    onOpenModuleSettings = { module ->
+                                        selectedModuleComponent = module.component.flattenToString()
+                                    },
                                     onUpdate = organization.runtime::update,
                                     onAddWidget = widgetController::addWidget,
                                     onReconfigureWidget = widgetController::reconfigureWidget,
@@ -841,6 +895,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        moduleIdentityRevision++
         if (::homeRoleController.isInitialized) {
             refreshHomeRoleState()
         }

@@ -21,6 +21,10 @@ class SignerOutputTest(unittest.TestCase):
     def test_core_only_selects_core(self):
         self.assertEqual(["app"], [module for module, _ in artifact_modules(core_only=True)])
 
+    def test_files_distribution_selects_core_and_files(self):
+        self.assertEqual(["app", "addon-files"],
+                         [module for module, _ in artifact_modules(core_only=True, include_files=True)])
+
     def test_default_checks_all_six_apks(self):
         self.assertEqual(["app", "reference-sort-alphabetical", "addon-most-used"],
                          [module for module, _ in artifact_modules()])

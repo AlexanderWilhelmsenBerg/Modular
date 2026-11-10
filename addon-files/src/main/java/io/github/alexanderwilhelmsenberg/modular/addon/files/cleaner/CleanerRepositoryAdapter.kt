@@ -12,6 +12,7 @@ import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.OperationRe
 import java.io.IOException
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.zip.ZipFile
@@ -197,17 +198,33 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
         try {
             ParcelFileDescriptor.AutoCloseInputStream(repository.openRead(leftId)).use { left ->
                 ParcelFileDescriptor.AutoCloseInputStream(repository.openRead(rightId)).use { right ->
-                    val bufferSize = 32 * 1024
+                    val a = ByteArray(32 * 1024)
+                    val b = ByteArray(a.size)
                     while (true) {
-                        val a = left.readNBytes(bufferSize)
-                        val b = right.readNBytes(bufferSize)
-                        if (!a.contentEquals(b)) return false
-                        if (a.isEmpty()) return true
+                        val countA = fillChunk(left, a)
+                        val countB = fillChunk(right, b)
+                        if (countA != countB) return false
+                        if (countA == 0) return true
+                        for (i in 0 until countA) if (a[i] != b[i]) return false
                     }
                 }
             }
         } catch (ex: Exception) {
             throw IOException("Content comparison failed", ex)
         }
+    }
+
+    private fun fillChunk(input: InputStream, bytes: ByteArray): Int {
+        var count = 0
+        while (count < bytes.size) {
+            val read = input.read(bytes, count, bytes.size - count)
+            if (read < 0) break
+            if (read == 0) {
+                val one = input.read()
+                if (one < 0) break
+                bytes[count++] = one.toByte()
+            } else count += read
+        }
+        return count
     }
 }

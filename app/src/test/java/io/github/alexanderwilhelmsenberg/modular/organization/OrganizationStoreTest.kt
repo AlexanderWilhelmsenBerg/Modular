@@ -34,11 +34,20 @@ class OrganizationStoreTest {
         val memory = MemoryPreferences()
         val store = OrganizationStore(memory)
         val before = store.currentSnapshot()
-        val page = ModuleHomePage("example.files/.FilesService", "example.files", "Files")
+        val signer = "example.files|${"a".repeat(64)}"
+        val page = ModuleHomePage("example.files/.FilesService", "example.files", "Files",
+            signerKey = signer)
         val left = before.pageOrder.indexOf(HomePageId.Home)
         store.update(OrganizationBatch(listOf(OrganizationEdit.AddModulePage(page, left)))).getOrThrow()
         val restored = OrganizationStore(memory).currentSnapshot()
         assertEquals(HomePageId.Module(page.component), restored.visiblePageOrder().first())
+        assertEquals(signer, restored.modulePages.single().signerKey)
+        assertTrue(restored.modulePages.single().matchesInstalledProvider(
+            page.component, page.providerId, signer))
+        assertFalse(restored.modulePages.single().matchesInstalledProvider(
+            page.component, page.providerId, "example.files|${"b".repeat(64)}"))
+        assertFalse(restored.modulePages.single().matchesInstalledProvider(
+            page.component, "example.other", signer))
         assertEquals(before.categories, restored.categories)
         assertEquals(before.workspacePages, restored.workspacePages)
         assertEquals(before.widgets, restored.widgets)

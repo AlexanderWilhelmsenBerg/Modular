@@ -58,14 +58,7 @@ class PdfDocumentSession private constructor(
         if (!textFeaturesAvailable) return null
         require(index in 0 until pageCount)
         require(maxCharacters in 1..100_000)
-        return renderer.openPage(index).use { page ->
-            buildString {
-                for (block in page.textContents) {
-                    if (length >= maxCharacters) break
-                    append(block.text.take(maxCharacters - length))
-                }
-            }
-        }
+        return renderer.openPage(index).use { PdfApi35.pageText(it, maxCharacters) }
     }
 
     /** Search only requested pages so large PDFs are not scanned or retained at once. */
@@ -73,9 +66,7 @@ class PdfDocumentSession private constructor(
         if (!textFeaturesAvailable) return null
         require(index in 0 until pageCount)
         require(query.length in 1..200 && maxMatches in 1..100)
-        return renderer.openPage(index).use { page ->
-            page.searchText(query).take(maxMatches).map { PdfTextMatch(index, it.textStartIndex) }
-        }
+        return renderer.openPage(index).use { PdfApi35.search(it, index, query, maxMatches) }
     }
 
     fun readingPosition(): PdfReadingPosition? {
@@ -107,7 +98,7 @@ class PdfDocumentSession private constructor(
             val descriptor = repository.openRead(fileId)
             try {
                 val renderer = if (Build.VERSION.SDK_INT >= 35) {
-                    PdfRenderer(descriptor, LoadParams.Builder().apply { password?.let { setPassword(it) } }.build())
+                    PdfApi35.open(descriptor, password)
                 } else PdfRenderer(descriptor)
                 return PdfDocumentSession(context.applicationContext, repository, fileId, repository.fingerprint(fileId), renderer)
             } catch (error: Exception) {
@@ -116,4 +107,20 @@ class PdfDocumentSession private constructor(
             }
         }
     }
+}
+
+/** Isolates Android 15-only symbols from the API 29–34 renderer path. */
+private object PdfApi35 {
+    fun open(descriptor: android.os.ParcelFileDescriptor, password: String?): PdfRenderer =
+        PdfRenderer(descriptor, LoadParams.Builder().apply { password?.let { setPassword(it) } }.build())
+
+    fun pageText(page: PdfRenderer.Page, maxCharacters: Int): String = buildString {
+        for (block in page.textContents) {
+            if (length >= maxCharacters) break
+            append(block.text.take(maxCharacters - length))
+        }
+    }
+
+    fun search(page: PdfRenderer.Page, index: Int, query: String, maxMatches: Int): List<PdfTextMatch> =
+        page.searchText(query).take(maxMatches).map { PdfTextMatch(index, it.textStartIndex) }
 }

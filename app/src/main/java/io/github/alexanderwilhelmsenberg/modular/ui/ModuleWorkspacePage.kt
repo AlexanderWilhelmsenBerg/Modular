@@ -1,10 +1,8 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
-import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.ParcelFileDescriptor
-import android.webkit.MimeTypeMap
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -31,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -41,8 +38,9 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.WorkspacePageContract
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.IWorkspacePageCapability
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleConnectionStatus
+import io.github.alexanderwilhelmsenberg.modular.modules.ModuleDescriptorDiscovery
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
-import java.io.File
+import io.github.alexanderwilhelmsenberg.modular.security.AndroidModuleIdentityResolver
 import java.util.UUID
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -51,6 +49,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.jsonPrimitive
 
 /** Timeouts return to Home even if a remote Binder ignores cancellation. */
 private object WorkspaceBinderCalls {
@@ -105,6 +104,8 @@ private object WorkspaceBinderCalls {
 fun ModuleWorkspacePage(
     module: ModuleRecord?,
     router: CapabilityRouter,
+    unavailableReason: String? = null,
+    expectedSignerKey: String? = null,
     active: Boolean,
     onInteractionActiveChange: (Boolean) -> Unit,
     onReturnHome: () -> Unit,
@@ -158,15 +159,78 @@ fun ModuleWorkspacePage(
         return raw
     }
 
+    fun visibleAction(id: String): JSONObject? {
+        val page = JSONObject(pageJson ?: "{}")
+        val all = mutableListOf<JSONObject>()
+        fun addActions(array: org.json.JSONArray?) {
+            for (index in 0 until (array?.length() ?: 0)) {
+                array?.optJSONObject(index)?.let(all::add)
+            }
+        }
+        addActions(page.optJSONArray("actions"))
+        addActions(page.optJSONObject("dialog")?.optJSONArray("actions"))
+        val items = page.optJSONArray("items")
+        for (index in 0 until (items?.length() ?: 0)) {
+            addActions(items?.optJSONObject(index)?.optJSONArray("actions"))
+        }
+        return all.firstOrNull { it.optString("id") == id }
+    }
+
+    fun launchHostAction(hostAction: String, nonce: String) {
+        val current = module ?: error("Module is unavailable")
+        check(active && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            "Return to Files to open this activity"
+        }
+        require(hostAction in setOf(WorkspacePageContract.HOST_PICK_FOLDER,
+            WorkspacePageContract.HOST_FULL_ACCESS, WorkspacePageContract.HOST_OPEN_DOCUMENT,
+            WorkspacePageContract.HOST_SHARE_DOCUMENT)) { "Unsupported module activity request" }
+        require(nonce.length in 32..128 && nonce.matches(Regex("[A-Za-z0-9_-]+"))) {
+            "Invalid module activity token"
+        }
+        val signer = AndroidModuleIdentityResolver(context)
+            .resolve(current.component.packageName).getOrThrow().key
+        check(expectedSignerKey != null && signer == expectedSignerKey) {
+            "Module signing identity changed. Remove and add this screen again."
+        }
+        check(current.status == ModuleConnectionStatus.CONNECTED && route != null) {
+            "Module page is no longer connected"
+        }
+        val declaration = current.descriptor?.managementActivity
+            ?: error("Module has no setup screen")
+        val target = ModuleDescriptorDiscovery.validateManagementActivity(context.packageManager,
+            ServiceInfo().apply { packageName = current.component.packageName }, declaration)
+        context.startActivity(Intent().setComponent(target)
+            .putExtra(WorkspacePageContract.EXTRA_HOST_HANDOFF_NONCE, nonce))
+    }
+
     fun submitAction(request: String) {
         if (busy) return
+        val hostAction: String
+        try {
+            val actionId = WorkspacePageContract.validateActionRequest(request)["actionId"]
+                ?.jsonPrimitive?.content ?: error("Invalid action")
+            val action = visibleAction(actionId)
+            hostAction = action?.optString("hostAction").orEmpty()
+        } catch (failure: Exception) {
+            message = failure.message ?: "Action failed"
+            return
+        }
         scope.launch {
             busy = true
             try {
                 WorkspacePageContract.validateActionRequest(request)
                 val remote = capability()
                 val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(request) }
-                pageJson = validatedPage(raw)
+                val validated = validatedPage(raw)
+                if (hostAction.isNotEmpty()) {
+                    val launch = JSONObject(validated).optJSONObject("hostLaunch")
+                        ?: error("Module did not authorize the requested activity")
+                    require(launch.optString("kind") == hostAction) {
+                        "Module activity request changed"
+                    }
+                    launchHostAction(hostAction, launch.optString("nonce"))
+                }
+                pageJson = validated
                 message = null
             } catch (failure: CancellationException) {
                 throw failure
@@ -177,10 +241,20 @@ fun ModuleWorkspacePage(
     }
 
     BackHandler(enabled = active) {
-        val actions = JSONObject(pageJson ?: "{}").optJSONArray("actions")
-        val back = (0 until (actions?.length() ?: 0)).asSequence()
+        val page = JSONObject(pageJson ?: "{}")
+        val actions = page.optJSONArray("actions")
+        val options = (0 until (actions?.length() ?: 0)).asSequence()
             .mapNotNull { actions?.optJSONObject(it) }
-            .firstOrNull { it.optString("kind") == "back" }
+            .toList()
+        val selectionActive = (page.optJSONArray("selectedIds")?.length() ?: 0) > 0
+        val dialog = page.optJSONObject("dialog")
+        val dialogActions = (0 until (dialog?.optJSONArray("actions")?.length() ?: 0)).asSequence()
+            .mapNotNull { dialog?.optJSONArray("actions")?.optJSONObject(it) }.toList()
+        val back = when {
+            dialog != null -> dialogActions.firstOrNull { it.optString("kind") == "cancel" }
+            selectionActive -> options.firstOrNull { it.optString("label") == "Clear selection" }
+            else -> null
+        } ?: options.firstOrNull { it.optString("kind") == "back" }
         val id = back?.optString("id")?.takeIf { it.isNotBlank() }
         if (id == null) onReturnHome()
         else submitAction(JSONObject().put("version", 1).put("actionId", id)
@@ -237,64 +311,22 @@ fun ModuleWorkspacePage(
                 }
             },
             onAction = ::submitAction, onOpenDocument = { id, mode ->
-                scope.launch {
-                    try {
-                        require(id.length in 1..WorkspacePageContract.MAX_DOCUMENT_ID_LENGTH && mode == "r") {
-                            "Invalid document request"
-                        }
-                        val items = JSONObject(pageJson ?: "{}").optJSONArray("items")
-                        val item = (0 until (items?.length() ?: 0)).asSequence()
-                            .mapNotNull { items?.optJSONObject(it) }
-                            .firstOrNull { it.optString("id") == id }
-                        val extension = item?.optString("name")?.substringAfterLast('.', "")
-                            ?.takeIf { it.matches(Regex("[A-Za-z0-9]{1,12}")) }?.lowercase()
-                        val mime = item?.optString("mimeType")?.takeIf { it.contains('/') }
-                            ?: extension?.let { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
-                            ?: "application/octet-stream"
-                        val remote = capability()
-                        val file = WorkspaceBinderCalls.run(30_000, onDiscard = { it.delete() }) {
-                            val descriptor: ParcelFileDescriptor = remote.openDocument(id, "r")
-                                ?: error("Document is unavailable")
-                            context.cacheDir.listFiles()?.filter { candidate ->
-                                candidate.name.startsWith("workspace-document-") &&
-                                    System.currentTimeMillis() - candidate.lastModified() > 24L * 60 * 60 * 1000
-                            }?.forEach { it.delete() }
-                            val destination = File(context.cacheDir,
-                                "workspace-document-${UUID.randomUUID()}${extension?.let { ".$it" } ?: ""}")
-                            try {
-                                descriptor.use { input ->
-                                    ParcelFileDescriptor.AutoCloseInputStream(input).use { source ->
-                                        destination.outputStream().use { output ->
-                                            val buffer = ByteArray(32_768)
-                                            var copied = 0L
-                                            while (true) {
-                                                val count = source.read(buffer)
-                                                if (count < 0) break
-                                                copied += count
-                                                require(copied <= 64L * 1024 * 1024) { "Document is too large to open externally" }
-                                                output.write(buffer, 0, count)
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (failure: Exception) {
-                                destination.delete()
-                                throw failure
-                            }
-                            destination
-                        }
-                        val uri = FileProvider.getUriForFile(context,
-                            "${context.packageName}.workspacefiles", file)
-                        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    } catch (failure: CancellationException) {
-                        throw failure
-                    } catch (failure: ActivityNotFoundException) {
-                        Toast.makeText(context, "No app can open this document", Toast.LENGTH_LONG).show()
-                    } catch (failure: Exception) {
-                        Toast.makeText(context, failure.message ?: "Could not open document", Toast.LENGTH_LONG).show()
-                    }
+                try {
+                    require(mode == "r") { "Invalid document mode" }
+                    val page = JSONObject(pageJson ?: "{}")
+                    val items = page.optJSONArray("items")
+                    val item = (0 until (items?.length() ?: 0)).asSequence()
+                        .mapNotNull { items?.optJSONObject(it) }
+                        .firstOrNull { it.optString("id") == id }
+                    val actions = item?.optJSONArray("actions")
+                    val open = (0 until (actions?.length() ?: 0)).asSequence()
+                        .mapNotNull { actions?.optJSONObject(it) }
+                        .firstOrNull { it.optString("hostAction") == WorkspacePageContract.HOST_OPEN_DOCUMENT }
+                        ?: error("Open with is unavailable for this item")
+                    submitAction(JSONObject().put("version", 1).put("actionId", open.optString("id"))
+                        .put("operationToken", UUID.randomUUID().toString()).toString())
+                } catch (failure: Exception) {
+                    message = failure.message ?: "Could not open document"
                 }
             })
         if (message != null) AlertDialog(onDismissRequest = { message = null },
@@ -303,7 +335,7 @@ fun ModuleWorkspacePage(
     } else {
         Column(modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
             Text(module?.label ?: "Module page unavailable", style = MaterialTheme.typography.titleLarge)
-            Text(message ?: when (module?.status) {
+            Text(message ?: unavailableReason ?: when (module?.status) {
                 null -> "The module is no longer installed. Its Home placement is saved."
                 ModuleConnectionStatus.DISABLED -> "Enable this module to open its page."
                 ModuleConnectionStatus.CONNECTING, ModuleConnectionStatus.DISCOVERED -> "Connecting to the module…"

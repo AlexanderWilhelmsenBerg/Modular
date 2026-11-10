@@ -45,8 +45,12 @@ class SelectedFolderSafTest {
             assertTrue("Could not create disposable Downloads child",
                 shell("mkdir -p -- '${fixture.absolutePath}' && echo READY").contains("READY"))
             scenario = ActivityScenario.launch(
-                Intent(context, FilesActivity::class.java).putExtra(FilesActivity.EXTRA_PICK_FOLDER, true),
+                Intent(context, FilesActivity::class.java).putExtra(FilesActivity.EXTRA_SETTINGS, true),
             )
+            val add = device.wait(Until.findObject(By.text("Add folder")), 10_000)
+            requireNotNull(add) { "Files Settings did not expose Add folder" }.click()
+            assertTrue("Android system folder picker did not open",
+                device.wait(Until.hasObject(By.pkg(Pattern.compile(".*documentsui.*"))), 10_000))
             val downloads = device.wait(Until.findObject(By.text("Downloads")), 10_000)
                 ?: run {
                     device.findObject(By.desc(Pattern.compile("(?i).*roots.*|.*navigation.*|.*menu.*")))?.click()

@@ -20,6 +20,7 @@ import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.createFiles
 import io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerEngine
 import io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerRepositoryAdapter
 import io.github.alexanderwilhelmsenberg.modular.addon.files.archives.ArchivePageSupport
+import io.github.alexanderwilhelmsenberg.modular.addon.files.archives.ArchiveExtractionReport
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -37,7 +38,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private val completedTokens = LinkedHashSet<String>(preferences.getStringSet("completedTokens", emptySet()) ?: emptySet())
     private val pendingTokens = LinkedHashSet<String>(preferences.getStringSet("pendingTokens", emptySet()) ?: emptySet())
     private var revision = 0L
-    private var currentOffset = 0
+    private var currentOffset = preferences.getInt("currentOffset", 0)
+    private var scrollAnchor = preferences.getInt("scrollAnchor", 0)
+    private var scrollOffset = preferences.getInt("scrollOffset", 0)
     private var view = preferences.getString("view", "overview") ?: "overview"
     private var locationId = preferences.getString("location", null)
     private var folderId = preferences.getString("folder", null)
@@ -53,6 +56,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private var minSizeBytes = preferences.getLong("minSizeBytes", -1).takeIf { it >= 0 }
     private var maxSizeBytes = preferences.getLong("maxSizeBytes", -1).takeIf { it >= 0 }
     private var selected = linkedSetOf<String>()
+    private val favorites = LinkedHashSet<String>(preferences.getStringSet("favorites", emptySet()) ?: emptySet())
+    private val recent = LinkedHashSet<String>((preferences.getString("recent", "") ?: "").split(',').filter { it.isNotBlank() })
+    private var propertyEntryId: String? = null
     private var clipboard: List<String> = emptyList()
     private var clipboardMove = false
     private var destinationFolderId: String? = null
@@ -76,6 +82,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private val stagedDocumentWrites = mutableMapOf<String, String>()
     private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "files-worker").apply { isDaemon = true } }
     private val pendingTotals = mutableSetOf<String>()
+    private val totalCancelFlags = mutableMapOf<String, AtomicBoolean>()
+    private val canceledTotals = mutableSetOf<String>()
     private val computedTotals = mutableMapOf<String, DirectoryTotal>()
     private val totalErrors = mutableMapOf<String, String>()
     private var activeJobCancel: AtomicBoolean? = null
@@ -84,6 +92,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private val cleaner by lazy { CleanerRepositoryAdapter(repository, app) }
     private val archives by lazy { ArchivePageSupport(app, repository) }
     private var archiveDestinationFolderId: String? = null
+    private var archiveReport: ArchiveExtractionReport? = null
     private var cleanerAnalysis: CleanerEngine.Analysis? = null
     private var cleanerScopeKey: String? = null
     private var cleanerPlan: CleanerEngine.Plan? = null
@@ -99,7 +108,18 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private fun cleanKey(folder: String): String = listOf(folder, cleanerIncludeSubfolders,
         cleanerLargeMiB, cleanerOldDays, cleanerExcludedIds.sorted().joinToString("|")).joinToString("::")
 
-    private data class Command(val revision: Long, val destructive: Boolean, val handler: (JSONObject) -> Unit)
+    data class HostHandoff(val kind: String, val documentId: String?)
+    private data class TimedHandoff(val value: HostHandoff, val expiresAt: Long)
+    private val handoffs = linkedMapOf<String, TimedHandoff>()
+    private var pendingHostLaunch: JSONObject? = null
+    private data class Command(val revision: Long, val kind: String, val destructive: Boolean,
+        val hostAction: String?, val documentId: String?, val handler: (JSONObject) -> Unit)
+
+    fun consumeHostHandoff(nonce: String): HostHandoff? = synchronized(lock) {
+        if (nonce.length !in 32..64) return@synchronized null
+        val item = handoffs.remove(nonce) ?: return@synchronized null
+        item.value.takeIf { item.expiresAt >= System.currentTimeMillis() }
+    }
 
     fun getPage(requestJson: String): String = synchronized(lock) {
         val request = JSONObject(requestJson)
@@ -129,7 +149,15 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         }
         val oldView = view
         val outcome = runCatching { command.handler(request.optJSONObject("args") ?: JSONObject()) }
-        if (view != oldView) currentOffset = 0
+        if (view != oldView) { currentOffset = 0; scrollAnchor = 0; scrollOffset = 0 }
+        if (outcome.isSuccess && command.hostAction != null) {
+            val nonce = UUID.randomUUID().toString().replace("-", "")
+            handoffs.entries.removeIf { it.value.expiresAt < System.currentTimeMillis() }
+            if (handoffs.size >= 16) handoffs.remove(handoffs.keys.first())
+            handoffs[nonce] = TimedHandoff(HostHandoff(command.hostAction, command.documentId),
+                System.currentTimeMillis() + 60_000)
+            pendingHostLaunch = JSONObject().put("kind", command.hostAction).put("nonce", nonce)
+        }
         if (outcome.isFailure) {
             message = outcome.exceptionOrNull()?.message ?: "File action failed"
             if (view == "markdown") documentSaveStatus = "failed"
@@ -141,8 +169,12 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             preferences.edit().putStringSet("pendingTokens", pendingTokens.toSet())
                 .putStringSet("completedTokens", completedTokens.toSet()).commit()
         }
-        revision++
-        commands.clear()
+        if (command.kind == "documentCommit" || command.kind == "documentCancel") {
+            if (outcome.isSuccess) commands.remove(id)
+        } else {
+            revision++
+            commands.clear()
+        }
         persist()
         render(currentOffset, 100)
     }
@@ -222,12 +254,16 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             "keeper" -> "Choose which to keep"; "filters" -> "Search filters";
             "archive" -> "Extract archive";
             "archiveReview" -> "Review extraction"; "archiveDestination" -> "Choose destination";
-            "movePicker" -> "Move destination"; "pasteReview" -> "Review paste"; else -> "Files" })
+            "archiveReport" -> "Extraction result";
+            "movePicker" -> "Move destination"; "pasteReview" -> "Review paste";
+            "properties" -> "Properties"; else -> "Files" })
             .put("view", view).put("locationId", locationId).put("folderId", folderId)
             .put("layout", if (grid) "grid" else "list")
+            .put("scrollAnchor", scrollAnchor).put("scrollOffset", scrollOffset)
             .put("state", "ready")
         message?.let { page.put("message", it) }
         documentSaveStatus?.let { page.put("documentSaveStatus", it) }
+        pendingHostLaunch?.let { page.put("hostLaunch", it); pendingHostLaunch = null }
         val actions = JSONArray()
         val items = JSONArray()
         val trash = runCatching { repository.trashSummary() }.getOrNull()
@@ -251,9 +287,11 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             "archive" -> renderArchive(page, actions)
             "archiveReview" -> renderArchiveReview(page, actions, items, offset, limit)
             "archiveDestination" -> renderArchiveDestination(page, actions, items, offset, limit)
+            "archiveReport" -> renderArchiveReport(page, actions, items, offset, limit)
             "filters" -> renderFilters(page, actions)
             "movePicker" -> renderMovePicker(page, actions, items, offset, limit)
             "pasteReview" -> renderPasteReview(page, actions, items, offset, limit)
+            "properties" -> renderProperties(page, actions, items)
             else -> { view = "overview"; renderOverview(page, actions, items, offset, limit) }
         }
         page.put("actions", actions).put("items", items)
@@ -263,7 +301,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
 
     private fun renderOverview(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
         page.put("summary", "Connected locations. Choose a folder to browse.")
-        action(actions, "Add folder", "setup") { openSetup() }
+        action(actions, "Add folder", "setup", hostAction = "pickFolder") { message = "Choose a folder in Android’s picker" }
         action(actions, "Full storage access", "settings") { view = "settings" }
         val locations = repository.locations()
         locations.drop(offset).take(limit).forEach { location ->
@@ -274,7 +312,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                     else -> "Capacity unavailable"
                 })
             val rowActions = JSONArray()
-            action(rowActions, if (location.available) "Open" else "Reconnect", "open") {
+            action(rowActions, if (location.available) "Open" else "Reconnect", "open",
+                hostAction = if (location.available) null else "pickFolder") {
                 locationId = location.id; folderId = location.rootId
                 view = "browser"
             }
@@ -282,6 +321,16 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             items.put(item)
         }
         next(page, actions, offset, limit, locations.size)
+        if (offset == 0) {
+            for ((label, ids) in listOf("Favorite" to favorites.toList().take(12), "Recent" to recent.toList().reversed().take(12))) {
+                for (id in ids) {
+                    if (items.length() >= 100) break
+                    val entry = runCatching { repository.get(id) }.getOrNull() ?: continue
+                    val item = entryJson(entry, true).put("subtitle", "$label · ${entry.relativePath}")
+                    items.put(item)
+                }
+            }
+        }
     }
 
     private fun renderBrowser(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
@@ -289,27 +338,17 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val location = repository.locations().firstOrNull { it.id == locationId }
         if (location == null || !location.available) {
             page.put("state", "unavailable").put("summary", "Remembered location is unavailable")
-            action(actions, "Reconnect", "setup") { openSetup() }
+            action(actions, "Reconnect", "setup", hostAction = "pickFolder") { message = "Reconnect this location in Android’s picker" }
             action(actions, "Locations", "back") { view = "overview" }
             return
         }
         val current = runCatching { repository.get(folder) }.getOrElse {
             page.put("state", "unavailable").put("summary", "Folder access was lost")
-            action(actions, "Reconnect", "setup") { openSetup() }
+            action(actions, "Reconnect", "setup", hostAction = "pickFolder") { message = "Reconnect this location in Android’s picker" }
             return
         }
         page.put("title", current.name.ifBlank { location.title })
-        val total = computedTotals[folder] ?: repository.cachedDirectoryTotal(folder)
-        if (total == null && pendingTotals.add(folder)) {
-            worker.execute {
-                val outcome = runCatching { repository.directoryTotal(folder) }
-                synchronized(lock) {
-                    outcome.onSuccess { computedTotals[folder] = it }
-                        .onFailure { totalErrors[folder] = it.message ?: "Folder size unavailable" }
-                    pendingTotals.remove(folder)
-                }
-            }
-        }
+        val total = knownTotal(folder)
         page.put("summary", buildString {
             append(if (total == null && folder in pendingTotals) "Calculating folder size…" else formatBytes(total?.bytes))
             if (location.capacityBytes != null && location.capacityBytes > 0 && total != null) {
@@ -368,6 +407,10 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         action(actions, "Settings", "settings") { view = "settings" }
         action(actions, "History", "history") { view = "history" }
         action(actions, "Refresh", "refresh") { computedTotals.remove(folder); totalErrors.remove(folder) }
+        action(actions, "Remember position", "scroll") { args ->
+            scrollAnchor = args.optInt("anchor", 0).coerceIn(0, 100)
+            scrollOffset = args.optInt("offset", 0).coerceIn(0, 100_000)
+        }
         if (selected.isNotEmpty()) {
             action(actions, "Delete ${selected.size}", "review") {
                 review = repository.prepareDeletion(selected.toList()); reviewReturnView = view; view = "review"
@@ -408,10 +451,14 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .put("mimeType", entry.mimeType)
         if (includeActions) {
             val row = JSONArray()
-            action(row, "Open", "open") {
-                if (entry.isDirectory) { folderId = entry.id; view = "browser"; selected.clear() }
+            val extension = entry.name.substringAfterLast('.', "").lowercase()
+            val internal = !entry.isDirectory && extension in setOf("md", "markdown", "mdown", "pdf")
+            action(row, "Open", "open", hostAction = if (!entry.isDirectory && !internal) "openDocument" else null,
+                documentId = if (!entry.isDirectory && !internal) entry.id else null) {
+                recent.remove(entry.id); recent.add(entry.id)
+                while (recent.size > 30) recent.remove(recent.first())
+                if (entry.isDirectory) { locationId = entry.locationId; folderId = entry.id; view = "browser"; selected.clear() }
                 else {
-                    val extension = entry.name.substringAfterLast('.', "").lowercase()
                     val newKind = when {
                         extension in setOf("md", "markdown", "mdown") -> "markdown"
                         extension == "pdf" -> "pdf"
@@ -422,18 +469,29 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                         documentFingerprint = if (newKind == "markdown") repository.fingerprint(entry.id) else null
                         documentSaveStatus = null
                         view = newKind
-                    } else message = "Use Open with for ${entry.name}"
+                    } else message = "Opening ${entry.name}"
                 }
             }
             action(row, if (entry.id in selected) "Selected" else "Select", "select") {
                 if (!selected.add(entry.id)) selected.remove(entry.id)
             }
             if (!entry.isDirectory) {
+                action(row, "Open with", "openExternal", hostAction = "openDocument", documentId = entry.id) { }
                 val archiveExt = entry.name.lowercase()
-                if (listOf(".zip", ".7z", ".rar", ".tar", ".tar.gz").any(archiveExt::endsWith)) {
+                if (listOf(".zip", ".7z", ".rar", ".tar", ".tar.gz", ".tgz").any(archiveExt::endsWith)) {
                     action(row, "Extract", "archive") { archives.begin(entry.id); view = "archive" }
                 }
             }
+            if (entry.writable) action(row, "Rename", "rename", input = "name", initial = entry.name) { args ->
+                val renamed = repository.rename(entry.id, safeName(args.optString("name")))
+                if (favorites.remove(entry.id)) favorites.add(renamed.id)
+                message = "Renamed to ${renamed.name}"
+            }
+            action(row, "Properties", "properties") { propertyEntryId = entry.id; view = "properties" }
+            action(row, if (entry.id in favorites) "Unfavorite" else "Favorite", "favorite") {
+                if (!favorites.add(entry.id)) favorites.remove(entry.id)
+            }
+            if (!entry.isDirectory) action(row, "Share", "share", hostAction = "shareDocument", documentId = entry.id) { }
             item.put("actions", row)
         }
         return item
@@ -516,7 +574,10 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .put("mapComplete", total?.complete ?: false)
         action(actions, "Back to files", "back") { view = "browser" }
         if (folder.parentId != null) action(actions, "Up", "back") { mapFolderId = folder.parentId; mapDepth-- }
-        action(actions, "Refresh map", "refresh") { }
+        action(actions, "Refresh map", "refresh") {
+            canceledTotals.remove(target)
+            repository.list(target, 0, 100).entries.forEach { canceledTotals.remove(it.id) }
+        }
         val all = repository.list(target, offset, limit, FileSort.SIZE).entries
         val mapNodes = JSONArray()
         all.forEach { entry ->
@@ -532,19 +593,29 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             mapNodes.put(json)
         }
         page.put("mapNodes", mapNodes)
-        page.put("mapCalculating", target in pendingTotals || all.any { it.isDirectory && it.id in pendingTotals })
+        page.put("mapCalculating", (target in pendingTotals && target !in canceledTotals) ||
+            all.any { it.isDirectory && it.id in pendingTotals && it.id !in canceledTotals })
+        if (page.optBoolean("mapCalculating")) action(actions, "Cancel analysis", "cancelMap") {
+            (listOf(target) + all.filter { it.isDirectory }.map { it.id }).forEach { id ->
+                canceledTotals.add(id); totalCancelFlags[id]?.set(true)
+            }
+            message = "Storage map analysis canceled; completed cached sizes remain available"
+        }
         next(page, actions, offset, limit, repository.list(target, offset, limit).totalCount ?: offset + all.size)
     }
 
     private fun knownTotal(folder: String): DirectoryTotal? {
         val total = computedTotals[folder] ?: repository.cachedDirectoryTotal(folder)
-        if (total == null && pendingTotals.add(folder)) {
+        if (total == null && folder !in canceledTotals && pendingTotals.add(folder)) {
+            val cancel = AtomicBoolean(false)
+            totalCancelFlags[folder] = cancel
             worker.execute {
-                val outcome = runCatching { repository.directoryTotal(folder) }
+                val outcome = runCatching { repository.directoryTotal(folder, Cancellation { cancel.get() }) }
                 synchronized(lock) {
-                    outcome.onSuccess { computedTotals[folder] = it }
+                    if (!cancel.get()) outcome.onSuccess { computedTotals[folder] = it }
                         .onFailure { totalErrors[folder] = it.message ?: "Size unavailable" }
                     pendingTotals.remove(folder)
+                    totalCancelFlags.remove(folder)
                 }
             }
         }
@@ -705,13 +776,16 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private fun renderArchive(page: JSONObject, actions: JSONArray) {
         val sourceId = archives.sourceId() ?: run { view = "browser"; return }
         val source = repository.get(sourceId)
-        val destination = archives.destinationId()?.let { runCatching { repository.get(it) }.getOrNull() }
         page.put("summary", "${source.name} · ${formatBytes(source.sizeBytes)} · ${source.relativePath}")
-            .put("message", "Destination: ${destination?.relativePath ?: "Choose a folder"}. Review every member and collision before extraction.")
+            .put("message", "Destination: ${archives.plannedDestinationPath() ?: "Choose a folder"}${if (archives.plannedNewFolderName() != null) " (new folder created after reviewed Extract)" else ""}. Extracts ZIP, 7z, RAR 4/5, TAR and TAR.GZ. Single-volume only; split ZIP and multipart RAR are unsupported. Password-protected archives work when their encryption method is supported. Wrong or unsupported passwords retain the source. Review every member and collision before extraction.")
         action(actions, "Back to files", "back") { archives.close(); view = "browser" }
         action(actions, "Choose destination", "destination") {
             archiveDestinationFolderId = archives.destinationId() ?: folderId
             view = "archiveDestination"
+        }
+        action(actions, "New folder name", "destination", input = "name",
+            initial = archives.plannedNewFolderName() ?: "") { args ->
+            archives.setNewFolderName(safeName(args.optString("name")))
         }
         action(actions, "Password", "password", input = "password") { args ->
             archives.setPassword(args.optString("password"))
@@ -734,26 +808,32 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val members = review.inspection.members
         val collisions = review.destinationPreview.collisions.associateBy { it.memberPath }
         page.put("summary", "Source ${source.name} · ${formatBytes(source.sizeBytes)} · ${source.relativePath} · Modified ${source.modifiedAtMillis?.let { java.util.Date(it).toString() } ?: "Unavailable"} · Created ${source.createdAtMillis?.let { java.util.Date(it).toString() } ?: "Unavailable"}")
-            .put("message", "Destination ${review.destinationPath} · ${review.fileCount} files · ${formatBytes(review.inspection.estimatedOutputBytes)} estimated · ${if (review.trashSourceAfterSuccess) "Archive moves to trash after success" else "Archive retained"}" +
-                if (review.blockers.isNotEmpty()) " · ${review.blockers.take(2).joinToString("; ")}" else "")
+            .put("message", "Destination ${review.destinationPath}${if (review.newFolderName != null) " (new folder after reviewed Extract)" else ""} · ${review.fileCount} files · ${formatBytes(review.inspection.estimatedOutputBytes)} estimated · ${if (review.trashSourceAfterSuccess) "Archive moves to trash after success" else "Archive retained"}" +
+                if (review.blockers.isNotEmpty()) " · ${review.blockers.size} issues listed below" else "")
             .put("complete", review.ready)
         action(actions, "Back", "back") { view = "archive" }
         action(actions, "Cancel", "cancel") { archives.close(); view = "browser" }
         if (review.ready) action(actions, "Extract", "confirm", destructive = true) {
-            startJob("Extracting archive", "browser") { cancel, progress ->
+            startJob("Extracting archive", "archiveReport") { cancel, progress ->
                 val report = archives.executeReviewed(review.id, cancel, progress)
+                synchronized(lock) { archiveReport = report }
                 "${report.outcomes.count { it.status.name == "SUCCESS" }} extracted · ${report.sourceCleanupMessage ?: if (report.sourceMovedToTrash) "Archive moved to trash" else "Archive retained"}"
             }
         }
-        members.drop(offset).take(limit).forEach { member ->
+        review.blockers.drop(offset).take(limit).forEachIndexed { index, blocker ->
+            items.put(JSONObject().put("id", "blocker:${offset + index}").put("name", blocker)
+                .put("kind", "error").put("subtitle", "Resolve before extraction"))
+        }
+        val memberOffset = (offset - review.blockers.size).coerceAtLeast(0)
+        members.drop(memberOffset).take((limit - (review.blockers.size - offset).coerceIn(0, limit)).coerceAtLeast(0)).forEach { member ->
             val collision = collisions[member.path]
             val chosen = review.collisionChoices[member.path]
             val row = JSONArray()
             if (collision != null) {
                 for (choice in CollisionChoice.entries) {
                     action(row, if (chosen == choice) "${choice.name.lowercase()} ✓" else choice.name.lowercase(), "collision") {
-                        archives.chooseCollision(member.path, choice); view = "archive"
-                        message = "Collision choice saved; review archive again"
+                        archives.chooseCollision(member.path, choice)
+                        message = "Collision choice updated"
                     }
                 }
             }
@@ -762,7 +842,25 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                 .put("subtitle", if (collision != null) "Collision with ${collision.existing.relativePath}; ${chosen?.name ?: "choose action"}" else "New item")
                 .put("sizeBytes", member.sizeBytes).put("actions", row))
         }
-        next(page, actions, offset, limit, members.size)
+        next(page, actions, offset, limit, review.blockers.size + members.size)
+    }
+
+    private fun renderArchiveReport(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
+        val report = archiveReport ?: run { view = "browser"; return }
+        page.put("summary", "${report.outcomes.count { it.status.name == "SUCCESS" }} succeeded · ${report.outcomes.count { it.status.name != "SUCCESS" }} need attention · ${report.createdIds.size} created outputs")
+            .put("message", report.sourceCleanupMessage ?: if (report.sourceMovedToTrash) "Archive moved to trash" else "Archive retained")
+        action(actions, "Back to files", "back") { archives.close(); archiveReport = null; view = "browser" }
+        val count = report.outcomes.size + report.createdIds.size
+        report.outcomes.drop(offset).take(limit).forEach { outcome ->
+            items.put(JSONObject().put("id", "outcome:${outcome.id}").put("name", outcome.id)
+                .put("kind", "outcome").put("subtitle", "${outcome.status}: ${outcome.message ?: "Completed"}"))
+        }
+        val createdOffset = (offset - report.outcomes.size).coerceAtLeast(0)
+        report.createdIds.drop(createdOffset).take((limit - (report.outcomes.size - offset).coerceIn(0, limit)).coerceAtLeast(0)).forEach { id ->
+            items.put(JSONObject().put("id", "created:$id").put("name", runCatching { repository.get(id).name }.getOrDefault(id))
+                .put("kind", "created").put("subtitle", "Created output; inspect before cleanup"))
+        }
+        next(page, actions, offset, limit, count)
     }
 
     private fun renderArchiveDestination(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
@@ -894,12 +992,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private fun renderSettings(page: JSONObject, actions: JSONArray) {
         page.put("summary", "Manage selected folders and optional full storage access. Android still protects other apps’ private data.")
         action(actions, "Back", "back") { view = if (folderId == null) "overview" else "browser" }
-        action(actions, "Add folder", "setup") { openSetup() }
-        action(actions, if (Environment.isExternalStorageManager()) "Full access enabled" else "Enable full storage access", "setup") {
-            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                android.net.Uri.parse("package:${app.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            app.startActivity(intent)
-        }
+        action(actions, "Add folder", "setup", hostAction = "pickFolder") { }
+        action(actions, if (android.os.Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) "Full access enabled" else "Enable full storage access", "setup",
+            hostAction = "fullAccess") { }
         action(actions, "Large file threshold (MiB)", "setting", input = "value", initial = cleanerLargeMiB.toString()) { args ->
             cleanerLargeMiB = args.optString("value").toIntOrNull()?.coerceIn(1, 1_048_576)
                 ?: throw IllegalArgumentException("Enter a positive MiB threshold")
@@ -935,6 +1030,16 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                 modifiedBefore != null || minSizeBytes != null || maxSizeBytes != null) "search" else "browser"
         }
     }
+
+    private fun renderProperties(page: JSONObject, actions: JSONArray, items: JSONArray) {
+        val id = propertyEntryId ?: run { view = "browser"; return }
+        val entry = repository.get(id)
+        page.put("title", entry.name).put("summary", entry.relativePath)
+        action(actions, "Back", "back") { view = "browser" }
+        items.put(entryJson(entry, false).put("subtitle", "${if (entry.isDirectory) "Folder" else entry.mimeType ?: "Unknown type"} · ${if (entry.writable) "Writable" else "Read only"}")
+            .put("sizeBytes", entry.sizeBytes).put("modifiedAt", entry.modifiedAtMillis).put("createdAt", entry.createdAtMillis))
+    }
+
 
     private fun JSONObject.optLongOrNull(name: String): Long? =
         if (!has(name) || isNull(name)) null else optLong(name).takeIf { it >= 0 }
@@ -990,30 +1095,28 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     }
 
     private fun next(page: JSONObject, actions: JSONArray, offset: Int, limit: Int, count: Int) {
-        if (offset > 0) action(actions, "Previous page", "previous") { currentOffset = (offset - limit).coerceAtLeast(0) }
+        if (offset > 0) action(actions, "Previous page", "previous") {
+            currentOffset = (offset - limit).coerceAtLeast(0); scrollAnchor = 0; scrollOffset = 0
+        }
         if (offset + limit < count) {
             page.put("nextCursor", (offset + limit).toString())
-            action(actions, "Load more", "loadMore") { currentOffset = offset + limit }
+            action(actions, "Load more", "loadMore") { currentOffset = offset + limit; scrollAnchor = 0; scrollOffset = 0 }
         } else page.put("nextCursor", JSONObject.NULL)
     }
 
     private fun action(out: JSONArray, label: String, kind: String, input: String? = null,
-        initial: String = "", destructive: Boolean = false, handler: (JSONObject) -> Unit) {
-        out.put(registered(label, kind, input, initial, destructive, handler))
+        initial: String = "", destructive: Boolean = false, hostAction: String? = null,
+        documentId: String? = null, handler: (JSONObject) -> Unit) {
+        out.put(registered(label, kind, input, initial, destructive, hostAction, documentId, handler))
     }
 
     private fun registered(label: String, kind: String, input: String? = null,
-        initial: String = "", destructive: Boolean = false, handler: (JSONObject) -> Unit): JSONObject {
+        initial: String = "", destructive: Boolean = false, hostAction: String? = null,
+        documentId: String? = null, handler: (JSONObject) -> Unit): JSONObject {
         val id = UUID.randomUUID().toString()
-        commands[id] = Command(revision, destructive, handler)
+        commands[id] = Command(revision, kind, destructive, hostAction, documentId, handler)
         return JSONObject().put("id", id).put("label", label).put("kind", kind)
-            .put("input", input).put("initial", initial)
-    }
-
-    private fun openSetup() {
-        app.startActivity(Intent(app, FilesActivity::class.java).putExtra(FilesActivity.EXTRA_PICK_FOLDER, true)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        message = "Use the Files setup screen to add a folder"
+            .put("input", input).put("initial", initial).put("hostAction", hostAction).put("documentId", documentId)
     }
 
     private fun safeName(raw: String): String = raw.trim().also {
@@ -1022,11 +1125,13 @@ class FilesPageController(context: Context, private val repository: FilesReposit
 
     private fun persist() {
         preferences.edit().putString("view", when (view) {
-            "review", "emptyTrashReview", "cleanReview", "keeper", "progress" -> if (folderId == null) "overview" else "browser"
+            "review", "emptyTrashReview", "cleanReview", "keeper", "progress", "archiveReview", "archiveReport", "archiveDestination" -> if (folderId == null) "overview" else "browser"
             else -> view
         })
             .putString("location", locationId).putString("folder", folderId).putString("query", query)
             .putString("sort", sort.name).putBoolean("hidden", showHidden)
+            .putInt("currentOffset", currentOffset).putInt("scrollAnchor", scrollAnchor)
+            .putInt("scrollOffset", scrollOffset)
             .putBoolean("grid", grid)
             .putBoolean("subfolders", includeSubfolders).putBoolean("allLocations", allLocations)
             .putString("mimePrefix", mimePrefix)
@@ -1034,7 +1139,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .putLong("minSizeBytes", minSizeBytes ?: -1).putLong("maxSizeBytes", maxSizeBytes ?: -1)
             .putBoolean("cleanSubfolders", cleanerIncludeSubfolders)
             .putInt("cleanLargeMiB", cleanerLargeMiB).putInt("cleanOldDays", cleanerOldDays)
-            .putStringSet("cleanExcludedIds", cleanerExcludedIds.toSet()).putString("documentId", documentId)
+            .putStringSet("cleanExcludedIds", cleanerExcludedIds.toSet())
+            .putStringSet("favorites", favorites.toSet()).putString("recent", recent.joinToString(","))
+            .putString("documentId", documentId)
             .putString("documentKind", documentKind).putString("documentFingerprint", documentFingerprint).apply()
     }
 

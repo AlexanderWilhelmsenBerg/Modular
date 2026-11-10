@@ -362,7 +362,12 @@ private fun validate(snapshot: OrganizationSnapshot) {
         moduleComponents.distinct().size == moduleComponents.size &&
         snapshot.modulePages.all { page ->
             page.component.length in 3..512 && page.component.contains('/') &&
-                page.providerId.length in 3..160 && validName(page.name)
+                page.providerId.length in 3..160 && validName(page.name) &&
+                (page.signerKey.isEmpty() || (page.signerKey.length in 68..512 &&
+                    page.signerKey.startsWith(page.component.substringBefore('/') + "|") &&
+                    page.signerKey.substringAfter('|').split(',').all {
+                        it.matches(Regex("[0-9a-f]{64}"))
+                    }))
         }) { "Invalid module pages" }
     require(workspaceIds.size <= OrganizationLimits.MAX_WORKSPACE_PAGES &&
         workspaceIds.distinct().size == workspaceIds.size &&
@@ -494,11 +499,12 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
 }
 @Serializable private data class SavedModuleHomePage(
     val component: String, val providerId: String, val name: String, val enabled: Boolean,
+    val signerKey: String = "",
 ) {
-    fun public() = ModuleHomePage(component, providerId, name, enabled)
+    fun public() = ModuleHomePage(component, providerId, name, enabled, signerKey)
     companion object {
         fun from(page: ModuleHomePage) = SavedModuleHomePage(
-            page.component, page.providerId, page.name, page.enabled,
+            page.component, page.providerId, page.name, page.enabled, page.signerKey,
         )
     }
 }

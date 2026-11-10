@@ -3,7 +3,6 @@ package io.github.alexanderwilhelmsenberg.modular.addon.files.documents
 import android.content.Context
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FilesRepository
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.StorageLocation
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream

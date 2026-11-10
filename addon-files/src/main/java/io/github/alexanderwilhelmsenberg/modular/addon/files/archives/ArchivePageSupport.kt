@@ -12,6 +12,7 @@ class ArchivePageSupport(context: Context, private val repository: FilesReposito
     private val extractor = ArchiveExtractor(context.applicationContext, repository)
     private var sourceId: String? = null
     private var destinationId: String? = null
+    private var newFolderName: String? = null
     private var password: String? = null
     private var trashSource = false
     private val collisionChoices = linkedMapOf<String, CollisionChoice>()
@@ -24,6 +25,8 @@ class ArchivePageSupport(context: Context, private val repository: FilesReposito
         val inspection: ArchiveInspection,
         val destinationId: String,
         val destinationPath: String,
+        val newFolderName: String?,
+        val destinationParentFingerprint: String?,
         val destinationPreview: ArchiveDestinationPreview,
         val collisionChoices: Map<String, CollisionChoice>,
         val collisionFingerprints: Map<String, String>,
@@ -38,7 +41,8 @@ class ArchivePageSupport(context: Context, private val repository: FilesReposito
         val source = repository.get(sourceId)
         require(!source.isDirectory) { "Select an archive file" }
         this.sourceId = sourceId
-        destinationId = source.parentId
+        destinationId = requireNotNull(source.parentId) { "Archive has no parent folder" }
+        newFolderName = archiveBaseName(source.name)
         password = null
         trashSource = false
         collisionChoices.clear()
@@ -47,6 +51,11 @@ class ArchivePageSupport(context: Context, private val repository: FilesReposito
 
     fun sourceId(): String? = sourceId
     fun destinationId(): String? = destinationId
+    fun plannedNewFolderName(): String? = newFolderName
+    fun plannedDestinationPath(): String? = destinationId?.let { parentId ->
+        val parentPath = repository.get(parentId).relativePath.trimEnd('/')
+        newFolderName?.let { "$parentPath/$it" } ?: parentPath
+    }
     fun trashSourceAfterSuccess(): Boolean = trashSource
     fun chosenCollisions(): Map<String, CollisionChoice> = collisionChoices.toMap()
     fun currentReview(): Review? = prepared?.takeUnless { consumed }
@@ -54,6 +63,14 @@ class ArchivePageSupport(context: Context, private val repository: FilesReposito
     fun setDestination(folderId: String) {
         require(repository.get(folderId).isDirectory) { "Destination must be a folder" }
         destinationId = folderId
+        newFolderName = null
+        collisionChoices.clear()
+        invalidate()
+    }
+
+    /** Plan a new folder under the current parent; it is created only after reviewed Extract. */
+    fun setNewFolderName(name: String) {
+        newFolderName = validFolderName(name)
         collisionChoices.clear()
         invalidate()
     }
@@ -87,7 +104,15 @@ class ArchivePageSupport(context: Context, private val repository: FilesReposito
         require(repository.fingerprint(source) == inspection.sourceFingerprint) { "Archive changed during inspection; scan again" }
         val destinationEntry = repository.get(destination)
         require(destinationEntry.isDirectory) { "Destination is not a folder" }
-        val preview = extractor.detectCollisions(inspection, destination)
+        val plannedName = newFolderName
+        val existingPlannedFolder = plannedName?.let { findChild(destination, it) }
+        val available = repository.locations().firstOrNull { it.id == destinationEntry.locationId }?.freeBytes
+        val preview = if (plannedName == null) extractor.detectCollisions(inspection, destination)
+            else ArchiveDestinationPreview(emptyList(), buildList {
+                if (existingPlannedFolder != null) add("Destination name already exists: $plannedName")
+                if (available != null && inspection.estimatedOutputBytes != null && inspection.estimatedOutputBytes > available)
+                    add("Insufficient destination space")
+            }, available)
         val relevant = preview.collisions.map { it.memberPath }.toSet()
         val choices = collisionChoices.filterKeys { it in relevant }.toMap()
         val fingerprints = preview.collisions.associate { it.memberPath to it.existingFingerprint }
@@ -97,8 +122,12 @@ class ArchivePageSupport(context: Context, private val repository: FilesReposito
             if (!destinationEntry.writable) add("Destination is read only")
             preview.collisions.forEach { if (it.memberPath !in choices) add("Choose collision action: ${it.memberPath}") }
         }
+        val plannedPath = destinationEntry.relativePath.trimEnd('/') +
+            (plannedName?.let { "/$it" } ?: "")
         val review = Review(UUID.randomUUID().toString(), inspection, destination,
-            destinationEntry.relativePath, preview, choices, fingerprints,
+            plannedPath, plannedName,
+            if (plannedName == null) null else repository.fingerprint(destination),
+            preview, choices, fingerprints,
             trashSource, blockers)
         prepared = review
         preparedPassword = password
@@ -118,24 +147,38 @@ class ArchivePageSupport(context: Context, private val repository: FilesReposito
         require(repository.fingerprint(review.inspection.source.id) == review.inspection.sourceFingerprint) {
             "Archive changed since review; scan again"
         }
-        val currentPreview = extractor.detectCollisions(review.inspection, review.destinationId)
-        require(currentPreview.blockers.isEmpty()) { "Destination changed; review again" }
-        val reviewedCollisions = review.destinationPreview.collisions.associateBy { it.memberPath }
-        val currentCollisions = currentPreview.collisions.associateBy { it.memberPath }
-        require(reviewedCollisions.keys == currentCollisions.keys) { "Destination collisions changed; review again" }
-        for ((path, collision) in currentCollisions) {
-            require(collision.existing.id == reviewedCollisions[path]?.existing?.id &&
-                repository.fingerprint(collision.existing.id) == review.collisionFingerprints[path]) {
-                "Destination item changed; review again"
+        val plannedName = review.newFolderName
+        if (plannedName == null) {
+            val currentPreview = extractor.detectCollisions(review.inspection, review.destinationId)
+            require(currentPreview.blockers.isEmpty()) { "Destination changed; review again" }
+            val reviewedCollisions = review.destinationPreview.collisions.associateBy { it.memberPath }
+            val currentCollisions = currentPreview.collisions.associateBy { it.memberPath }
+            require(reviewedCollisions.keys == currentCollisions.keys) { "Destination collisions changed; review again" }
+            for ((path, collision) in currentCollisions) {
+                require(collision.existing.id == reviewedCollisions[path]?.existing?.id &&
+                    repository.fingerprint(collision.existing.id) == review.collisionFingerprints[path]) {
+                    "Destination item changed; review again"
+                }
+            }
+        } else {
+            require(repository.fingerprint(review.destinationId) == review.destinationParentFingerprint &&
+                findChild(review.destinationId, plannedName) == null) {
+                "Destination folder changed or name appeared; review again"
             }
         }
-        return extractor.extract(review.inspection, review.destinationPreview, review.destinationId,
+        require(!cancel.isCanceled()) { "Extraction canceled before destination creation" }
+        val createdFolder = plannedName?.let { repository.createDirectory(review.destinationId, it) }
+        val finalDestination = createdFolder?.id ?: review.destinationId
+        val result = extractor.extract(review.inspection, review.destinationPreview, finalDestination,
             review.collisionChoices, reviewedPassword, review.trashSourceAfterSuccess, cancel, progress)
+        return if (createdFolder == null) result else
+            result.copy(createdIds = listOf(createdFolder.id) + result.createdIds)
     }
 
     fun close() {
         sourceId = null
         destinationId = null
+        newFolderName = null
         password = null
         collisionChoices.clear()
         invalidate()
@@ -159,5 +202,31 @@ class ArchivePageSupport(context: Context, private val repository: FilesReposito
             blockers = review.blockers.filterNot { it.startsWith("Choose collision action: ") } +
                 paths.filterNot { it in choices }.map { "Choose collision action: $it" }
         )
+    }
+
+    private fun findChild(parentId: String, name: String): io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FileEntry? {
+        var offset = 0
+        while (true) {
+            val page = repository.list(parentId, offset, 100, showHidden = true)
+            require(page.complete) { "Destination listing incomplete; review again" }
+            page.entries.firstOrNull { it.name == name }?.let { return it }
+            val next = page.nextOffset ?: return null
+            require(next > offset) { "Destination listing did not advance" }
+            offset = next
+        }
+    }
+
+    private fun archiveBaseName(name: String): String {
+        val suffix = listOf(".tar.gz", ".tgz", ".zip", ".7z", ".rar", ".tar")
+            .firstOrNull { name.endsWith(it, ignoreCase = true) }
+            ?: throw IllegalArgumentException("Unsupported archive format")
+        return validFolderName(name.dropLast(suffix.length))
+    }
+
+    private fun validFolderName(value: String): String = value.trim().also {
+        require(it.isNotEmpty() && it != "." && it != ".." && it.length <= 255 &&
+            !it.contains('/') && !it.contains('\\') && !it.contains(':') && !it.contains('\u0000')) {
+            "Invalid destination folder name"
+        }
     }
 }

@@ -70,7 +70,11 @@ data class ModuleHomePage(
     val enabled: Boolean = true,
     /** Installed APK signer identity at the user's Add to Home decision. */
     val signerKey: String = "",
-)
+) {
+    fun matchesInstalledProvider(component: String, providerId: String?, installedSignerKey: String?): Boolean =
+        this.component == component && this.providerId == providerId &&
+            signerKey.isNotBlank() && signerKey == installedSignerKey
+}
 
 sealed interface HomePinRef {
     data class App(val key: AppKey) : HomePinRef

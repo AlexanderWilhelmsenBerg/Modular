@@ -17,6 +17,11 @@ object WorkspacePageContract {
     const val MAX_DOCUMENT_ID_LENGTH = 512
     const val MAX_PAGE_SIZE = 100
     const val FILES_KIND = "files"
+    const val HOST_PICK_FOLDER = "pickFolder"
+    const val HOST_FULL_ACCESS = "fullAccess"
+    const val HOST_OPEN_DOCUMENT = "openDocument"
+    const val HOST_SHARE_DOCUMENT = "shareDocument"
+    const val EXTRA_HOST_HANDOFF_NONCE = "filesHostHandoffNonce"
     private val writeMode = Regex("rw:[A-Za-z0-9._:-]{1,128}")
 
     fun validDocumentMode(mode: String): Boolean = mode == "r" || writeMode.matches(mode)

@@ -179,7 +179,7 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
             draftResolved.set(true)
             status = "Saved"
             conflict = false
-            onClose()
+            closePrompt = false
         } catch (error: Exception) {
             if (writeStarted) try { onCancel() } catch (_: Exception) { }
             status = "Save failed; draft retained: ${error.message ?: "unknown error"}"
@@ -197,14 +197,14 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { scope.launch { save() } }, enabled = dirty && !conflict && original != null) { Text("Save") }
                 OutlinedButton(onClick = { saveAsLauncher.launch("Markdown-copy.md") }, enabled = original != null) { Text("Save as") }
-                TextButton(onClick = { val next = undo.undo(); if (next != null) text = next }, enabled = undo.canUndo) { Text("Undo") }
-                TextButton(onClick = { val next = undo.redo(); if (next != null) text = next }, enabled = undo.canRedo) { Text("Redo") }
+                TextButton(onClick = { val next = undo.undo(); if (next != null) { draftResolved.set(false); text = next } }, enabled = undo.canUndo) { Text("Undo") }
+                TextButton(onClick = { val next = undo.redo(); if (next != null) { draftResolved.set(false); text = next } }, enabled = undo.canRedo) { Text("Redo") }
             }
             var query by remember(id) { mutableStateOf("") }
             OutlinedTextField(query, { query = it.take(200) }, label = { Text("Find text") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             if (query.isNotEmpty()) Text("${Regex(Regex.escape(query), RegexOption.IGNORE_CASE).findAll(text).count()} matches")
             OutlinedTextField(text, { next ->
-                if (next.length <= MAX_TEXT_CHARS) { undo.edit(next); text = next }
+                if (next.length <= MAX_TEXT_CHARS) { draftResolved.set(false); undo.edit(next); text = next }
             }, modifier = Modifier.fillMaxWidth().weight(1f), label = { Text("Markdown") })
         } else {
             MarkdownPreview(text, id, loader, Modifier.weight(1f))
@@ -280,12 +280,13 @@ private fun LocalMarkdownImage(documentId: String, path: String, alt: String, lo
     var error by remember(documentId, path) { mutableStateOf<String?>(null) }
     LaunchedEffect(documentId, path) {
         val uri = Uri.parse(path)
-        if (uri.scheme != null || path.startsWith('/') || path.startsWith('\\') || path.split('/', '\\').any { it == ".." || it == "." }) {
+        val localPath = Uri.decode(path.substringBefore('#').substringBefore('?'))
+        if (uri.scheme != null || localPath.startsWith('/') || localPath.startsWith('\\') || localPath.split('/', '\\').any { it == ".." || it == "." }) {
             error = "Remote or unsafe image blocked"
             return@LaunchedEffect
         }
         try {
-            val encoded = Base64.encodeToString(path.toByteArray(StandardCharsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+            val encoded = Base64.encodeToString(localPath.toByteArray(StandardCharsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
             val imageId = "image:$documentId:$encoded"
             require(imageId.length <= 512) { "Image path is too long" }
             val bytes = withContext(Dispatchers.IO) {
@@ -404,7 +405,7 @@ private fun PdfViewer(id: String, fingerprint: String, loader: suspend (String, 
             val result = withContext(Dispatchers.IO) {
                 val descriptor = loader(id, "r") ?: throw IllegalStateException("Read permission unavailable")
                 val renderer = try {
-                    if (Build.VERSION.SDK_INT >= 35) PdfRenderer(descriptor, LoadParams.Builder().apply { if (password.isNotEmpty()) setPassword(password) }.build())
+                    if (Build.VERSION.SDK_INT >= 35) PdfAdvanced.open(descriptor, password)
                     else PdfRenderer(descriptor)
                 } catch (error: Exception) { descriptor.close(); throw error }
                 renderer.use { pdf ->
@@ -417,7 +418,7 @@ private fun PdfViewer(id: String, fingerprint: String, loader: suspend (String, 
                         val image = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                         image.eraseColor(android.graphics.Color.WHITE)
                         current.render(image, null, Matrix().apply { setScale(width.toFloat() / current.width, height.toFloat() / current.height) }, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        val text = if (Build.VERSION.SDK_INT >= 35) current.textContents.joinToString("\n") { it.text }.take(100_000) else null
+                        val text = if (Build.VERSION.SDK_INT >= 35) PdfAdvanced.pageText(current) else null
                         Triple(pdf.pageCount, image, text)
                     }
                 }
@@ -474,17 +475,33 @@ private fun PdfViewer(id: String, fingerprint: String, loader: suspend (String, 
 private suspend fun findNextPdfMatch(loader: suspend (String, String) -> ParcelFileDescriptor?, id: String, password: String, currentPage: Int, query: String): Int? {
     if (Build.VERSION.SDK_INT < 35 || query.isBlank()) return null
     val descriptor = loader(id, "r") ?: return null
-    val renderer = try { PdfRenderer(descriptor, LoadParams.Builder().apply { if (password.isNotBlank()) setPassword(password) }.build()) }
+    val renderer = try { PdfAdvanced.open(descriptor, password) }
         catch (error: Exception) { descriptor.close(); throw error }
     renderer.use { pdf ->
         for (index in currentPage + 1 until pdf.pageCount) {
             currentCoroutineContext().ensureActive()
-            pdf.openPage(index).use { if (it.searchText(query).isNotEmpty()) return index }
+            pdf.openPage(index).use { if (PdfAdvanced.hasMatch(it, query)) return index }
         }
         for (index in 0 until currentPage.coerceAtMost(pdf.pageCount)) {
             currentCoroutineContext().ensureActive()
-            pdf.openPage(index).use { if (it.searchText(query).isNotEmpty()) return index }
+            pdf.openPage(index).use { if (PdfAdvanced.hasMatch(it, query)) return index }
         }
     }
     return null
+}
+
+/** Kept in a separate class so API 29–34 never resolve Android 15-only PDF symbols. */
+private object PdfAdvanced {
+    fun open(descriptor: ParcelFileDescriptor, password: String): PdfRenderer =
+        PdfRenderer(descriptor, LoadParams.Builder().apply { if (password.isNotBlank()) setPassword(password) }.build())
+
+    fun pageText(page: PdfRenderer.Page): String = buildString {
+        for (block in page.textContents) {
+            if (length >= 100_000) break
+            append(block.text.take(100_000 - length))
+            if (length < 100_000) append('\n')
+        }
+    }
+
+    fun hasMatch(page: PdfRenderer.Page, query: String): Boolean = page.searchText(query).isNotEmpty()
 }

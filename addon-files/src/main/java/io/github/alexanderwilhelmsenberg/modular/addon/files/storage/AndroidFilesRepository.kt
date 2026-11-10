@@ -32,6 +32,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     private val resolver = context.contentResolver
     private val prefs = context.getSharedPreferences("files_storage_v1", Context.MODE_PRIVATE)
     private val totals = ConcurrentHashMap<String, DirectoryTotal>()
+    private data class CachedListing(val atMillis: Long, val entries: List<FileEntry>)
+    private val listings = ConcurrentHashMap<String, CachedListing>()
     private data class PendingWrite(val id: String, val expectedFingerprint: String, val temp: File, val descriptor: ParcelFileDescriptor)
     private companion object {
         val pendingWrites = ConcurrentHashMap<String, PendingWrite>()
@@ -50,7 +52,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
 
     private data class Root(val key: String, val label: String, val tree: Uri?, val file: File?, val kind: StorageLocation.Kind, val writable: Boolean)
     private data class Node(val root: Root, val id: String, val parentId: String?, val name: String, val relative: String, val directory: Boolean, val mime: String?, val size: Long?, val modified: Long?, val created: Long?, val writable: Boolean, val file: File?, val uri: Uri?) {
-        fun entry() = FileEntry(id, root.key, parentId, name, relative, directory, mime, size, modified, created, true, writable)
+        fun entry() = FileEntry(id, root.key, parentId, name, relative, directory, mime, size, modified, created, file?.canRead() ?: true, writable)
     }
     private class PartialReplacement(message: String, val recoveryIds: List<String>, cause: Throwable) : IllegalStateException(message, cause)
 
@@ -73,8 +75,10 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         val rootUri = DocumentsContract.buildDocumentUriUsingTree(uri, doc)
         val info = query(rootUri)
         require(info.directory) { "Selected location must be a folder" }
+        require(info.name != trashName) { "Module trash cannot be added as a normal location" }
         prefs.edit().putString("tree.$key", uri.toString()).putString("label.$key", info.name)
             .putBoolean("write.$key", flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0).apply()
+        listings.clear()
         return locations().first { it.id == key }
         } finally { mutationLock.unlock() }
     }
@@ -87,6 +91,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         try { resolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
         try { resolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } catch (_: Exception) { }
         prefs.edit().remove("tree.$locationId").remove("label.$locationId").remove("write.$locationId").apply()
+        listings.clear()
         } finally { mutationLock.unlock() }
     }
 
@@ -94,7 +99,12 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         require(offset >= 0 && limit in 1..maxPage)
         val node = resolve(folderId)
         require(node.directory) { "Not a folder" }
-        val children = children(node).filter { it.name != trashName && (showHidden || !it.name.startsWith('.')) }.map { it.entry() }
+        val now = System.currentTimeMillis()
+        val cached = listings[folderId]
+        val all = if (cached != null && now - cached.atMillis < 3_000) cached.entries else {
+            children(node).filter { it.name != trashName }.map { it.entry() }.also { listings[folderId] = CachedListing(now, it) }
+        }
+        val children = all.filter { showHidden || !it.name.startsWith('.') }
         val comparator = when (sort) {
             FileSort.NAME -> compareBy<FileEntry> { it.name.lowercase() }
             FileSort.MODIFIED -> compareByDescending<FileEntry> { it.modifiedAtMillis ?: Long.MIN_VALUE }
@@ -164,10 +174,25 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         }
         val value = DirectoryTotal(bytes, files, complete, System.currentTimeMillis())
         totals[folderId] = value
+        mutationLock.withLock {
+            val cache = try { JSONObject(prefs.getString("total.cache", "{}")) } catch (_: Exception) { JSONObject() }
+            val key = digest(folderId.toByteArray())
+            cache.put(key, JSONObject().put("bytes", value.bytes).put("files", value.fileCount)
+                .put("complete", value.complete).put("at", value.calculatedAtMillis))
+            if (cache.length() > 128) {
+                val keys = cache.keys().asSequence().toList().sortedBy { cache.optJSONObject(it)?.optLong("at") ?: 0L }
+                keys.take(cache.length() - 128).forEach { cache.remove(it) }
+            }
+            prefs.edit().putString("total.cache", cache.toString()).apply()
+        }
         return value
     }
 
-    override fun cachedDirectoryTotal(folderId: String): DirectoryTotal? = totals[folderId]
+    override fun cachedDirectoryTotal(folderId: String): DirectoryTotal? = totals[folderId] ?: runCatching {
+        val cache = JSONObject(prefs.getString("total.cache", "{}"))
+        val value = cache.optJSONObject(digest(folderId.toByteArray())) ?: return@runCatching null
+        DirectoryTotal(value.optLong("bytes"), value.optLong("files"), value.optBoolean("complete"), value.optLong("at"))
+    }.getOrNull()
 
     override fun openRead(id: String): ParcelFileDescriptor {
         val node = resolve(id)
@@ -196,6 +221,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         startJournal(token, "stagedWrite", listOf(id), temp.path)
         try {
             require(temp.createNewFile()) { "Could not create save staging file" }
+            listings.clear()
             val descriptor = ParcelFileDescriptor.open(temp, ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_TRUNCATE)
             pendingWrites[token] = PendingWrite(id, expectedFingerprint, temp, descriptor)
             return StagedWrite(token, descriptor)
@@ -237,6 +263,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         val pending = pendingWrites.remove(token) ?: return
         try { pending.descriptor.close() } catch (_: Exception) { }
         require(pending.temp.delete() || !pending.temp.exists()) { "Could not remove staged copy" }
+        listings.clear()
         recordOperation(token, "cancelSave", listOf(FileOutcome(pending.id, FileOutcome.Status.CANCELED)))
         finishJournal(token)
         } finally { mutationLock.unlock() }
@@ -254,8 +281,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         return ScopedContent(uri, node.mime, Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 
-    override fun createDirectory(parentId: String, name: String): FileEntry = mutationLock.withLock { create(resolve(parentId), name, DocumentsContract.Document.MIME_TYPE_DIR).entry() }
-    override fun createFile(parentId: String, name: String, mimeType: String): FileEntry = mutationLock.withLock { create(resolve(parentId), name, mimeType).entry() }
+    override fun createDirectory(parentId: String, name: String): FileEntry = mutationLock.withLock { create(resolve(parentId), name, DocumentsContract.Document.MIME_TYPE_DIR).entry().also { listings.clear() } }
+    override fun createFile(parentId: String, name: String, mimeType: String): FileEntry = mutationLock.withLock { create(resolve(parentId), name, mimeType).entry().also { listings.clear() } }
 
     override fun rename(id: String, newName: String): FileEntry {
         mutationLock.lock()
@@ -291,7 +318,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         require(destination.directory && destination.writable) { "Destination is not writable" }
         val sources = ids.distinct().map { resolve(it) }
         startJournal(operation, if (move) "move" else "copy", sources.map { it.id }, destination.id)
-        val total = sources.sumOf { it.size ?: 0L }
+        val total = if (sources.all { !it.directory && it.size != null }) sources.sumOf { it.size ?: 0L } else null
         var done = 0L
         for (source in sources) {
             if (cancel.isCanceled()) { outcomes.add(FileOutcome(source.id, FileOutcome.Status.CANCELED)); continue }
@@ -369,6 +396,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         val outcomes = ArrayList<FileOutcome>()
         val groups = plan.roots.map { root -> plan.descendants.filter { it.locationId == root.locationId && (it.id == root.id || it.relativePath.startsWith(root.relativePath.trimEnd('/') + "/")) } }
         var movedBytes = 0L
+        val progressTotal = plan.totalKnownBytes.takeIf { plan.descendants.all { it.isDirectory || it.sizeBytes != null } }
         for (group in groups) {
             if (cancel.isCanceled()) { group.forEach { outcomes.add(FileOutcome(it.id, FileOutcome.Status.CANCELED)) }; continue }
             val error = validateGroup(group, plan.fingerprints, plan.directoryChildren)
@@ -384,7 +412,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                     require(changed == null) { changed ?: "Folder changed" }
                     val current = resolve(item.id)
                     require(fingerprint(current) == plan.fingerprints[item.id]) { "File changed" }
-                    val record = trashOne(current, cancel) { n -> movedBytes += n; progress.onProgress(movedBytes, plan.totalKnownBytes, item.name) }
+                    val record = trashOne(current, cancel) { n -> movedBytes += n; progress.onProgress(movedBytes, progressTotal, item.name) }
                     outcomes.add(FileOutcome(item.id, FileOutcome.Status.SUCCESS, resultingId = record.id))
                     removedIds.add(item.id)
                 } catch (e: Exception) { failed = true; outcomes.add(FileOutcome(item.id, FileOutcome.Status.FAILED, e.message)) }
@@ -846,7 +874,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         try {
             payload = if (node.file != null) {
                 val target = File(requireNotNull(folder.file), payloadName)
-                require(node.file.renameTo(target)) { "Could not move to trash" }
+                java.nio.file.Files.move(node.file.toPath(), target.toPath())
                 sourceDeleted = true
                 resolveInternal(directChildId(folder.id, payloadName))
             } else {
@@ -866,7 +894,9 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         } catch (e: Exception) {
             var rolledBack = !sourceDeleted
             if (node.file != null) {
-                if (sourceDeleted) rolledBack = try { requireNotNull(payload?.file).renameTo(node.file) } catch (_: Exception) { false }
+                if (sourceDeleted) rolledBack = try {
+                    java.nio.file.Files.move(requireNotNull(payload?.file).toPath(), node.file.toPath()); true
+                } catch (_: Exception) { false }
             } else if (!sourceDeleted) {
                 try { val meta = children(folder).firstOrNull { it.name == "$uuid.meta.json" }; if (meta != null) deleteExact(meta) } catch (_: Exception) { }
                 try { payload?.let(::deleteExact) } catch (_: Exception) { }
@@ -888,7 +918,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         var sourceDeleted = false
         try {
             payload = if (node.file != null) {
-                require(node.file.renameTo(File(requireNotNull(folder.file), payloadName))) { "Could not move empty folder" }
+                java.nio.file.Files.move(node.file.toPath(), File(requireNotNull(folder.file), payloadName).toPath())
                 sourceDeleted = true
                 resolveInternal(directChildId(folder.id, payloadName))
             } else create(folder, payloadName, DocumentsContract.Document.MIME_TYPE_DIR)
@@ -898,7 +928,9 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
             return entry
         } catch (e: Exception) {
             var rolledBack = !sourceDeleted
-            if (node.file != null && sourceDeleted) rolledBack = try { requireNotNull(payload?.file).renameTo(node.file) } catch (_: Exception) { false }
+            if (node.file != null && sourceDeleted) rolledBack = try {
+                java.nio.file.Files.move(requireNotNull(payload?.file).toPath(), node.file.toPath()); true
+            } catch (_: Exception) { false }
             if (rolledBack) try { val meta = children(folder).firstOrNull { it.name == "$uuid.meta.json" }; if (meta != null) deleteExact(meta) } catch (_: Exception) { }
             if (!sourceDeleted && node.file == null) try { payload?.let(::deleteExact) } catch (_: Exception) { }
             throw e
@@ -1010,6 +1042,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         prefs.edit().putString("trash.cache", array.toString()).apply()
     }
     private fun recordOperation(id: String, kind: String, outcomes: List<FileOutcome>) {
+        listings.clear()
+        totals.clear()
         val old = try { JSONArray(prefs.getString("history", "[]")) } catch (_: Exception) { JSONArray() }
         val entry = JSONObject().put("id", id).put("kind", kind).put("at", System.currentTimeMillis()).put("outcomes", JSONArray().also { array ->
             outcomes.forEach { outcome -> array.put(JSONObject().put("id", outcome.id).put("status", outcome.status.name)

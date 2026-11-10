@@ -23,9 +23,13 @@ import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationBatch
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationEdit
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationStore
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import java.util.regex.Pattern
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -96,6 +100,17 @@ class FilesCrossApkHomeTest {
             rule.onNodeWithTag("files.trash.badge").assertIsDisplayed()
             assertTrue(rule.onAllNodesWithTag("workspace-apps-action").fetchSemanticsNodes().isNotEmpty())
             if (InstrumentationRegistry.getArguments().getString("files_capture") == "true") captureOverview()
+
+            rule.onNodeWithText("Add folder").performClick()
+            val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            assertTrue("Embedded Files did not open Android's tree picker",
+                device.wait(Until.hasObject(By.pkg(Pattern.compile(".*documentsui.*"))), 10_000))
+            device.pressBack()
+            rule.waitUntil(15_000) {
+                rule.onAllNodesWithTag("files.page.overview").fetchSemanticsNodes().isNotEmpty()
+            }
+            rule.onNodeWithTag("files.page.overview").assertIsDisplayed()
+            rule.onNodeWithTag("files.trash.badge").assertIsDisplayed()
         } finally {
             addedComponent?.let { component ->
                 runBlocking {

@@ -176,6 +176,11 @@ fun FilesStorageMap(
             refresh?.let { action ->
                 TextButton(onClick = { onAction(action) }) { Text("Refresh") }
             }
+            if (page.optBoolean("mapCalculating")) {
+                actions.firstOrNull { it.optString("kind") == "cancelMap" }?.let { action ->
+                    TextButton(onClick = { onAction(action) }) { Text("Cancel analysis") }
+                }
+            }
             actions.firstOrNull { it.optString("kind") == "trash" }?.let { action ->
                 val count = page.optJSONObject("trash")?.optLong("fileCount", 0L) ?: 0L
                 val color = when {

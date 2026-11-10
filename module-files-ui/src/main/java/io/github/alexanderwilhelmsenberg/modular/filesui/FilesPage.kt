@@ -35,6 +35,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,15 +46,21 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import android.os.ParcelFileDescriptor
 import io.github.alexanderwilhelmsenberg.modular.filesui.documents.FilesDocumentViewer
+import io.github.alexanderwilhelmsenberg.modular.filesui.documents.FileThumbnail
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.collect
 
 /** Trusted native renderer. Module data is text and typed actions; it is never executable UI code. */
 @Composable
@@ -78,13 +86,22 @@ fun FilesPage(
     val pageKey = page.optString("locationId") + "/" + page.optString("folderId") + "/" + view
     LaunchedEffect(pageKey) {
         val anchor = page.optInt("scrollAnchor", 0)
-        if (anchor > 0 && anchor < items.size) listState.scrollToItem(anchor)
+        if (anchor > 0 && anchor < items.size) listState.scrollToItem(anchor, page.optInt("scrollOffset", 0))
     }
     val send: (PageAction, JSONObject?) -> Unit = { action, args ->
         val request = JSONObject().put("version", 1).put("actionId", action.id)
             .put("operationToken", UUID.randomUUID().toString())
         if (args != null) request.put("args", args)
         onAction(request.toString())
+    }
+    val scrollAction = actions.firstOrNull { it.kind == "scroll" }
+    LaunchedEffect(pageKey, scrollAction?.id) {
+        if ((view == "browser" || view == "search") && scrollAction != null) {
+            snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+                .debounce(900).drop(1).collect { (anchor, offset) ->
+                    send(scrollAction, JSONObject().put("anchor", anchor).put("offset", offset))
+                }
+        }
     }
     LaunchedEffect(view, pageJson) {
         if (view == "progress") {
@@ -114,18 +131,21 @@ fun FilesPage(
     if (view == "markdown" || view == "pdf") {
         val document = page.optJSONObject("document")
         val back = actions.firstOrNull { it.kind == "back" }
+        val latestBack by rememberUpdatedState(back)
+        val latestCommit by rememberUpdatedState(actions.firstOrNull { it.kind == "documentCommit" })
+        val latestCancel by rememberUpdatedState(actions.firstOrNull { it.kind == "documentCancel" })
         if (document != null && back != null) {
             FilesDocumentViewer(documentId = document.optString("id"), kind = view,
                 baseFingerprint = document.optString("baseFingerprint"), documentLoader = documentLoader,
                 onCommit = {
-                    val commit = actions.firstOrNull { it.kind == "documentCommit" }
+                    val commit = latestCommit
                     if (commit == null) false else documentCommit(JSONObject().put("version", 1)
                         .put("actionId", commit.id).put("operationToken", UUID.randomUUID().toString()).toString())
                 }, onCancel = {
-                    val cancel = actions.firstOrNull { it.kind == "documentCancel" }
+                    val cancel = latestCancel
                     if (cancel != null) documentCancel(JSONObject().put("version", 1)
                         .put("actionId", cancel.id).put("operationToken", UUID.randomUUID().toString()).toString())
-                }, onClose = { send(back, null) }, modifier = modifier)
+                }, onClose = { latestBack?.let { send(it, null) } }, modifier = modifier)
         } else Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Document unavailable") }
         return
     }
@@ -184,7 +204,7 @@ fun FilesPage(
                 }
                 Spacer(Modifier.height(6.dp))
             }
-            val commandActions = actions.filterNot { it.kind == "trash" || it.kind == "loadMore" || it.kind == "confirm" || it.kind == "cancel" }
+            val commandActions = actions.filterNot { it.kind in setOf("trash", "loadMore", "confirm", "cancel", "scroll", "documentCommit", "documentCancel") }
             if (commandActions.isNotEmpty()) {
                 LazyColumn(Modifier.fillMaxWidth().height(if (commandActions.size > 6) 102.dp else 54.dp)) {
                     items(commandActions.chunked(4)) { row ->
@@ -206,16 +226,34 @@ fun FilesPage(
                     "loading" -> "Loading…"; else -> "Unable to load files" }, Modifier.padding(12.dp))
             }
             if (view == "review" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview") {
-                Text("Review every affected file before moving to trash", style = MaterialTheme.typography.titleMedium)
-                if (!page.optBoolean("complete", true)) Text("Review incomplete — deletion is unavailable", color = MaterialTheme.colorScheme.error)
+                Text(when (view) {
+                    "pasteReview" -> "Review sources and destination conflicts"
+                    "archiveReview" -> "Review archive contents and extraction choices"
+                    else -> "Review every affected file before moving to trash"
+                }, style = MaterialTheme.typography.titleMedium)
+                if (!page.optBoolean("complete", true)) Text("Review incomplete — action unavailable", color = MaterialTheme.colorScheme.error)
             }
             LazyColumn(Modifier.weight(1f).testTag("files.items"), state = listState) {
-                items(items, key = { it.optString("id") }) { item ->
-                    FileRow(item, view, send, onOpenDocument) { action ->
-                        if (action.input != null) { formAction = action; formValue = action.initial }
-                        else send(action, null)
+                if (page.optString("layout") == "grid" && (view == "browser" || view == "search")) {
+                    items(items.chunked(2), key = { it.first().optString("id") }) { pair ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            pair.forEach { item ->
+                                FileRow(item, view, send, onOpenDocument, documentLoader, Modifier.weight(1f), compact = true) { action ->
+                                    if (action.input != null) { formAction = action; formValue = action.initial }
+                                    else send(action, null)
+                                }
+                            }
+                        }
+                        HorizontalDivider()
                     }
-                    HorizontalDivider()
+                } else {
+                    items(items, key = { it.optString("id") }) { item ->
+                        FileRow(item, view, send, onOpenDocument, documentLoader) { action ->
+                            if (action.input != null) { formAction = action; formValue = action.initial }
+                            else send(action, null)
+                        }
+                        HorizontalDivider()
+                    }
                 }
                 if (page.optString("nextCursor") != "null" && page.optString("nextCursor").isNotBlank()) {
                     item {
@@ -239,12 +277,13 @@ fun FilesPage(
     }
     if (formAction != null) {
         val action = formAction!!
-        AlertDialog(onDismissRequest = { formAction = null }, title = { Text(action.label) },
-            text = { OutlinedTextField(formValue, { formValue = it.take(512) }, label = { Text(action.input ?: "Value") }) },
+        AlertDialog(onDismissRequest = { formValue = ""; formAction = null }, title = { Text(action.label) },
+            text = { OutlinedTextField(formValue, { formValue = it.take(512) }, label = { Text(action.input ?: "Value") },
+                visualTransformation = if (action.kind == "password") PasswordVisualTransformation() else VisualTransformation.None) },
             confirmButton = { TextButton(onClick = {
-                send(action, JSONObject().put(action.input ?: "value", formValue)); formAction = null
+                send(action, JSONObject().put(action.input ?: "value", formValue)); formValue = ""; formAction = null
             }) { Text("Apply") } },
-            dismissButton = { TextButton(onClick = { formAction = null }) { Text("Cancel") } })
+            dismissButton = { TextButton(onClick = { formValue = ""; formAction = null }) { Text("Cancel") } })
     }
     if (dialog != null) {
         val choices = dialog.optJSONArray("actions").objects().map(::PageAction)
@@ -263,18 +302,25 @@ fun FilesPage(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileRow(item: JSONObject, view: String, send: (PageAction, JSONObject?) -> Unit,
-    onOpenDocument: (String, String) -> Unit, onCommand: (PageAction) -> Unit) {
+    onOpenDocument: (String, String) -> Unit,
+    documentLoader: suspend (String, String) -> ParcelFileDescriptor?,
+    modifier: Modifier = Modifier, compact: Boolean = false,
+    onCommand: (PageAction) -> Unit) {
     val itemActions = item.optJSONArray("actions").objects().map(::PageAction)
     val primary = itemActions.firstOrNull { it.kind == "open" }
     val kind = item.optString("kind")
     var expanded by remember(item.optString("id")) { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().testTag("files.item.${item.optString("id")}").combinedClickable(onClick = {
+    Row(modifier.fillMaxWidth().testTag("files.item.${item.optString("id")}").combinedClickable(onClick = {
         when {
             primary != null -> send(primary, null)
             kind == "markdown" || kind == "pdf" -> onOpenDocument(item.optString("id"), "r")
         }
     }, onLongClick = { expanded = true }).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (view == "map") {
+        if (item.optString("mimeType").startsWith("image/") && view != "review" && view != "cleanReview") {
+            FileThumbnail(item.optString("id"), item.optString("mimeType"), documentLoader,
+                modifier = Modifier.size(if (compact) 40.dp else 48.dp), contentDescription = item.optString("name"))
+            Spacer(Modifier.size(8.dp))
+        } else if (view == "map") {
             Box(Modifier.size(30.dp).background(mapColor(item.optString("mimeType")), RoundedCornerShape(4.dp)))
             Spacer(Modifier.size(8.dp))
         }
@@ -284,7 +330,7 @@ private fun FileRow(item: JSONObject, view: String, send: (PageAction, JSONObjec
             val subtitle = item.optString("subtitle").ifBlank { item.optString("path") }
             if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-            if (view == "review" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview" || view == "trash" || view == "emptyTrashReview") {
+            if (view == "review" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview" || view == "trash" || view == "emptyTrashReview" || view == "properties") {
                 val size = if (item.isNull("sizeBytes")) "Size unavailable" else formatBytes(item.optLong("sizeBytes"))
                 val modified = date(item, "modifiedAt")
                 val created = date(item, "createdAt")
@@ -293,10 +339,10 @@ private fun FileRow(item: JSONObject, view: String, send: (PageAction, JSONObjec
         }
         if (view != "review" && view != "cleanReview" && view != "pasteReview") {
             val secondary = itemActions.filterNot { it.kind == "open" }
-            secondary.take(1).forEach { action ->
+            secondary.take(if (compact) 0 else 1).forEach { action ->
                 TextButton(onClick = { onCommand(action) }) { Text(action.label) }
             }
-            if (secondary.size > 1) {
+            if (secondary.size > if (compact) 0 else 1) {
                 Box {
                     TextButton(onClick = { expanded = true }, modifier = Modifier.testTag("files.item.more")) { Text("More") }
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {

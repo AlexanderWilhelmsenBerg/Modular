@@ -17,6 +17,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /** Pure, manual cleaner analysis. No method here changes storage or authorizes a deletion. */
 public final class CleanerEngine {
@@ -218,7 +219,7 @@ public final class CleanerEngine {
             }
             for (List<Entry> equal : equalSets) if (equal.size() > 1)
                 groups.add(new Group(groupId(Category.EXACT_DUPLICATE, equal), Category.EXACT_DUPLICATE,
-                        equal.stream().map(Entry::id).toList(), null, true, null,
+                        equal.stream().map(Entry::id).collect(Collectors.toList()), null, true, null,
                         "Content verified byte for byte; choose a copy to keep"));
         }
     }
@@ -255,7 +256,7 @@ public final class CleanerEngine {
             String evidence = agrees ? "Highest numeric copy and uniquely newest modification time agree"
                     : "Copy number and modification evidence conflict, tie, or are unavailable; choose which to keep";
             groups.add(new Group(groupId(Category.NUMBERED_COPY, members), Category.NUMBERED_COPY,
-                    members.stream().map(Entry::id).toList(), agrees ? highest.id() : null,
+                    members.stream().map(Entry::id).collect(Collectors.toList()), agrees ? highest.id() : null,
                     !agrees, copyName(highest).base(), evidence));
         }
     }
@@ -340,7 +341,7 @@ public final class CleanerEngine {
             }
             boolean choice = tied || codeConflict;
             groups.add(new Group(groupId(Category.OLDER_VERSION, members), Category.OLDER_VERSION,
-                    members.stream().map(Entry::id).toList(), choice ? null : newest.id(), choice,
+                    members.stream().map(Entry::id).collect(Collectors.toList()), choice ? null : newest.id(), choice,
                     null, codeConflict ? "APK version code conflicts with version name; choose which to keep"
                             : tied ? "Versions tie or are incomparable; choose which to keep"
                             : "Newest parsed version; file dates do not determine version order"));
@@ -384,7 +385,7 @@ public final class CleanerEngine {
                 Entry retained = entries.get(keeper);
                 if (!retained.name().equals(group.baseName()))
                     renames.add(new RenameStep(keeper, group.baseName(), groupId,
-                            group.memberIds().stream().filter(id -> !id.equals(keeper)).toList()));
+                            group.memberIds().stream().filter(id -> !id.equals(keeper)).collect(Collectors.toList())));
             }
         }
         Set<String> suggested = new HashSet<>();

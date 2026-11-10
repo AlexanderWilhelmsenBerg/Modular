@@ -38,15 +38,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Modular">
 
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.workspacefiles"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/workspace_file_paths" />
-        </provider>
-
         <activity
             android:name=".widgets.WidgetConfigurationActivity"
             android:exported="false" />

@@ -52,10 +52,10 @@ The existing `.github/workflows/android.yml` uses API 35, installs release Core 
 | Gate | Current result | Evidence needed |
 | --- | --- | --- |
 | JVM protocol/planner/adapter tests | Tests added; execution pending | Exact test reports, source revision |
-| API 35 direct-storage safety instrumentation | Test added; execution pending | `DirectStorageSafetyTest` connected XML, clean fixture teardown |
-| API 35 actual SAF picker and grant | Test added; execution pending | `SelectedFolderSafTest` connected XML, real DocumentsUI grant/revoke |
-| API 35 Markdown/PDF/archive files | Tests added; execution pending | `MarkdownRealDocumentTest`, `PdfRealDocumentTest`, `ArchiveRealStorageTest` connected XML |
-| API 35 cross-APK Files instrumentation | Test added; execution pending | Separate APK install plus connected test XML |
+| API 35 direct-storage safety instrumentation | Test source compiles; execution pending | `DirectStorageSafetyTest` connected XML, clean fixture teardown |
+| API 35 actual SAF picker and grant | Test source compiles; execution pending | `SelectedFolderSafTest` connected XML, real DocumentsUI grant/revoke |
+| API 35 Markdown/PDF/archive files | Test sources compile; execution pending | `MarkdownRealDocumentTest`, `PdfRealDocumentTest`, `ArchiveRealStorageTest` connected XML |
+| API 35 cross-APK Files instrumentation | Test source compiles; execution pending | Separate APK install plus connected test XML |
 | API 35 Files captures | Capture script added; execution pending | Actual nonempty PNGs and capture log |
 | Samsung One UI selected-folder/full-access flows | Unverified | Device/version, permission path, outcomes |
 | SD/USB unplug/read-only/provider matrix | Unverified | Device/media/provider, failure and recovery outcomes |

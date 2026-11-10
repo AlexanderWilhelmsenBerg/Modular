@@ -36,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -51,6 +52,7 @@ import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationSnapsh
 import io.github.alexanderwilhelmsenberg.modular.organization.ModuleHomePage
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.StandardCapabilities
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleRecord
+import io.github.alexanderwilhelmsenberg.modular.security.AndroidModuleIdentityResolver
 import io.github.alexanderwilhelmsenberg.modular.widgets.WidgetLayoutLimits
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePage
 import io.github.alexanderwilhelmsenberg.modular.workspace.WorkspacePageId
@@ -89,6 +91,8 @@ fun WorkspaceSettingsUi(
     pageModules: List<ModuleRecord> = emptyList(),
     onOpenModuleSettings: (ModuleRecord) -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val identityResolver = remember(context) { AndroidModuleIdentityResolver(context) }
     val scope = rememberCoroutineScope()
     val dialogScroll = rememberScrollState()
     var open by rememberSaveable { mutableStateOf(false) }
@@ -362,24 +366,25 @@ fun WorkspaceSettingsUi(
         },
     )
     addModule?.let { module ->
+        fun addModuleScreen(left: Boolean) {
+            val signerKey = identityResolver.resolve(module.component.packageName).getOrElse {
+                error = "Could not verify the installed module. Refresh modules and try again."
+                return
+            }.key
+            val home = snapshot.pageOrder.indexOf(HomePageId.Home).coerceAtLeast(0)
+            save(OrganizationEdit.AddModulePage(ModuleHomePage(
+                module.component.flattenToString(), module.moduleId ?: module.component.flattenToString(),
+                module.label, signerKey = signerKey,
+            ), if (left) home else home + 1), afterSuccess = { addModule = null })
+        }
         AlertDialog(onDismissRequest = { addModule = null },
             title = { Text("Add ${module.label}") },
             text = { Text("Choose which side of Home to place this screen. You can move it later.") },
             confirmButton = {
-                TextButton(onClick = {
-                    val home = snapshot.pageOrder.indexOf(HomePageId.Home).coerceAtLeast(0)
-                    save(OrganizationEdit.AddModulePage(ModuleHomePage(
-                        module.component.flattenToString(), module.moduleId ?: module.component.flattenToString(), module.label,
-                    ), home + 1), afterSuccess = { addModule = null })
-                }) { Text("Right of Home") }
+                TextButton(onClick = { addModuleScreen(false) }) { Text("Right of Home") }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    val home = snapshot.pageOrder.indexOf(HomePageId.Home).coerceAtLeast(0)
-                    save(OrganizationEdit.AddModulePage(ModuleHomePage(
-                        module.component.flattenToString(), module.moduleId ?: module.component.flattenToString(), module.label,
-                    ), home), afterSuccess = { addModule = null })
-                }) { Text("Left of Home") }
+                TextButton(onClick = { addModuleScreen(true) }) { Text("Left of Home") }
             })
     }
     snapshot.workspacePages.firstOrNull { it.id == renameId }?.let { page ->

@@ -369,8 +369,7 @@ fun FilesPage(
                     if (primaryActions.isNotEmpty()) {
                         val largeSettingsText = view == "settings" && density.fontScale >= 1.3f
                         Column(Modifier.weight(1f)
-                            .then(if (view == "settings") Modifier.heightIn(max = 420.dp)
-                                .verticalScroll(rememberScrollState()) else Modifier),
+                            .then(if (view == "settings") Modifier.verticalScroll(rememberScrollState()) else Modifier),
                             verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             primaryActions.chunked(if (largeSettingsText) 1 else 2).forEach { pair ->
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -47,6 +47,19 @@ requirement is not evidence that its implementation has passed validation.
   that folder. Cleanup results are an internal view with a return action to the
   same folder; separate Files/Clean tabs are not required. Horizontal swipes
   belong to workspace navigation, not an inner tab pager.
+- Primary browser actions use large, labeled tiles. Less frequent actions open
+  from an animated circular three-dot menu. A folder has its own three-dot menu
+  for its actions and appearance. Put longer explanations in **Info** so the
+  browser opens with concise guidance.
+- Selecting a folder gives visual feedback as its tile moves into the folder
+  header. The header identifies the selected folder while browsing its contents.
+  Folder icons offer folder, game, audio, and music choices; a user can select
+  a color or leave it on **Auto**. Auto uses a light yellow folder in Light mode
+  and a dark blue folder in Dark/AMOLED mode. Persist icon and color choices
+  across page changes and process recreation.
+- **Clean** starts a fresh scan of the current folder immediately and presents
+  progress and recommendations in a dismissible sheet over the browser. Closing
+  the sheet returns to the same folder; it does not start cleanup or change files.
 - Files opens the last valid location, with breadcrumbs, local file search,
   sort controls, and a list/grid switch. Persist the storage identity, folder
   URI/path, scroll anchor/offset, view/sort preferences, and active search state
@@ -63,8 +76,10 @@ requirement is not evidence that its implementation has passed validation.
 - File search stays within the selected location/subtree unless the user selects
   All connected locations. Core's bottom app search continues searching apps;
   these are distinct, clearly labeled scopes.
-- Keep the existing alphabet rail and direct Apps action available. Opening the
-  drawer starts at Most Used, or the requested letter when using the rail.
+- Main Home keeps its alphabet rail. Secondary Home screens omit that rail to
+  leave their content unobstructed. The direct Apps action and bottom app search
+  remain available on every Home screen. Opening the drawer starts at Most Used,
+  or the requested letter when using Main Home's rail.
 - Vertical gestures scroll the file/results list first; reaching its bottom can
   open the drawer using the existing Home transition. Selection, dialogs, and
   other active interactions own their gestures before launcher navigation.

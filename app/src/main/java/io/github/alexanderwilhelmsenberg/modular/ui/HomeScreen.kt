@@ -273,7 +273,7 @@ fun HomeScreen(
                     enableReachability = enableReachability,
                     bottomPadding = if (showChrome) 12.dp else 108.dp,
                 )
-                if (showAlphabetRail && useSections && alphabet.isNotEmpty()) AlphabetRail(
+                if (showAlphabetRail && pageTitle == null && useSections && alphabet.isNotEmpty()) AlphabetRail(
                     alphabet = alphabet,
                     populated = headerIndices.keys + if ("Folders" in headerIndices) setOf("◇") else emptySet(),
                     onSelect = { label -> jumpSerial += 1; jump = (if (label == "◇") "Folders" else label) to jumpSerial },

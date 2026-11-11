@@ -11,6 +11,9 @@ interface FilesRepository {
     fun addSelectedFolder(uri: Uri, grantFlags: Int): StorageLocation
     fun removeSelectedFolder(locationId: String)
     fun list(folderId: String, offset: Int = 0, limit: Int = 100, sort: FileSort = FileSort.NAME, showHidden: Boolean = false): FilePage
+    /** Display-only metadata. Never use this for collision checks, deletion, copying, or writes. */
+    fun cachedListing(folderId: String, offset: Int = 0, limit: Int = 100, sort: FileSort = FileSort.NAME, showHidden: Boolean = false): FilePage? = null
+    fun invalidateListing(folderId: String) {}
     fun get(id: String): FileEntry
     fun search(folderIds: List<String>, filter: SearchFilter, cancel: Cancellation = Cancellation { false }): SearchPage
     fun searchPage(folderIds: List<String>, filter: SearchFilter, offset: Int, limit: Int = 100, cancel: Cancellation = Cancellation { false }): SearchPage

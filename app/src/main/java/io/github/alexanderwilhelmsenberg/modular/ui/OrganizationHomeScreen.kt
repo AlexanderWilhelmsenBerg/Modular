@@ -367,7 +367,7 @@ fun OrganizationHomeScreen(
                 val featured = if (category == null && sorter == null) featuredApps?.let(projection::filterDirectStarred) else null
                 if (workspaceMode && page is HomePageId.Module && sorter == null) {
                     if (pageName == "module:${page.component}") SideEffect { activeWorkspaceList = null }
-                    Box(Modifier.fillMaxSize().padding(bottom = 72.dp, end = 28.dp)) {
+                    Box(Modifier.fillMaxSize().padding(bottom = 72.dp)) {
                         modulePageContent(page.component, pageName == "module:${page.component}",
                             { moduleInteractionActive = it },
                             { requestedPage = HomePageId.Home; pageRequestSerial += 1 })
@@ -557,7 +557,8 @@ fun OrganizationHomeScreen(
                     (if (hasFeatured) listOf("★") else emptyList()) +
                         (if (hasFolders) listOf("◇") else emptyList()) + sections.map { it.label }
             }
-            if (searchQuery.isBlank() && !editingSearch && !editingWidgetGrid &&
+            if ((pageName == "home" || vertical.progress == 1f) &&
+                searchQuery.isBlank() && !editingSearch && !editingWidgetGrid &&
                 !drawerPagerScrolling && alphabet.isNotEmpty()) AlphabetRail(
                 alphabet = alphabet,
                 populated = alphabet.toSet(),
@@ -583,7 +584,18 @@ fun OrganizationHomeScreen(
                 .background(if (wallpaperMode) Color.Black.copy(alpha = 0.65f) else MaterialTheme.colorScheme.background),
                 verticalAlignment = Alignment.CenterVertically) {
                 TextButton(
-                    onClick = { settle(vertical.progress < 1f) },
+                    onClick = {
+                        if (vertical.progress < 1f) {
+                            requestedDrawerPage = HomePageId.Home
+                            drawerRequestSerial++
+                            railJumpPage = HomePageId.Home
+                            railJump = null
+                            railJumpSerial++
+                            listState.requestScrollToItem(0)
+                            activeDrawerList = listState
+                            settle(true)
+                        } else settle(false)
+                    },
                     enabled = !editingWidgetGrid,
                     contentPadding = PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.width(72.dp).testTag(if (vertical.progress < 1f) "workspace-apps-action" else "workspace-home-action"),

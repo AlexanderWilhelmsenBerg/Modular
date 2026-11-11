@@ -25,8 +25,8 @@ Open a location, browse folders, search locally or across connected locations,
 and long-press a file for its available actions. Copy and Cut stage references;
 Paste chooses the destination and resolves collisions before changing files.
 
-**Clean** opens the current folder's cleanup view. Start a scan explicitly,
-choose which candidates to remove, and review every affected file. Numbered
+**Clean** opens a sheet and scans the current folder. Choose which candidates
+to remove, and review every affected file. Numbered
 copies with conflicting dates require a keeper choice. Normal **Delete** moves
 reviewed files to trash. Trash does not free the space until it is emptied.
 
@@ -34,6 +34,16 @@ The trashcan shows grey when empty, blue for up to 20 files, and red above 20.
 Trash lists original locations and offers restore and a separately confirmed
 permanent empty operation. Unavailable media remains represented in trash;
 reconnect it before restoring or emptying its entries.
+
+Folders have icon tiles. Their three-dot menu includes **Customize folder**,
+with a populated icon and color picker. Automatic folder color is yellow in
+Light and blue in Dark/AMOLED; choosing a color overrides that default. The
+page menu contains **Info** for storage and recovery details.
+
+Files keeps a bounded local listing cache and Core keeps a read-only page
+snapshot while reconnecting. Saved snapshots cannot execute old commands.
+Use **Refresh** to see external changes immediately; display listings otherwise
+expire after two minutes. File operations always recheck live storage.
 
 ## Documents and archives
 

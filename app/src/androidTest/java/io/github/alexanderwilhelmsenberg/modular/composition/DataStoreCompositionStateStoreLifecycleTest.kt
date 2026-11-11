@@ -5,7 +5,7 @@ import android.content.Context
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -19,22 +19,30 @@ class DataStoreCompositionStateStoreLifecycleTest {
         var third: DataStoreCompositionStateStore? = null
         try {
             first.update { it.copy(contexts = listOf(LauncherContext("first", "First")), activeContextId = "first") }
-            withTimeout(5_000) { second.state.first { it.activeContextId == "first" } }
+            awaitContext(second, "first", "Second wrapper missed the first saved context")
 
             first.close()
             second.update { it.copy(contexts = listOf(LauncherContext("second", "Second")), activeContextId = "second") }
             val thirdStore = DataStoreCompositionStateStore(context, file)
             third = thirdStore
-            val restored = withTimeout(5_000) { thirdStore.state.first { it.activeContextId == "second" } }
+            val restored = awaitContext(thirdStore, "second", "Recreated wrapper missed the second saved context")
             assertEquals("Second", restored.contexts.single().name)
 
             second.close()
             thirdStore.update { it.copy(contexts = listOf(LauncherContext("third", "Third")), activeContextId = "third") }
-            assertEquals("third", withTimeout(5_000) { thirdStore.state.first { it.activeContextId == "third" } }.activeContextId)
+            assertEquals("third", awaitContext(thirdStore, "third", "Remaining wrapper missed its update").activeContextId)
         } finally {
             first.close()
             second.close()
             third?.close()
         }
     }
+
+    private suspend fun awaitContext(
+        store: DataStoreCompositionStateStore,
+        expected: String,
+        message: String,
+    ): CompositionState = withTimeoutOrNull(5_000) {
+        store.state.first { it.activeContextId == expected }
+    } ?: throw AssertionError("$message: state=${store.state.value}, loadError=${store.loadError.value}")
 }

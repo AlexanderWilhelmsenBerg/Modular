@@ -36,6 +36,39 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun cleanStartsImmediatelyAndClosingSheetKeepsCurrentFolder() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val browser = page(controller)
+            assertEquals("browser", browser.getString("view"))
+            assertEquals("root", browser.getString("folderId"))
+
+            val scanning = action(controller, browser, "Clean")
+            assertEquals("progress", scanning.getString("view"))
+            assertEquals("sheet", scanning.getString("presentation"))
+            assertEquals("browser", scanning.getString("underlyingView"))
+            assertEquals("clean", scanning.getString("progressFor"))
+
+            val recommendations = awaitView(controller, "clean")
+            assertEquals("sheet", recommendations.getString("presentation"))
+            assertEquals("browser", recommendations.getString("underlyingView"))
+            assertTrue(context.getSharedPreferences("files-page", 0)
+                .getLong("lastCleanScanAt:root", 0) > 0)
+            assertEquals(0, repository.moveCalls)
+
+            val returned = action(controller, recommendations, "Back to folder")
+            assertEquals("browser", returned.getString("view"))
+            assertEquals("root", returned.getString("folderId"))
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
     @Test fun everyReviewedFileCanBeReachedAndCancelIsInert() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
@@ -114,9 +147,9 @@ class FilesReviewPaginationTest {
         return JSONObject(controller.performAction(request.toString()))
     }
 
-    private class ReviewFixtureRepository : FilesRepository {
+    private class ReviewFixtureRepository(itemCount: Int = 105) : FilesRepository {
         private val root = entry("root", true)
-        private val files = (0 until 105).map { entry("item-$it", false) }
+        private val files = (0 until itemCount).map { entry("item-$it", false) }
         var moveCalls = 0
         var lastPlanSize = 0
 
@@ -159,7 +192,7 @@ class FilesReviewPaginationTest {
         override fun beginStagedWrite(id: String, expectedFingerprint: String): StagedWrite = error("Unexpected staged write")
         override fun commitStagedWrite(token: String): FileEntry = error("Unexpected staged commit")
         override fun cancelStagedWrite(token: String) = Unit
-        override fun fingerprint(id: String) = error("Unexpected fingerprint")
+        override fun fingerprint(id: String) = "fixture:$id"
         override fun scopedContent(id: String): ScopedContent = error("Unexpected content grant")
         override fun createDirectory(parentId: String, name: String): FileEntry = error("Unexpected create")
         override fun createFile(parentId: String, name: String, mimeType: String): FileEntry = error("Unexpected create")

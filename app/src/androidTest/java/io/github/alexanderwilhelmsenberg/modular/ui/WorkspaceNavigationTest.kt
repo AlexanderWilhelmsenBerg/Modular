@@ -109,6 +109,10 @@ class WorkspaceNavigationTest {
                     .assertIsDisplayed() }.isSuccess
             }
             assertTrue("Category leaked into the Home pager", offSurface("launcher-page:category:games"))
+            val homeLetter = HomeSectionBuilder(rule.activity.resources.configuration.locales[0])
+                .bucket(app.label)
+            assertTrue("Widget page kept the alphabet rail", offSurface("rail:$homeLetter"))
+            rule.onNodeWithTag("home-search").assertIsDisplayed()
 
             rule.onNodeWithTag("workspace-apps-action").performClick()
             waitForAllApps()
@@ -139,16 +143,19 @@ class WorkspaceNavigationTest {
             rule.onNodeWithTag("launcher-page:widget:${widgetPage.id}").assertIsDisplayed()
             rule.onNodeWithTag("workspace-apps-action").performClick()
             waitForAllApps()
-            rule.onNodeWithTag("launcher-page:category:games").assertIsDisplayed()
+            assertTrue("Apps from a secondary Home page did not reset to the central drawer",
+                offSurface("launcher-page:category:games"))
+            rule.onNode(hasTestTag("launcher-page:home") and
+                hasAnyAncestor(hasTestTag("drawer-pages"))).assertIsDisplayed()
             rule.runOnIdle { rule.activity.onBackPressedDispatcher.onBackPressed() }
             waitForHome()
             rule.onNodeWithTag("launcher-page:widget:${widgetPage.id}").assertIsDisplayed()
 
-            // The upper surface's rail always targets central All apps, even after
-            // a category was the last drawer page.
+            // The secondary Home page has no rail; Apps returns to the central drawer.
             val centralLetter = HomeSectionBuilder(rule.activity.resources.configuration.locales[0])
                 .bucket(app.label)
-            tapRail(centralLetter)
+            assertTrue("Widget page kept the alphabet rail", offSurface("rail:$centralLetter"))
+            rule.onNodeWithTag("workspace-apps-action").performClick()
             waitForAllApps()
             rule.waitUntil(15_000) { offSurface("launcher-page:category:games") }
             rule.onNodeWithTag("workspace-home-action").performClick()

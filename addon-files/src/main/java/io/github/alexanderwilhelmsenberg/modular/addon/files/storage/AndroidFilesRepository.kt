@@ -32,8 +32,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     private val resolver = context.contentResolver
     private val prefs = context.getSharedPreferences("files_storage_v1", Context.MODE_PRIVATE)
     private val totals = ConcurrentHashMap<String, DirectoryTotal>()
-    private data class CachedListing(val atMillis: Long, val entries: List<FileEntry>)
-    private val listings = ConcurrentHashMap<String, CachedListing>()
+    private val listingCache = DirectoryListingCache(File(context.filesDir, "directory-listings-v1"))
+    private val cachedListingAgeMillis = 120_000L
     private data class PendingWrite(val id: String, val expectedFingerprint: String, val temp: File, val descriptor: ParcelFileDescriptor)
     private companion object {
         val pendingWrites = ConcurrentHashMap<String, PendingWrite>()
@@ -80,7 +80,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
             .putBoolean("write.$key", flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0).commit()) {
             "Could not persist selected folder"
         }
-        listings.clear()
+        listingCache.clear()
         return locations().first { it.id == key }
         } finally { mutationLock.unlock() }
     }
@@ -95,19 +95,35 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         }
         try { resolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
         try { resolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } catch (_: Exception) { }
-        listings.clear()
+        listingCache.clear()
         } finally { mutationLock.unlock() }
     }
 
-    override fun list(folderId: String, offset: Int, limit: Int, sort: FileSort, showHidden: Boolean): FilePage {
+    override fun list(folderId: String, offset: Int, limit: Int, sort: FileSort, showHidden: Boolean): FilePage = mutationLock.withLock {
         require(offset >= 0 && limit in 1..maxPage)
         val node = resolve(folderId)
         require(node.directory) { "Not a folder" }
         val now = System.currentTimeMillis()
-        val cached = listings[folderId]
-        val all = if (cached != null && now - cached.atMillis < 3_000) cached.entries else {
-            children(node).filter { it.name != trashName }.map { it.entry() }.also { listings[folderId] = CachedListing(now, it) }
-        }
+        val all = children(node).filter { it.name != trashName }.map { it.entry() }
+        runCatching { listingCache.write(folderId, all, now) }
+            .onFailure { listingCache.invalidate(folderId) }
+        pageFor(all, offset, limit, sort, showHidden)
+    }
+
+    override fun cachedListing(folderId: String, offset: Int, limit: Int, sort: FileSort, showHidden: Boolean): FilePage? = mutationLock.withLock {
+        require(offset >= 0 && limit in 1..maxPage)
+        // The original location and folder must still be accessible before showing saved entries.
+        val node = runCatching { resolve(folderId) }.getOrNull() ?: return@withLock null
+        if (!node.directory) return@withLock null
+        val snapshot = listingCache.read(folderId, System.currentTimeMillis(), cachedListingAgeMillis) ?: return@withLock null
+        pageFor(snapshot.entries, offset, limit, sort, showHidden)
+    }
+
+    override fun invalidateListing(folderId: String) = mutationLock.withLock {
+        listingCache.invalidate(folderId)
+    }
+
+    private fun pageFor(all: List<FileEntry>, offset: Int, limit: Int, sort: FileSort, showHidden: Boolean): FilePage {
         val children = all.filter { showHidden || !it.name.startsWith('.') }
         val comparator = when (sort) {
             FileSort.NAME -> compareBy<FileEntry> { it.name.lowercase() }
@@ -211,7 +227,9 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         require(fingerprint(id) == expectedFingerprint) { "File changed; review before saving" }
         require(node.file == null) { "Direct files require staged write and explicit commit" }
         // SAF providers may only support in-place writes. The editor must disclose this and retain its draft.
-        return resolver.openFileDescriptor(requireNotNull(node.uri), "wt") ?: error("Provider did not open file for writing")
+        val descriptor = resolver.openFileDescriptor(requireNotNull(node.uri), "wt") ?: error("Provider did not open file for writing")
+        node.parentId?.let(listingCache::invalidate)
+        return descriptor
     }
 
     override fun beginStagedWrite(id: String, expectedFingerprint: String): StagedWrite {
@@ -225,7 +243,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         startJournal(token, "stagedWrite", listOf(id), temp.path)
         try {
             require(temp.createNewFile()) { "Could not create save staging file" }
-            listings.clear()
+            listingCache.invalidate(requireNotNull(node.parentId))
             val descriptor = ParcelFileDescriptor.open(temp, ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_TRUNCATE)
             pendingWrites[token] = PendingWrite(id, expectedFingerprint, temp, descriptor)
             return StagedWrite(token, descriptor)
@@ -267,7 +285,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         val pending = pendingWrites.remove(token) ?: return
         try { pending.descriptor.close() } catch (_: Exception) { }
         require(pending.temp.delete() || !pending.temp.exists()) { "Could not remove staged copy" }
-        listings.clear()
+        listingCache.invalidate(pending.id.substringBeforeLast('.', missingDelimiterValue = pending.id))
         recordOperation(token, "cancelSave", listOf(FileOutcome(pending.id, FileOutcome.Status.CANCELED)))
         finishJournal(token)
         } finally { mutationLock.unlock() }
@@ -285,8 +303,16 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         return ScopedContent(uri, node.mime, Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 
-    override fun createDirectory(parentId: String, name: String): FileEntry = mutationLock.withLock { create(resolve(parentId), name, DocumentsContract.Document.MIME_TYPE_DIR).entry().also { listings.clear() } }
-    override fun createFile(parentId: String, name: String, mimeType: String): FileEntry = mutationLock.withLock { create(resolve(parentId), name, mimeType).entry().also { listings.clear() } }
+    override fun createDirectory(parentId: String, name: String): FileEntry = mutationLock.withLock {
+        val parent = resolve(parentId)
+        listingCache.invalidate(parentId)
+        create(parent, name, DocumentsContract.Document.MIME_TYPE_DIR).entry()
+    }
+    override fun createFile(parentId: String, name: String, mimeType: String): FileEntry = mutationLock.withLock {
+        val parent = resolve(parentId)
+        listingCache.invalidate(parentId)
+        create(parent, name, mimeType).entry()
+    }
 
     override fun rename(id: String, newName: String): FileEntry {
         mutationLock.lock()
@@ -760,7 +786,16 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     private fun children(parent: Node): List<Node> {
         require(parent.directory)
         val file = parent.file
-        if (file != null) return (file.listFiles() ?: error("Cannot list folder")).map { child -> resolveInternal(directChildId(parent.id, child.name)) }
+        if (file != null) return (file.listFiles() ?: error("Cannot list folder")).map { child ->
+            val checked = StorageSafety.confinedChild(requireNotNull(parent.root.file), file, child.name)
+            require(checked.exists()) { "Item missing" }
+            val directory = checked.isDirectory
+            Node(parent.root, directChildId(parent.id, child.name), parent.id, child.name,
+                if (parent.relative.isEmpty()) child.name else "${parent.relative}/${child.name}",
+                directory, if (directory) DocumentsContract.Document.MIME_TYPE_DIR else mime(child.name),
+                if (checked.isFile) checked.length() else null, checked.lastModified().takeIf { it > 0 },
+                null, parent.root.writable && checked.canWrite(), checked, null)
+        }
         val tree = requireNotNull(parent.root.tree)
         val uri = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getDocumentId(requireNotNull(parent.uri)))
         val out = ArrayList<Node>()
@@ -1063,7 +1098,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         prefs.edit().putString("trash.cache", array.toString()).apply()
     }
     private fun recordOperation(id: String, kind: String, outcomes: List<FileOutcome>) {
-        listings.clear()
+        listingCache.clear()
         totals.clear()
         val old = try { JSONArray(prefs.getString("history", "[]")) } catch (_: Exception) { JSONArray() }
         val entry = JSONObject().put("id", id).put("kind", kind).put("at", System.currentTimeMillis()).put("outcomes", JSONArray().also { array ->
@@ -1093,6 +1128,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         updated.put(JSONObject().put("id", id).put("kind", kind).put("ids", JSONArray(ids))
             .put("destination", destination).put("at", System.currentTimeMillis()))
         require(prefs.edit().putString("journal", updated.toString()).commit()) { "Could not persist operation journal" }
+        // A failed or interrupted operation may still have changed storage.
+        listingCache.clear()
     }
     private fun finishJournal(id: String) {
         val updated = JSONArray()

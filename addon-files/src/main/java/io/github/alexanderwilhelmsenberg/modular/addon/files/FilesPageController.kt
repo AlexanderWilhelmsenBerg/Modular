@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class FilesPageController(context: Context, private val repository: FilesRepository = createFilesRepository(context)) {
     private val app = context.applicationContext
     private val preferences = app.getSharedPreferences("files-page", Context.MODE_PRIVATE)
+    private val folderAppearance = FolderAppearance(preferences)
     private val lock = Any()
     private val commands = LinkedHashMap<String, Command>()
     private val completedTokens = LinkedHashSet<String>(preferences.getStringSet("completedTokens", emptySet()) ?: emptySet())
@@ -61,6 +62,10 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private val favorites = LinkedHashSet<String>(preferences.getStringSet("favorites", emptySet()) ?: emptySet())
     private val recent = LinkedHashSet<String>((preferences.getString("recent", "") ?: "").split(',').filter { it.isNotBlank() })
     private var propertyEntryId: String? = null
+    private var appearanceFolderId: String? = null
+    private var appearanceReturnView = "browser"
+    private var infoReturnView = "browser"
+    private var cleanBrowserPosition: Triple<Int, Int, Int>? = null
     private var historyDetailId: String? = null
     private var clipboard: List<String> = emptyList()
     private var clipboardMove = false
@@ -172,7 +177,14 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val oldFolderId = folderId
         val oldLocationId = locationId
         val outcome = runCatching { command.handler(request.optJSONObject("args") ?: JSONObject()) }
-        if (view != oldView || folderId != oldFolderId || locationId != oldLocationId) {
+        val restoreBrowserPosition = if (view == "browser" && oldView in setOf("clean", "progress"))
+            cleanBrowserPosition else null
+        if (restoreBrowserPosition != null) {
+            currentOffset = restoreBrowserPosition.first
+            scrollAnchor = restoreBrowserPosition.second
+            scrollOffset = restoreBrowserPosition.third
+            cleanBrowserPosition = null
+        } else if (view != oldView || folderId != oldFolderId || locationId != oldLocationId) {
             currentOffset = 0; scrollAnchor = 0; scrollOffset = 0
         }
         if (outcome.isSuccess && command.hostAction != null) {
@@ -275,6 +287,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .put("title", when (view) { "trash" -> "Trash"; "review" -> "Review deletion";
                 "emptyTrashReview" -> "Empty trash"; "map" -> "Storage map"; "clean" -> "Clean folder";
                 "settings" -> "Files settings"; "cleanReview" -> "Review cleanup";
+            "info" -> "Folder info"; "folderAppearance" -> "Folder appearance";
             "history", "historyDetail" -> "Operation history"; "markdown" -> "Markdown"; "pdf" -> "PDF";
             "keeper" -> "Choose which to keep"; "filters" -> "Search filters";
             "archive" -> "Extract archive";
@@ -288,6 +301,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .put("layout", if (grid) "grid" else "list")
             .put("scrollAnchor", scrollAnchor).put("scrollOffset", scrollOffset)
             .put("state", "ready")
+        if (view == "clean" || (view == "progress" && jobReturnView == "clean")) {
+            page.put("presentation", "sheet").put("underlyingView", "browser")
+        }
         if (view == "browser" || view == "search") page.put("scrollKey", scrollKey())
         message?.let { page.put("message", it) }
         documentSaveStatus?.let { page.put("documentSaveStatus", it) }
@@ -297,7 +313,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val trash = runCatching { repository.trashSummary() }.getOrNull()
         if (trash != null) page.put("trash", JSONObject().put("fileCount", trash.fileCount)
             .put("emptyFolderCount", trash.emptyFolderCount).put("knownBytes", trash.knownBytes))
-        if (view != "trash") action(actions, "Trash", "trash") { view = "trash"; selected.clear() }
+        if (view != "trash" && view != "clean" && view != "progress")
+            action(actions, "Trash", "trash") { view = "trash"; selected.clear() }
         when (view) {
             "overview" -> renderOverview(page, actions, items, offset, limit)
             "browser", "search" -> renderBrowser(page, actions, items, offset, limit)
@@ -309,6 +326,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             "keeper" -> renderKeeper(page, actions, items, offset, limit)
             "cleanReview" -> renderCleanReview(page, actions, items, offset, limit)
             "settings" -> renderSettings(page, actions)
+            "info" -> renderInfo(page, actions, items)
+            "folderAppearance" -> renderFolderAppearance(page, actions)
             "history" -> renderHistory(page, actions, items, offset, limit)
             "historyDetail" -> renderHistoryDetail(page, actions, items, offset, limit)
             "markdown", "pdf" -> renderDocument(page, actions)
@@ -335,6 +354,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         page.put("summary", "Connected locations. Choose a folder to browse.")
         action(actions, "Add folder", "setup", hostAction = "pickFolder") { message = "Choose a folder in Android’s picker" }
         action(actions, "Full storage access", "settings") { view = "settings" }
+        action(actions, "Info", "info") { infoReturnView = view; view = "info" }
         val locations = repository.locations()
         locations.drop(offset).take(limit).forEach { location ->
             val item = JSONObject().put("id", location.id).put("name", location.title)
@@ -343,6 +363,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                     location.capacityBytes != null -> "${formatBytes(location.freeBytes)} free of ${formatBytes(location.capacityBytes)}"
                     else -> "Capacity unavailable"
                 })
+                .put("folderAppearance", folderAppearance.json(location.rootId, location.title))
             val rowActions = JSONArray()
             action(rowActions, if (location.available) "Open" else "Reconnect", "open",
                 hostAction = if (location.available) null else "pickFolder") {
@@ -380,16 +401,11 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             return
         }
         page.put("title", current.name.ifBlank { location.title })
+        page.put("currentFolder", folderAppearance.json(current.id, current.name.ifBlank { location.title }))
         val total = knownTotal(folder)
         page.put("summary", buildString {
             append(if (total == null && folder in pendingTotals) "Calculating folder size…" else formatBytes(total?.bytes))
-            if (location.capacityBytes != null && location.capacityBytes > 0 && total != null) {
-                append(" · ")
-                append("%.1f".format(total.bytes * 100.0 / location.capacityBytes))
-                append("% of "); append(formatBytes(location.capacityBytes))
-            } else append(" · Storage capacity unavailable")
             if (total?.complete == false) append(" · Partial")
-            totalErrors[folder]?.let { append(" · $it") }
         })
         val breadcrumbs = JSONArray()
         var crumb: FileEntry? = current
@@ -397,7 +413,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         while (crumb != null && n++ < 16) {
             val target = crumb.id
             val a = registered("Open", "open") { folderId = target; view = "browser"; selected.clear() }
-            breadcrumbs.put(0, JSONObject().put("id", target).put("name", crumb.name).put("action", a))
+            breadcrumbs.put(0, JSONObject().put("id", target).put("name", crumb.name)
+                .put("folderAppearance", folderAppearance.json(target, crumb.name)).put("action", a))
             crumb = crumb.parentId?.let { runCatching { repository.get(it) }.getOrNull() }
         }
         page.put("breadcrumbs", breadcrumbs)
@@ -436,14 +453,18 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         action(actions, "Sort ${sort.name.lowercase()}", "sort") { sort = FileSort.entries[(sort.ordinal + 1) % FileSort.entries.size] }
         action(actions, if (grid) "List view" else "Grid view", "layout") { grid = !grid }
         action(actions, if (showHidden) "Show hidden" else "Hide hidden", "toggle") { showHidden = !showHidden }
-        action(actions, "Clean", "clean") { view = "clean" }
+        action(actions, "Clean", "clean") { startCleanScan(folder) }
+        action(actions, "Info", "info") { infoReturnView = view; view = "info" }
+        action(actions, "Customize folder", "folderAppearance") {
+            appearanceFolderId = folder; appearanceReturnView = view; view = "folderAppearance"
+        }
         action(actions, "Storage map", "map") { mapFolderId = folder; mapDepth = 0; view = "map" }
         action(actions, "New folder", "create", input = "name") { args ->
             repository.createDirectory(folder, safeName(args.optString("name"))); message = "Folder created"
         }
         action(actions, "Settings", "settings") { view = "settings" }
         action(actions, "History", "history") { view = "history" }
-        action(actions, "Refresh", "refresh") { computedTotals.remove(folder); totalErrors.remove(folder) }
+        action(actions, "Refresh", "refresh") { computedTotals.remove(folder); totalErrors.remove(folder); repository.invalidateListing(folder) }
         action(actions, "Remember position", "scroll") { args ->
             scrollAnchor = args.optInt("anchor", 0).coerceIn(0, 100)
             scrollOffset = args.optInt("offset", 0).coerceIn(0, 100_000)
@@ -470,7 +491,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             action(actions, "Cancel ${if (clipboardMove) "cut" else "copy"}", "cancel") { clipboard = emptyList() }
         }
         val result = if (view == "search") repository.searchPage(searchRoots(folder), searchFilter(), offset, limit) else null
-        val listing = if (result == null) repository.list(folder, offset, limit, sort, showHidden) else null
+        val listing = if (result == null) repository.cachedListing(folder, offset, limit, sort, showHidden)
+            ?: repository.list(folder, offset, limit, sort, showHidden) else null
         val entries = result?.entries ?: listing!!.entries
         if (result != null) page.put("summary", "Search in ${if (allLocations) "all connected locations" else location.title}: ${result.totalCount ?: "many"} matches")
         val portion = entries
@@ -486,6 +508,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .put("path", entry.relativePath).put("sizeBytes", entry.sizeBytes)
             .put("modifiedAt", entry.modifiedAtMillis).put("createdAt", entry.createdAtMillis)
             .put("mimeType", entry.mimeType)
+        if (entry.isDirectory) item.put("folderAppearance", folderAppearance.json(entry.id, entry.name))
         if (includeActions) {
             val row = JSONArray()
             val extension = entry.name.substringAfterLast('.', "").lowercase()
@@ -525,6 +548,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                 message = "Renamed to ${renamed.name}"
             }
             action(row, "Properties", "properties") { propertyEntryId = entry.id; view = "properties" }
+            if (entry.isDirectory) action(row, "Customize folder", "folderAppearance") {
+                appearanceFolderId = entry.id; appearanceReturnView = view; view = "folderAppearance"
+            }
             action(row, if (entry.id in favorites) "Unfavorite" else "Favorite", "favorite") {
                 if (!favorites.add(entry.id)) favorites.remove(entry.id)
             }
@@ -703,7 +729,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             val row = JSONArray()
             action(row, "Open", "nav") { restoreDestinationFolderId = child.id }
             items.put(JSONObject().put("id", child.id).put("name", child.name)
-                .put("kind", "folder").put("path", child.relativePath).put("actions", row))
+                .put("kind", "folder").put("path", child.relativePath)
+                .put("folderAppearance", folderAppearance.json(child.id, child.name)).put("actions", row))
         }
         next(page, actions, offset, limit, listing.totalCount ?: offset + listing.entries.size)
     }
@@ -789,23 +816,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         if (lastScan > 0) page.put("summary", "Last scan ${java.util.Date(lastScan)} · ${if (cleanerIncludeSubfolders) "Subfolders included" else "Current folder only"}")
         else page.put("summary", "No scan yet · ${if (cleanerIncludeSubfolders) "Subfolders included" else "Current folder only"}")
         action(actions, "Back to folder", "back") { view = "browser" }
-        action(actions, "Scan", "scan") {
-            startJob("Scanning cleanup candidates", "clean") { cancel, _ ->
-                val snapshot = cleaner.snapshot(folder, cancel, cleanerExcludedIds.toSet())
-                val analysisResult = cleaner.analyze(snapshot, CleanerEngine.Options(
-                    folder, cleanerIncludeSubfolders, cleanerExcludedIds.toSet(), emptySet(),
-                    cleanerLargeMiB.toLong() * 1024 * 1024, cleanerOldDays.toLong(), Instant.now()))
-                if (cancel.isCanceled()) throw IllegalStateException("Scan canceled")
-                synchronized(lock) {
-                    cleanerAnalysis = analysisResult
-                    cleanerScopeKey = cleanKey(folder)
-                    cleanerSelectedGroups.clear(); cleanerSelectedSuggestions.clear(); cleanerKeepers.clear()
-                    analysisResult.groups().filter { it.suggestedKeeperId() != null }.forEach { cleanerSelectedGroups.add(it.id()) }
-                    preferences.edit().putLong("lastCleanScanAt:$folder", System.currentTimeMillis()).apply()
-                }
-                "Found ${analysisResult.groups().size} cleanup groups"
-            }
-        }
+        action(actions, "Scan again", "scan") { startCleanScan(folder) }
         action(actions, if (cleanerIncludeSubfolders) "Subfolders on" else "Subfolders off", "toggle") {
             cleanerIncludeSubfolders = !cleanerIncludeSubfolders
         }
@@ -848,6 +859,27 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                 .put("sizeBytes", entry.size()).put("actions", row))
         }
         next(page, actions, offset, limit, combinedCount)
+    }
+
+    private fun startCleanScan(folder: String) {
+        if (view == "browser" || view == "search") {
+            cleanBrowserPosition = Triple(currentOffset, scrollAnchor, scrollOffset)
+        }
+        startJob("Scanning cleanup candidates", "clean") { cancel, _ ->
+            val snapshot = cleaner.snapshot(folder, cancel, cleanerExcludedIds.toSet())
+            val analysisResult = cleaner.analyze(snapshot, CleanerEngine.Options(
+                folder, cleanerIncludeSubfolders, cleanerExcludedIds.toSet(), emptySet(),
+                cleanerLargeMiB.toLong() * 1024 * 1024, cleanerOldDays.toLong(), Instant.now()))
+            if (cancel.isCanceled()) throw IllegalStateException("Scan canceled")
+            synchronized(lock) {
+                cleanerAnalysis = analysisResult
+                cleanerScopeKey = cleanKey(folder)
+                cleanerSelectedGroups.clear(); cleanerSelectedSuggestions.clear(); cleanerKeepers.clear()
+                analysisResult.groups().filter { it.suggestedKeeperId() != null }.forEach { cleanerSelectedGroups.add(it.id()) }
+                preferences.edit().putLong("lastCleanScanAt:$folder", System.currentTimeMillis()).apply()
+            }
+            "Found ${analysisResult.groups().size} cleanup groups"
+        }
     }
 
     private fun renderKeeper(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
@@ -924,9 +956,16 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     }
 
     private fun renderProgress(page: JSONObject, actions: JSONArray) {
-        page.put("state", "loading").put("summary", jobStatus)
+        page.put("state", "loading").put("summary", jobStatus).put("jobStatus", jobStatus)
+        if (jobReturnView == "clean") page.put("progressFor", "clean")
         action(actions, "Refresh progress", "refresh") { }
-        action(actions, "Back to files", "back") { view = jobReturnView }
+        action(actions, "Back to files", "back") {
+            if (jobReturnView == "clean") {
+                activeJobCancel?.set(true)
+                jobReturnView = "browser"
+                view = "browser"
+            } else view = jobReturnView
+        }
         if (activeJobCancel != null) action(actions, "Cancel operation", "cancel") {
             activeJobCancel?.set(true)
             jobStatus = "Cancel requested; finishing the current safe step"
@@ -1036,7 +1075,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             val row = JSONArray()
             action(row, "Open", "open") { archiveDestinationFolderId = child.id }
             items.put(JSONObject().put("id", child.id).put("name", child.name)
-                .put("kind", "folder").put("path", child.relativePath).put("actions", row))
+                .put("kind", "folder").put("path", child.relativePath)
+                .put("folderAppearance", folderAppearance.json(child.id, child.name)).put("actions", row))
         }
         next(page, actions, offset, limit, repository.list(currentId, offset, limit).totalCount ?: offset + listed.size)
     }
@@ -1090,7 +1130,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             val row = JSONArray()
             action(row, "Open", "nav") { destinationFolderId = child.id }
             items.put(JSONObject().put("id", child.id).put("name", child.name)
-                .put("kind", "folder").put("path", child.relativePath).put("actions", row))
+                .put("kind", "folder").put("path", child.relativePath)
+                .put("folderAppearance", folderAppearance.json(child.id, child.name)).put("actions", row))
         }
         next(page, actions, offset, limit, listing.totalCount ?: offset + listing.entries.size)
     }
@@ -1114,7 +1155,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             items.put(JSONObject().put("id", location.id).put("name", location.title)
                 .put("kind", "location").put("subtitle", if (location.available) {
                     if (location.writable) "Writable" else "Read only"
-                } else "Reconnect required").put("actions", row))
+                } else "Reconnect required")
+                .put("folderAppearance", folderAppearance.json(location.rootId, location.title))
+                .put("actions", row))
         }
         next(page, actions, offset, limit, locations.size)
     }
@@ -1176,8 +1219,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     }
 
     private fun renderSettings(page: JSONObject, actions: JSONArray) {
-        page.put("summary", "Manage selected folders and optional full storage access. Android still protects other apps’ private data. Files moved to this module’s same-storage trash still occupy space until Empty trash; no automatic expiry is set. Reconnect or regrant removable/selected locations after a drive change or reinstall. Provider trash and uninstall recovery vary by storage provider; unavailable entries remain listed until reconnected.")
+        page.put("summary", "Manage storage access, cleanup thresholds, and appearance.")
         action(actions, "Back", "back") { view = if (folderId == null) "overview" else "browser" }
+        action(actions, "Info", "info") { infoReturnView = view; view = "info" }
         action(actions, "Add folder", "setup", hostAction = "pickFolder") { }
         action(actions, if (android.os.Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) "Full access enabled" else "Enable full storage access", "setup",
             hostAction = "fullAccess") { }
@@ -1195,6 +1239,64 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             val current = preferences.getString("theme", "system") ?: "system"
             preferences.edit().putString("theme", choices[(choices.indexOf(current).coerceAtLeast(0) + 1) % choices.size]).apply()
         }
+    }
+
+    private fun renderInfo(page: JSONObject, actions: JSONArray, items: JSONArray) {
+        page.put("summary", "Storage access and recovery details")
+        action(actions, "Back", "back") { view = infoReturnView }
+        fun detail(name: String, value: String) {
+            items.put(JSONObject().put("id", "info:$name").put("name", name)
+                .put("kind", "detail").put("subtitle", value))
+        }
+        detail("Access", "Android still protects other apps’ private data. Reconnect removable or selected locations after a drive change or reinstall.")
+        detail("Trash", "Files in this module’s same-storage trash occupy space until Empty trash. There is no automatic expiry.")
+        detail("Recovery", "Provider trash and uninstall recovery vary by storage provider. Unavailable trash entries remain listed until reconnected.")
+        val id = folderId ?: run { page.put("title", "Files info"); return }
+        val folder = runCatching { repository.get(id) }.getOrElse {
+            detail("Folder", "Unavailable. Reconnect its storage location to inspect it.")
+            return
+        }
+        val location = repository.locations().firstOrNull { it.id == folder.locationId }
+        val total = knownTotal(id)
+        page.put("title", folder.name.ifBlank { location?.title ?: "Folder" })
+            .put("summary", "Storage details for this folder")
+            .put("currentFolder", folderAppearance.json(id, folder.name))
+        detail("Path", folder.relativePath.ifBlank { "/" })
+        detail("Location", location?.title ?: "Unavailable")
+        detail("Folder size", if (total == null && id in pendingTotals) "Calculating…" else formatBytes(total?.bytes))
+        if (total != null) {
+            detail("Files", total.fileCount.toString())
+            detail("Coverage", if (total.complete) "Complete" else "Partial")
+        }
+        totalErrors[id]?.let { detail("Size error", it) }
+        detail("Capacity", formatBytes(location?.capacityBytes))
+        detail("Free space", formatBytes(location?.freeBytes))
+        if (location?.capacityBytes != null && location.capacityBytes > 0 && total != null) {
+            detail("Share of location", "%.1f%%".format(total.bytes * 100.0 / location.capacityBytes))
+        }
+        detail("Access", when {
+            !folder.readable -> "Unavailable"
+            folder.writable -> "Read and write"
+            else -> "Read only"
+        })
+    }
+
+    private fun renderFolderAppearance(page: JSONObject, actions: JSONArray) {
+        val id = appearanceFolderId ?: folderId ?: run { view = "overview"; return }
+        val folder = repository.get(id)
+        require(folder.isDirectory) { "Appearance belongs to a folder" }
+        page.put("title", folder.name.ifBlank { "Folder appearance" })
+            .put("summary", "Choose an icon and color for this folder")
+            .put("folderAppearance", folderAppearance.json(id, folder.name))
+            .put("folderAppearanceOptions", FolderAppearance.optionsJson())
+        action(actions, "Back to folder", "back") { view = appearanceReturnView; appearanceFolderId = null }
+        action(actions, "Choose icon", "setFolderIcon") { args ->
+            folderAppearance.setIcon(id, args.optString("icon"))
+        }
+        action(actions, "Choose color", "setFolderColor") { args ->
+            folderAppearance.setColor(id, args.optString("color"))
+        }
+        action(actions, "Reset appearance", "resetFolderAppearance") { folderAppearance.reset(id) }
     }
 
     private fun renderFilters(page: JSONObject, actions: JSONArray) {
@@ -1350,7 +1452,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
 
     private fun persist() {
         preferences.edit().putString("view", when (view) {
-            "review", "emptyTrashReview", "cleanReview", "keeper", "progress", "archiveReview", "archiveReport", "archiveDestination", "historyDetail" -> if (folderId == null) "overview" else "browser"
+            "review", "emptyTrashReview", "cleanReview", "clean", "info", "folderAppearance", "settings", "keeper", "progress", "archiveReview", "archiveReport", "archiveDestination", "historyDetail" -> if (folderId == null) "overview" else "browser"
             else -> view
         })
             .putString("location", locationId).putString("folder", folderId).putString("query", query)

@@ -19,6 +19,7 @@ BROAD_TESTS = (
     "FilesHandoffNonceTest",
     "ArchiveRealStorageTest",
 )
+EXPECTED_COUNTS = {"FilesReviewPaginationTest": 2}
 
 
 def adb(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -42,7 +43,8 @@ def run_test(name: str) -> None:
     output = result.stdout + "\n" + result.stderr
     report.write_text(output)
     print(f"Files {name} instrumentation result: {report}", flush=True)
-    success = re.search(r"^OK \(1 test\)\s*$", result.stdout, re.MULTILINE)
+    expected_count = EXPECTED_COUNTS.get(name, 1)
+    success = re.search(rf"^OK \({expected_count} tests?\)\s*$", result.stdout, re.MULTILINE)
     if result.returncode or not success or "INSTRUMENTATION_STATUS_CODE: -2" in output:
         print(output, flush=True)
         raise RuntimeError(f"Files {name} instrumentation did not pass")
@@ -78,7 +80,7 @@ def main() -> None:
         report = REPORT_DIR / "addon-files-summary.log"
         report.write_text("\n".join(failures) + "\n")
         raise RuntimeError(f"Files device tests failed; see {report}:\n" + "\n".join(failures))
-    print("All eight Files device tests passed", flush=True)
+    print("All eight Files device test classes passed (nine tests)", flush=True)
 
 
 if __name__ == "__main__":

@@ -74,6 +74,7 @@ import io.github.alexanderwilhelmsenberg.modular.workspace.calculateWidgetAreaGe
 import io.github.alexanderwilhelmsenberg.modular.workspace.WidgetGridBand
 import io.github.alexanderwilhelmsenberg.modular.workspace.groupWidgetGridBands
 import io.github.alexanderwilhelmsenberg.modular.workspace.packWidgetGrid
+import io.github.alexanderwilhelmsenberg.modular.workspace.WIDGET_RAIL_INSET_DP
 import io.github.alexanderwilhelmsenberg.modular.widgets.WidgetLayoutLimits
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -161,9 +162,9 @@ internal fun WorkspaceHome(
         if (editMode && WorkspaceSection.WIDGETS !in order) listOf(WorkspaceSection.WIDGETS) + order else order
     } else listOf(WorkspaceSection.CLOCK, WorkspaceSection.WIDGETS)
     BoxWithConstraints(modifier, contentAlignment = AbsoluteAlignment.TopLeft) {
-    // The geometry is measured from the physical left edge. The alphabet rail is
-    // reserved on the physical right even when Compose uses RTL layout direction.
-    val geometry = calculateWidgetAreaGeometry(maxWidth.value.roundToInt(), preferences)
+    // Primary Home keeps the rail lane. Widget pages use the full physical width.
+    val geometry = calculateWidgetAreaGeometry(maxWidth.value.roundToInt() +
+        if (mainHome) 0 else WIDGET_RAIL_INSET_DP, preferences)
     val gridLayout = packWidgetGrid(pageWidgets, preferences, geometry) { widget ->
         val limit = widgetLayoutLimits(widget)
         if (limit == null) 0 to 0 else limit.minContentWidthDp to limit.minContentHeightDp

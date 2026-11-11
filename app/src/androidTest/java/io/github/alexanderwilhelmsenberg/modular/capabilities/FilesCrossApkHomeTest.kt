@@ -86,20 +86,29 @@ class FilesCrossApkHomeTest {
             rule.waitUntil(15_000) {
                 rule.onAllNodesWithTag("launcher-pages").fetchSemanticsNodes().isNotEmpty()
             }
-            rule.onNodeWithTag("launcher-pages").performTouchInput {
-                val y = height * 0.22f
-                val start = Offset(width * 0.82f, y)
-                down(start)
-                for (step in 1..12) moveTo(Offset(start.x - width * 0.64f * step / 12f, y), 20L)
-                up()
-            }
+            swipePage(left = true)
             rule.waitUntil(20_000) {
                 rule.onAllNodesWithTag("files.page.overview").fetchSemanticsNodes().isNotEmpty()
             }
             rule.onNodeWithTag("files.page.overview").assertIsDisplayed()
             rule.onNodeWithTag("files.trash.badge").assertIsDisplayed()
+            rule.onNodeWithTag("alphabet-rail").assertDoesNotExist()
+            rule.onNodeWithTag("home-search-field").assertIsDisplayed()
             assertTrue(rule.onAllNodesWithTag("workspace-apps-action").fetchSemanticsNodes().isNotEmpty())
             if (InstrumentationRegistry.getArguments().getString("files_capture") == "true") captureOverview()
+
+            repeat(2) {
+                swipePage(left = false)
+                rule.waitUntil(15_000) {
+                    runCatching { rule.onNodeWithTag("launcher-page:home").assertIsDisplayed() }.isSuccess
+                }
+                swipePage(left = true)
+                rule.waitUntil(20_000) {
+                    runCatching { rule.onNodeWithTag("files.page.overview").assertIsDisplayed() }.isSuccess
+                }
+                rule.onNodeWithTag("home-search-field").assertIsDisplayed()
+                rule.onNodeWithTag("files.trash.badge").assertIsDisplayed()
+            }
 
             rule.onNodeWithText("Add folder").performClick()
             val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
@@ -122,6 +131,17 @@ class FilesCrossApkHomeTest {
                 }
             }
             if (previousTheme != null) runBlocking { appearance.setTheme(previousTheme).getOrThrow() }
+        }
+    }
+
+    private fun swipePage(left: Boolean) {
+        rule.onNodeWithTag("launcher-pages").performTouchInput {
+            val y = height * 0.22f
+            val start = Offset(width * (if (left) 0.82f else 0.18f), y)
+            down(start)
+            for (step in 1..12) moveTo(Offset(
+                start.x + width * (if (left) -0.64f else 0.64f) * step / 12f, y), 20L)
+            up()
         }
     }
 

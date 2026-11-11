@@ -9,9 +9,11 @@ RUNNER = "io.github.alexanderwilhelmsenberg.modular.debug.test/androidx.test.run
 TEST = "io.github.alexanderwilhelmsenberg.modular.capabilities.FilesCrossApkHomeTest"
 VISUAL_TEST = "io.github.alexanderwilhelmsenberg.modular.ui.FilesPageVisualFixtureTest"
 MATRIX = [
+    (320, "LIGHT", "1.0"),
     (414, "LIGHT", "1.0"),
     (414, "DARK", "1.0"),
     (375, "AMOLED", "1.5"),
+    (768, "DARK", "1.0"),
 ]
 
 
@@ -33,12 +35,13 @@ try:
             raise RuntimeError(f"Files capture test failed for {width}dp/{theme}/font {font}:\n{result}")
         visual = adb("shell", "am", "instrument", "-w", "-e", "class", VISUAL_TEST,
                      "-e", "files_theme", theme, RUNNER, timeout=300)
-        if "OK (1 test)" not in visual:
+        if "OK (2 tests)" not in visual:
             raise RuntimeError(f"Files visual fixture failed for {width}dp/{theme}/font {font}:\n{visual}")
         adb("pull", "/sdcard/Pictures/ModularFiles/.", str(OUT), timeout=60)
         expected = [f"files-overview-{width}dp-{theme.lower()}-font{font}.png"]
         expected += [f"files-fixture-{scene}-{width}dp-{theme.lower()}-font{font}.png"
-                     for scene in ("browser", "review", "trash", "map")]
+                     for scene in ("browser", "review", "trash", "map", "settings",
+                                   "browser-menu", "folder-appearance", "clean-sheet")]
         for filename in expected:
             screenshot = OUT / filename
             if not screenshot.is_file() or screenshot.stat().st_size == 0:

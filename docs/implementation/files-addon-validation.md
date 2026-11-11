@@ -98,3 +98,23 @@ The initial API 35 Files instrumentation process stopped during its first archiv
 API 35 run [42811914169](https://github.com/AlexanderWilhelmsenBerg/Modular/actions/runs/42811914169), commit `38cf6cd`, completed all eight Files instrumentation cases: six passed. The native document UI assertion and selected-folder fixture setup failed; their corrections retain the original behavioral checks. The external runner records every test separately and fails CI if any case fails.
 
 Run [42817002489](https://github.com/AlexanderWilhelmsenBerg/Modular/actions/runs/42817002489), commit `1ff9b751`, passed all eight Files device cases, all 159 Core device cases, seven legacy add-on cases, and the isolated grant lifecycle check. All 15 Files captures were produced. Visual review found a missing opaque theme surface on the map and document routes; the follow-up supplies theme surfaces on all specialized views and improves map-label/trash contrast. Selected-folder metadata now uses checked commits so removal is durable before acknowledging it. Final rerun and visual confirmation are recorded on PR #36; physical-media/OEM checks remain unverified.
+
+## Usability refresh validation (2026-11-11)
+
+The refresh adds native action tiles, circular overflow menus, folder appearance,
+an Info view, a folder-header transition, and an immediate Clean scan shown in a
+sheet. The cross-APK Home case also checks that a secondary Files screen has no
+alphabet rail while the app search and Apps action remain visible. Renderer
+fixtures should check menu access, icon/color choices, and the Clean sheet's
+progress and recommendation states in Light, Dark, and AMOLED captures. A
+settings fixture checks access, threshold, and theme tiles at normal and large
+font sizes, with the longer storage explanation in Info. A controller case
+checks that closing Clean returns to the same folder without touching user
+files; another checks folder appearance across recreation. A Core device case
+checks that a saved passive browser snapshot survives a new store instance and
+is purged when its signer changes. The cross-APK case returns from Files to
+Home and back twice without invoking Retry.
+
+These refresh checks remain **pending** until the root build/device run reports
+their exact test results and nonempty capture files. Previous run results above
+apply to their recorded revisions only.

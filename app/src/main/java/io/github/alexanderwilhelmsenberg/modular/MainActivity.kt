@@ -287,6 +287,18 @@ class MainActivity : ComponentActivity() {
                 val customizationError by appCustomizationStore.error.collectAsState()
                 val mostUsedSettings by mostUsedStore.settings.collectAsState(initial = initialMostUsed)
                 val organizationSnapshot by organization.store.snapshots.collectAsState(initial = initialOrganization)
+                var cachedPageComponents by remember {
+                    mutableStateOf(initialOrganization.modulePages.map { it.component }.toSet())
+                }
+                LaunchedEffect(organizationSnapshot.modulePages) {
+                    val current = organizationSnapshot.modulePages.map { it.component }.toSet()
+                    val removed = cachedPageComponents - current
+                    cachedPageComponents = current
+                    if (removed.isNotEmpty()) kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        val snapshots = io.github.alexanderwilhelmsenberg.modular.ui.WorkspacePageSnapshotStore(this@MainActivity)
+                        removed.forEach(snapshots::purge)
+                    }
+                }
                 LaunchedEffect(organizationSnapshot.folders, organizationSnapshot.listeningPreferences.enabled) {
                     if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
                         organization.runtime.signals.start(organizationSnapshot.folders,
@@ -432,6 +444,7 @@ class MainActivity : ComponentActivity() {
                                     io.github.alexanderwilhelmsenberg.modular.ui.ModuleWorkspacePage(
                                         module = verifiedModule, router = capabilityRouter,
                                         expectedSignerKey = page?.signerKey,
+                                        placementComponent = component,
                                         unavailableReason = if (module != null && verifiedModule == null)
                                             "Module signing identity changed. Remove this screen and add it again to trust the installed module."
                                         else null,

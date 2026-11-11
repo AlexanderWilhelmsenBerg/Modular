@@ -6,6 +6,7 @@ import android.os.ParcelFileDescriptor
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -48,7 +49,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.jsonPrimitive
@@ -108,6 +113,7 @@ fun ModuleWorkspacePage(
     router: CapabilityRouter,
     unavailableReason: String? = null,
     expectedSignerKey: String? = null,
+    placementComponent: String? = module?.component?.flattenToString(),
     active: Boolean,
     onInteractionActiveChange: (Boolean) -> Unit,
     onReturnHome: () -> Unit,
@@ -119,8 +125,11 @@ fun ModuleWorkspacePage(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
     val scrollStore = remember(context) { WorkspacePageScrollStore(context) }
+    val snapshotStore = remember(context) { WorkspacePageSnapshotStore(context) }
     val moduleComponent = module?.component?.flattenToString()
     val currentActive by rememberUpdatedState(active)
+    val currentSessionId by rememberUpdatedState(module?.sessionId)
+    val currentComponent by rememberUpdatedState(moduleComponent)
     var resumeGeneration by remember { mutableIntStateOf(0) }
     DisposableEffect(lifecycle, moduleComponent) {
         val observer = LifecycleEventObserver { _, event ->
@@ -137,22 +146,46 @@ fun ModuleWorkspacePage(
         onDispose { if (moduleComponent != null) scrollStore.flush(moduleComponent) }
     }
     var pageJson by remember(module?.component) { mutableStateOf<String?>(null) }
+    var safeSnapshot by remember(placementComponent, expectedSignerKey, moduleComponent) {
+        mutableStateOf<String?>(null)
+    }
     var loadedSessionId by remember(module?.component) { mutableStateOf<String?>(null) }
     var message by remember(module?.component) { mutableStateOf<String?>(null) }
     var busy by remember(module?.component) { mutableStateOf(false) }
+    var retryGeneration by remember(module?.component) { mutableIntStateOf(0) }
+    var automaticRetries by remember(module?.component) { mutableIntStateOf(0) }
+    var documentCommitUncertain by remember(module?.component) { mutableStateOf(false) }
+    LaunchedEffect(active) { if (!active) automaticRetries = 0 }
+    LaunchedEffect(placementComponent, expectedSignerKey, unavailableReason) {
+        if (placementComponent != null && (expectedSignerKey == null ||
+            unavailableReason?.contains("signing identity changed", ignoreCase = true) == true)) {
+            withContext(Dispatchers.IO) { snapshotStore.purge(placementComponent) }
+            safeSnapshot = null
+        }
+    }
+    LaunchedEffect(placementComponent, moduleComponent, expectedSignerKey) {
+        if (placementComponent != null && placementComponent == moduleComponent && expectedSignerKey != null) {
+            val restored = withContext(Dispatchers.IO) {
+                snapshotStore.restore(placementComponent, expectedSignerKey)
+            }
+            if (pageJson == null) safeSnapshot = restored
+        }
+    }
     val routes by router.routes.collectAsState()
     val route = remember(module?.component, module?.sessionId, routes) {
         router.providersFor(StandardCapabilities.WorkspacePage).firstOrNull {
             it.component == module?.component && it.sessionId == module?.sessionId
         }
     }
-    LaunchedEffect(pageJson, active) {
+    val connected = module?.status == ModuleConnectionStatus.CONNECTED && route != null
+    val currentRoute by rememberUpdatedState(route)
+    LaunchedEffect(pageJson, active, connected, loadedSessionId, module?.sessionId) {
         val content = pageJson?.let { runCatching { JSONObject(it) }.getOrNull() }
         val view = content?.optString("view")
-        val interactive = active && content != null && (
+        val interactive = active && connected && loadedSessionId == module?.sessionId && content != null && (
             (content.optJSONArray("selectedIds")?.length() ?: 0) > 0 ||
                 content.optJSONObject("dialog") != null ||
-                view in setOf("review", "markdown", "pdf")
+                view in setOf("review", "markdown", "pdf", "clean", "cleanReview")
             )
         onInteractionActiveChange(interactive)
     }
@@ -172,6 +205,24 @@ fun ModuleWorkspacePage(
     fun validatedPage(raw: String): String {
         WorkspacePageContract.validateFilesPage(raw)
         return raw
+    }
+
+    suspend fun acceptPage(raw: String): String {
+        val validated = validatedPage(raw)
+        pageJson = validated
+        if (moduleComponent != null && expectedSignerKey != null) {
+            val display = WorkspacePageSnapshot.sanitize(validated)
+            if (display == null) {
+                if (WorkspacePageSnapshot.mustClear(validated)) {
+                    safeSnapshot = null
+                    withContext(Dispatchers.IO) { snapshotStore.purge(moduleComponent) }
+                }
+            } else {
+                safeSnapshot = display
+                withContext(Dispatchers.IO) { snapshotStore.save(moduleComponent, expectedSignerKey, validated) }
+            }
+        }
+        return validated
     }
 
     fun visibleAction(id: String): JSONObject? {
@@ -221,6 +272,12 @@ fun ModuleWorkspacePage(
 
     fun submitAction(request: String) {
         if (busy) return
+        if (!connected || loadedSessionId != module?.sessionId) {
+            message = "Files is reconnecting. Try again shortly."
+            return
+        }
+        val submittedSession = module?.sessionId
+        val submittedRoute = route
         val hostAction: String
         try {
             val actionId = WorkspacePageContract.validateActionRequest(request)["actionId"]
@@ -237,6 +294,8 @@ fun ModuleWorkspacePage(
                 WorkspacePageContract.validateActionRequest(request)
                 val remote = capability()
                 val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(request) }
+                check(currentSessionId == submittedSession && currentRoute == submittedRoute &&
+                    currentComponent == moduleComponent) { "Files session changed. Refreshing the page." }
                 val validated = validatedPage(raw)
                 if (hostAction.isNotEmpty()) {
                     val launch = JSONObject(validated).optJSONObject("hostLaunch")
@@ -246,8 +305,10 @@ fun ModuleWorkspacePage(
                     }
                     launchHostAction(hostAction, launch.optString("nonce"))
                 }
-                pageJson = validated
+                acceptPage(validated)
                 message = null
+            } catch (failure: TimeoutCancellationException) {
+                message = "Files did not confirm whether the action completed. Refresh and review the current files before trying again."
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
@@ -256,8 +317,13 @@ fun ModuleWorkspacePage(
         }
     }
 
+    val livePage = pageJson?.takeIf { connected && loadedSessionId == module?.sessionId }
     BackHandler(enabled = active) {
-        val page = JSONObject(pageJson ?: "{}")
+        if (livePage == null) {
+            onReturnHome()
+            return@BackHandler
+        }
+        val page = JSONObject(livePage)
         val actions = page.optJSONArray("actions")
         val options = (0 until (actions?.length() ?: 0)).asSequence()
             .mapNotNull { actions?.optJSONObject(it) }
@@ -278,58 +344,103 @@ fun ModuleWorkspacePage(
             .put("operationToken", UUID.randomUUID().toString()).toString())
     }
 
-    LaunchedEffect(module?.sessionId, route, active, resumeGeneration) {
+    LaunchedEffect(module?.status, active, resumeGeneration, retryGeneration) {
+        if (active && module?.status == ModuleConnectionStatus.FAILED && automaticRetries < 2) {
+            delay(if (automaticRetries == 0) 700 else 1_500)
+            automaticRetries++
+            onRetry()
+        }
+    }
+
+    LaunchedEffect(module?.sessionId, route, active, resumeGeneration, retryGeneration) {
         if (!active) return@LaunchedEffect
         val currentView = pageJson?.let { runCatching { JSONObject(it).optString("view") }.getOrNull() }
-        if (loadedSessionId == module?.sessionId && currentView in setOf("markdown", "pdf")) {
+        if (connected && loadedSessionId == module?.sessionId && currentView in setOf("markdown", "pdf") &&
+            !documentCommitUncertain) {
             return@LaunchedEffect
         }
-        if (loadedSessionId != module?.sessionId) pageJson = null
-        if (module?.status != ModuleConnectionStatus.CONNECTED || route == null) return@LaunchedEffect
+        if (!connected) return@LaunchedEffect
+        val loadingSession = module?.sessionId
+        val loadingRoute = route
         busy = true
         try {
-            val remote = capability()
-            val request = JSONObject().put("version", 1).put("pageSize", 100)
-            moduleComponent?.let(scrollStore::restore)?.let { saved ->
-                request.put("restoreScroll", JSONObject().put("key", saved.key)
-                    .put("anchor", saved.anchor).put("offset", saved.offset))
+            repeat(3) { attempt ->
+                try {
+                    val remote = capability()
+                    val request = JSONObject().put("version", 1).put("pageSize", 100)
+                    moduleComponent?.let(scrollStore::restore)?.let { saved ->
+                        request.put("restoreScroll", JSONObject().put("key", saved.key)
+                            .put("anchor", saved.anchor).put("offset", saved.offset))
+                    }
+                    val raw = WorkspaceBinderCalls.run(10_000) { remote.getPage(request.toString()) }
+                    check(currentSessionId == loadingSession && currentRoute == loadingRoute &&
+                        currentComponent == moduleComponent) { "Files session changed while loading" }
+                    acceptPage(raw)
+                    loadedSessionId = module?.sessionId
+                    documentCommitUncertain = false
+                    automaticRetries = 0
+                    message = null
+                    return@LaunchedEffect
+                } catch (failure: TimeoutCancellationException) {
+                    message = "Files did not respond in time. Reconnecting…"
+                    if (attempt < 2) delay(500L shl attempt)
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (failure: Exception) {
+                    message = failure.message ?: "Files page could not load"
+                    if (attempt < 2) delay(500L shl attempt)
+                }
             }
-            val raw = WorkspaceBinderCalls.run(10_000) {
-                remote.getPage(request.toString())
+            if (automaticRetries < 2) {
+                automaticRetries++
+                onRetry()
             }
-            pageJson = validatedPage(raw)
-            loadedSessionId = module.sessionId
-            message = null
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Exception) {
-            message = failure.message ?: "Files page could not load"
         } finally { busy = false }
     }
 
-    if (pageJson != null && module?.status == ModuleConnectionStatus.CONNECTED && route != null) {
-        FilesPage(pageJson = requireNotNull(pageJson), modifier = modifier,
+    if (livePage != null) {
+        FilesPage(pageJson = livePage, modifier = modifier,
             onScrollState = { key, anchor, offset ->
                 moduleComponent?.let { scrollStore.record(it, key, anchor, offset) }
             },
-            documentCancel = { request ->
+            documentCancel = cancel@{ request ->
+                if (documentCommitUncertain) return@cancel
                 WorkspacePageContract.validateActionRequest(request)
-                val remote = capability()
-                val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(request) }
-                pageJson = validatedPage(raw)
+                try {
+                    val remote = capability()
+                    val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(request) }
+                    acceptPage(raw)
+                } catch (failure: TimeoutCancellationException) {
+                    message = "Files did not confirm whether the document action completed. Review the current document before trying again."
+                }
             },
-            documentCommit = { request ->
+            documentCommit = commit@{ request ->
+                if (documentCommitUncertain) {
+                    message = "Review the current document before trying to save again. Your draft remains available."
+                    return@commit false
+                }
                 WorkspacePageContract.validateActionRequest(request)
-                val remote = capability()
-                val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(request) }
-                val validated = validatedPage(raw)
-                val saved = JSONObject(validated).optString("documentSaveStatus") == "saved"
-                pageJson = validated
-                saved
+                documentCommitUncertain = false
+                try {
+                    val remote = capability()
+                    val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(request) }
+                    val validated = validatedPage(raw)
+                    val saved = JSONObject(validated).optString("documentSaveStatus") == "saved"
+                    acceptPage(validated)
+                    saved
+                } catch (failure: TimeoutCancellationException) {
+                    documentCommitUncertain = true
+                    message = "Files did not confirm whether the document was saved. Your draft remains available; review the document before trying again."
+                    retryGeneration++
+                    false
+                }
             },
             documentLoader = { id, mode ->
                 require(id.length in 1..WorkspacePageContract.MAX_DOCUMENT_ID_LENGTH &&
                     WorkspacePageContract.validDocumentMode(mode)) { "Invalid document request" }
+                check(!documentCommitUncertain || mode == "r") {
+                    "Review the current document before trying to save again"
+                }
                 val remote = capability()
                 WorkspaceBinderCalls.run(10_000, onDiscard = { it?.close() }) {
                     remote.openDocument(id, mode)
@@ -357,6 +468,28 @@ fun ModuleWorkspacePage(
         if (message != null) AlertDialog(onDismissRequest = { message = null },
             title = { Text("Files action failed") }, text = { Text(requireNotNull(message)) },
             confirmButton = { TextButton(onClick = { message = null }) { Text("Close") } })
+    } else if (safeSnapshot != null && module != null &&
+        module.status in setOf(ModuleConnectionStatus.CONNECTING, ModuleConnectionStatus.DISCOVERED,
+            ModuleConnectionStatus.CONNECTED, ModuleConnectionStatus.FAILED)) {
+        Box(modifier.fillMaxSize()) {
+            FilesPage(pageJson = requireNotNull(safeSnapshot), onAction = {}, onOpenDocument = { _, _ -> },
+                documentLoader = { _, _ -> null }, modifier = Modifier.fillMaxSize())
+            androidx.compose.material3.Surface(
+                modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(12.dp),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainer,
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(message ?: "Reconnecting to Files…", style = MaterialTheme.typography.bodyMedium)
+                    if (message != null && !busy && automaticRetries >= 2) {
+                        Button(onClick = {
+                            retryGeneration++
+                            if (module.status != ModuleConnectionStatus.CONNECTED || route == null) onRetry()
+                        }) { Text("Retry") }
+                    }
+                }
+            }
+        }
     } else {
         Column(modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
             Text(module?.label ?: "Module page unavailable", style = MaterialTheme.typography.titleLarge)
@@ -368,7 +501,10 @@ fun ModuleWorkspacePage(
             }, modifier = Modifier.padding(vertical = 12.dp))
             if (busy) CircularProgressIndicator()
             if (module != null) {
-                Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
+                Button(onClick = {
+                    retryGeneration++
+                    if (module.status != ModuleConnectionStatus.CONNECTED || route == null) onRetry()
+                }, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
                 OutlinedButton(onClick = onOpenModuleSettings, modifier = Modifier.fillMaxWidth()) {
                     Text("Module settings")
                 }

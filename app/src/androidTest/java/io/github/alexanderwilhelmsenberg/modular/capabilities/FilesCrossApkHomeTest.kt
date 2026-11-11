@@ -7,6 +7,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -101,7 +103,10 @@ class FilesCrossApkHomeTest {
             repeat(2) {
                 swipePage(left = false)
                 rule.waitUntil(15_000) {
-                    runCatching { rule.onNodeWithTag("launcher-page:home").assertIsDisplayed() }.isSuccess
+                    runCatching {
+                        rule.onNode(hasTestTag("launcher-page:home") and
+                            hasAnyAncestor(hasTestTag("launcher-pages"))).assertIsDisplayed()
+                    }.isSuccess
                 }
                 swipePage(left = true)
                 rule.waitUntil(20_000) {

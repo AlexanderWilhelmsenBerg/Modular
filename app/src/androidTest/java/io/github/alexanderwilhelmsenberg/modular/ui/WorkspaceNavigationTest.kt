@@ -143,7 +143,10 @@ class WorkspaceNavigationTest {
             rule.onNodeWithTag("launcher-page:widget:${widgetPage.id}").assertIsDisplayed()
             rule.onNodeWithTag("workspace-apps-action").performClick()
             waitForAllApps()
-            rule.onNodeWithTag("launcher-page:category:games").assertIsDisplayed()
+            assertTrue("Apps from a secondary Home page did not reset to the central drawer",
+                offSurface("launcher-page:category:games"))
+            rule.onNode(hasTestTag("launcher-page:home") and
+                hasAnyAncestor(hasTestTag("drawer-pages"))).assertIsDisplayed()
             rule.runOnIdle { rule.activity.onBackPressedDispatcher.onBackPressed() }
             waitForHome()
             rule.onNodeWithTag("launcher-page:widget:${widgetPage.id}").assertIsDisplayed()

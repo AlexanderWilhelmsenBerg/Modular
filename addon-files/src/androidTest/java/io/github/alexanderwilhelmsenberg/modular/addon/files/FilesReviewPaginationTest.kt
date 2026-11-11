@@ -192,7 +192,7 @@ class FilesReviewPaginationTest {
         override fun beginStagedWrite(id: String, expectedFingerprint: String): StagedWrite = error("Unexpected staged write")
         override fun commitStagedWrite(token: String): FileEntry = error("Unexpected staged commit")
         override fun cancelStagedWrite(token: String) = Unit
-        override fun fingerprint(id: String) = error("Unexpected fingerprint")
+        override fun fingerprint(id: String) = "fixture:$id"
         override fun scopedContent(id: String): ScopedContent = error("Unexpected content grant")
         override fun createDirectory(parentId: String, name: String): FileEntry = error("Unexpected create")
         override fun createFile(parentId: String, name: String, mimeType: String): FileEntry = error("Unexpected create")

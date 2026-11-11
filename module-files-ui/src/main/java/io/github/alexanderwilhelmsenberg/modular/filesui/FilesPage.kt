@@ -345,7 +345,7 @@ fun FilesPage(
                     }
                 }
             }
-            page.optString("summary").takeIf { it.isNotBlank() }?.let {
+            page.optString("summary").takeIf { it.isNotBlank() && view != "settings" }?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = if (view == "info") Int.MAX_VALUE else 1,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 6.dp))

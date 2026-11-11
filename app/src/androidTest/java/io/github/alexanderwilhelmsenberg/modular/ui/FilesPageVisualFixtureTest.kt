@@ -121,6 +121,8 @@ class FilesPageVisualFixtureTest {
         rule.runOnIdle { page = fixture("clean") }
         rule.onNodeWithTag("files.clean.sheet").assertIsDisplayed()
         rule.onNodeWithText("Clean folder").assertIsDisplayed()
+        rule.onNodeWithText("Choose keeper").assertIsDisplayed()
+        rule.onNodeWithText("Include").assertIsDisplayed()
         capture("clean-sheet", requestedTheme.lowercase(Locale.ROOT))
 
         rule.runOnIdle { page = fixture("info") }
@@ -195,9 +197,12 @@ class FilesPageVisualFixtureTest {
                     .put(action("Scan again", "scan"))
                     .put(action("Review selected", "review"))
                 items.put(item("copies", "Project notes", "group", "Downloads/Project notes", 2048, null)
-                    .put("subtitle", "numbered copies · 2 items"))
+                    .put("subtitle", "numbered copies · 2 items")
+                    .put("actions", JSONArray().put(action("Included", "select"))
+                        .put(action("Choose keeper", "keeper"))))
                 items.put(item("old", "old-installer.apk", "suggestion", "Downloads/old-installer.apk", 37_000_000, null)
-                    .put("subtitle", "old download · Older installer"))
+                    .put("subtitle", "old download · Older installer")
+                    .put("actions", JSONArray().put(action("Include", "select"))))
             }
             "info" -> {
                 page.put("title", "Downloads").put("summary", "Storage details for this folder")

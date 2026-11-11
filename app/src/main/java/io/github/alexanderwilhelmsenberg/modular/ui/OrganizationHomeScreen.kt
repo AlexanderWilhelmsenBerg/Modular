@@ -584,7 +584,18 @@ fun OrganizationHomeScreen(
                 .background(if (wallpaperMode) Color.Black.copy(alpha = 0.65f) else MaterialTheme.colorScheme.background),
                 verticalAlignment = Alignment.CenterVertically) {
                 TextButton(
-                    onClick = { settle(vertical.progress < 1f) },
+                    onClick = {
+                        if (vertical.progress < 1f) {
+                            requestedDrawerPage = HomePageId.Home
+                            drawerRequestSerial++
+                            railJumpPage = HomePageId.Home
+                            railJump = null
+                            railJumpSerial++
+                            listState.requestScrollToItem(0)
+                            activeDrawerList = listState
+                            settle(true)
+                        } else settle(false)
+                    },
                     enabled = !editingWidgetGrid,
                     contentPadding = PaddingValues(horizontal = 8.dp),
                     modifier = Modifier.width(72.dp).testTag(if (vertical.progress < 1f) "workspace-apps-action" else "workspace-home-action"),

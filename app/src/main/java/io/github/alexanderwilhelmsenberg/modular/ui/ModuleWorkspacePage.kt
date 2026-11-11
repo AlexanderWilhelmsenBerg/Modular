@@ -54,6 +54,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.jsonPrimitive
@@ -127,6 +129,7 @@ fun ModuleWorkspacePage(
     val scrollStore = remember(context) { WorkspacePageScrollStore(context) }
     val snapshotStore = remember(context) { WorkspacePageSnapshotStore(context) }
     val moduleComponent = module?.component?.flattenToString()
+    val snapshotWriteMutex = remember(placementComponent) { Mutex() }
     val currentActive by rememberUpdatedState(active)
     val currentSessionId by rememberUpdatedState(module?.sessionId)
     val currentComponent by rememberUpdatedState(moduleComponent)
@@ -215,11 +218,15 @@ fun ModuleWorkspacePage(
             if (display == null) {
                 if (WorkspacePageSnapshot.mustClear(validated)) {
                     safeSnapshot = null
-                    withContext(Dispatchers.IO) { snapshotStore.purge(moduleComponent) }
+                    snapshotWriteMutex.withLock {
+                        withContext(Dispatchers.IO) { snapshotStore.purge(moduleComponent) }
+                    }
                 }
             } else {
                 safeSnapshot = display
-                withContext(Dispatchers.IO) { snapshotStore.save(moduleComponent, expectedSignerKey, validated) }
+                snapshotWriteMutex.withLock {
+                    withContext(Dispatchers.IO) { snapshotStore.save(moduleComponent, expectedSignerKey, validated) }
+                }
             }
         }
         return validated
@@ -406,12 +413,24 @@ fun ModuleWorkspacePage(
             documentCancel = cancel@{ request ->
                 if (documentCommitUncertain) return@cancel
                 WorkspacePageContract.validateActionRequest(request)
+                val submittedIdentity = Triple(module?.sessionId, route, moduleComponent)
                 try {
                     val remote = capability()
+                    if (Triple(currentSessionId, currentRoute, currentComponent) != submittedIdentity) {
+                        message = "Files session changed before the document action. Refresh and review the current document."
+                        retryGeneration++
+                        return@cancel
+                    }
                     val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(request) }
+                    if (Triple(currentSessionId, currentRoute, currentComponent) != submittedIdentity) {
+                        message = "Files session changed while completing the document action. Refresh and review the current document."
+                        retryGeneration++
+                        return@cancel
+                    }
                     acceptPage(raw)
                 } catch (failure: TimeoutCancellationException) {
                     message = "Files did not confirm whether the document action completed. Review the current document before trying again."
+                    retryGeneration++
                 }
             },
             documentCommit = commit@{ request ->
@@ -421,9 +440,22 @@ fun ModuleWorkspacePage(
                 }
                 WorkspacePageContract.validateActionRequest(request)
                 documentCommitUncertain = false
+                val submittedIdentity = Triple(module?.sessionId, route, moduleComponent)
                 try {
                     val remote = capability()
+                    if (Triple(currentSessionId, currentRoute, currentComponent) != submittedIdentity) {
+                        documentCommitUncertain = true
+                        message = "Files session changed before saving. Your draft remains available; refresh and review the document."
+                        retryGeneration++
+                        return@commit false
+                    }
                     val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(request) }
+                    if (Triple(currentSessionId, currentRoute, currentComponent) != submittedIdentity) {
+                        documentCommitUncertain = true
+                        message = "Files session changed while saving. Your draft remains available; refresh and review the document."
+                        retryGeneration++
+                        return@commit false
+                    }
                     val validated = validatedPage(raw)
                     val saved = JSONObject(validated).optString("documentSaveStatus") == "saved"
                     acceptPage(validated)
@@ -441,10 +473,19 @@ fun ModuleWorkspacePage(
                 check(!documentCommitUncertain || mode == "r") {
                     "Review the current document before trying to save again"
                 }
+                val submittedIdentity = Triple(module?.sessionId, route, moduleComponent)
                 val remote = capability()
-                WorkspaceBinderCalls.run(10_000, onDiscard = { it?.close() }) {
+                check(Triple(currentSessionId, currentRoute, currentComponent) == submittedIdentity) {
+                    "Files session changed before opening the document"
+                }
+                val descriptor = WorkspaceBinderCalls.run(10_000, onDiscard = { it?.close() }) {
                     remote.openDocument(id, mode)
                 }
+                if (Triple(currentSessionId, currentRoute, currentComponent) != submittedIdentity) {
+                    runCatching { descriptor?.close() }
+                    error("Files session changed while opening the document")
+                }
+                descriptor
             },
             onAction = ::submitAction, onOpenDocument = { id, mode ->
                 try {

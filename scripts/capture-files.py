@@ -32,6 +32,10 @@ try:
                      "-e", "files_capture", "true", "-e", "files_theme", theme,
                      RUNNER, timeout=300)
         if "OK (1 test)" not in result:
+            try:
+                adb("pull", "/sdcard/Pictures/ModularFiles/.", str(OUT), timeout=60)
+            except (OSError, subprocess.SubprocessError) as error:
+                print(f"Could not preserve failed Files capture: {error}", flush=True)
             raise RuntimeError(f"Files capture test failed for {width}dp/{theme}/font {font}:\n{result}")
         visual = adb("shell", "am", "instrument", "-w", "-e", "class", VISUAL_TEST,
                      "-e", "files_theme", theme, RUNNER, timeout=300)

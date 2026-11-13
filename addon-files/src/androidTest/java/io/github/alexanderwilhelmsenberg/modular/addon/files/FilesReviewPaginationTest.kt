@@ -38,6 +38,82 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun largeFileFindingsRankByKnownBytesAndFingerprintOnlyAfterReview() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().putInt("cleanLargeMiB", 1).commit()
+        val repository = ReviewFixtureRepository(itemCount = 3, largeFiles = true)
+        repository.files[0] = repository.files[0].copy(sizeBytes = 4L * 1024 * 1024)
+        repository.files[1] = repository.files[1].copy(sizeBytes = 3L * 1024 * 1024)
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            val chosen = toggleCleanCheck(controller, setup, "LARGE_FILE")
+            action(controller, chosen, "Start scan")
+            val results = awaitView(controller, "clean")
+            val items = results.getJSONArray("items")
+            assertEquals(3, items.length())
+            assertEquals(listOf(4L, 3L, 2L).map { it * 1024 * 1024 },
+                (0 until items.length()).map { items.getJSONObject(it).getLong("reclaimableKnownBytes") })
+            (0 until items.length()).forEach { index ->
+                assertEquals(3, items.getJSONObject(index).getInt("priorityTier"))
+                assertEquals("Large file", items.getJSONObject(index).getString("priorityLabel"))
+            }
+            assertEquals(0, repository.fingerprintCalls)
+            val included = rowAction(controller, items.getJSONObject(0), "Include")
+            val preparing = action(controller, included, "Review selected")
+            assertEquals("progress", preparing.getString("view"))
+            awaitView(controller, "cleanReview")
+            assertTrue(repository.fingerprintCalls > 0)
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun cleanSetupDefaultsToNumberedCopiesAndPersistsChosenChecksWithoutScanning() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        try {
+            val controller = FilesPageController(context, repository)
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            assertEquals("clean", setup.getString("view"))
+            assertTrue(setup.getBoolean("cleanSetup"))
+            assertTrue(setup.getBoolean("cleanCanScan"))
+            val ids = listOf("NUMBERED_COPY", "EXACT_DUPLICATE", "OLDER_VERSION", "LARGE_FILE",
+                "OLD_DOWNLOAD", "DOWNLOADED_INSTALLER_OR_ARCHIVE")
+            assertEquals(ids.toSet(), (0 until setup.getJSONArray("cleanChecks").length())
+                .map { setup.getJSONArray("cleanChecks").getJSONObject(it).getString("id") }.toSet())
+            ids.forEach { id -> assertEquals(id == "NUMBERED_COPY", cleanCheck(setup, id).getBoolean("enabled")) }
+            assertEquals(0, repository.scanCalls)
+            assertEquals(0, repository.fingerprintCalls)
+
+            val none = toggleCleanCheck(controller, setup, "NUMBERED_COPY")
+            assertFalse(none.getBoolean("cleanCanScan"))
+            assertEquals(0, repository.scanCalls)
+            val rejected = action(controller, none, "Start scan")
+            assertTrue(rejected.getBoolean("cleanSetup"))
+            assertTrue(rejected.getString("message").contains("Choose at least one check"))
+            assertEquals(0, repository.scanCalls)
+            val chosen = toggleCleanCheck(controller, rejected, "LARGE_FILE")
+            assertTrue(chosen.getBoolean("cleanCanScan"))
+            assertFalse(cleanCheck(chosen, "OLD_DOWNLOAD").getBoolean("enabled"))
+
+            val restored = FilesPageController(context, repository)
+            restored.addedLocation("test-volume")
+            val reopened = action(restored, page(restored), "Clean")
+            assertTrue(cleanCheck(reopened, "LARGE_FILE").getBoolean("enabled"))
+            assertFalse(cleanCheck(reopened, "NUMBERED_COPY").getBoolean("enabled"))
+            assertFalse(cleanCheck(reopened, "OLD_DOWNLOAD").getBoolean("enabled"))
+            assertEquals(0, repository.scanCalls)
+            assertEquals(0, repository.fingerprintCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
     @Test fun detailsRefreshesChildSizesWithoutExpiringBrowserActions() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
@@ -93,7 +169,9 @@ class FilesReviewPaginationTest {
         val controller = FilesPageController(context, repository)
         try {
             controller.addedLocation("test-volume")
-            action(controller, page(controller), "Clean")
+            val setup = action(controller, page(controller), "Clean")
+            val withLargeFiles = toggleCleanCheck(controller, setup, "LARGE_FILE")
+            action(controller, withLargeFiles, "Start scan")
             assertTrue(repository.scanSecondPage.await(5, TimeUnit.SECONDS))
             val browser = action(controller, page(controller), "Back to files")
             val settings = action(controller, browser, "Settings")
@@ -114,6 +192,7 @@ class FilesReviewPaginationTest {
             assertEquals("root", completed.getString("cleanScopeId"))
             assertEquals("subfolder", completed.getString("folderId"))
             assertTrue(completed.getJSONArray("items").length() > 0)
+            assertTrue(completed.getJSONArray("items").getJSONObject(0).has("priorityTier"))
             val returned = action(controller, completed, "Back to folder")
             assertEquals("subfolder", returned.getString("folderId"))
             assertEquals("browser", returned.getString("view"))
@@ -132,7 +211,9 @@ class FilesReviewPaginationTest {
         val controller = FilesPageController(context, repository)
         try {
             controller.addedLocation("test-volume")
-            val progress = action(controller, page(controller), "Clean")
+            val setup = action(controller, page(controller), "Clean")
+            val withLargeFiles = toggleCleanCheck(controller, setup, "LARGE_FILE")
+            val progress = action(controller, withLargeFiles, "Start scan")
             assertEquals("progress", progress.getString("view"))
             assertTrue(repository.scanSecondPage.await(5, TimeUnit.SECONDS))
             val partial = page(controller)
@@ -142,8 +223,8 @@ class FilesReviewPaginationTest {
             assertTrue(partial.getInt("filesScanned") > 0)
             assertEquals(1, repository.scanCalls)
 
-            action(controller, partial, "Refresh progress")
-            val hidden = action(controller, partial, "Back to files")
+            val refreshed = action(controller, partial, "Refresh progress")
+            val hidden = action(controller, refreshed, "Back to files")
             assertEquals("browser", hidden.getString("view"))
             assertTrue(hidden.getBoolean("cleanScanRunning"))
             val reopened = action(controller, hidden, "Clean")
@@ -235,14 +316,16 @@ class FilesReviewPaginationTest {
                 .put("actionId", cleanId).put("operationToken", UUID.randomUUID().toString())
                 .put("restoreScroll", JSONObject().put("key", browser.getString("scrollKey"))
                     .put("anchor", 7).put("offset", 41)).toString()))
-            assertTrue(scanning.getString("view") in setOf("progress", "clean"))
+            assertEquals("clean", scanning.getString("view"))
+            assertTrue(scanning.getBoolean("cleanSetup"))
 
             // A browser disposal write and a poll may arrive after Clean has changed routes.
             val polled = page(controller)
-            assertTrue(polled.getString("view") in setOf("progress", "clean"))
+            assertEquals("clean", polled.getString("view"))
             val afterLateScroll = JSONObject(controller.performAction(oldScrollRequest))
-            assertTrue(afterLateScroll.getString("view") in setOf("progress", "clean"))
+            assertEquals("clean", afterLateScroll.getString("view"))
             assertFalse(afterLateScroll.optString("state") == "error")
+            action(controller, afterLateScroll, "Start scan")
             val recommendations = awaitView(controller, "clean")
             assertEquals("sheet", recommendations.getString("presentation"))
             val afterAnotherLateScroll = JSONObject(controller.performAction(oldScrollRequest))
@@ -258,7 +341,7 @@ class FilesReviewPaginationTest {
         }
     }
 
-    @Test fun cleanStartsImmediatelyAndClosingSheetKeepsCurrentFolder() {
+    @Test fun cleanWaitsForExplicitStartAndClosingSheetKeepsCurrentFolder() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
         val repository = ReviewFixtureRepository(itemCount = 0)
@@ -269,7 +352,12 @@ class FilesReviewPaginationTest {
             assertEquals("browser", browser.getString("view"))
             assertEquals("root", browser.getString("folderId"))
 
-            val scanning = action(controller, browser, "Clean")
+            val setup = action(controller, browser, "Clean")
+            assertEquals("clean", setup.getString("view"))
+            assertTrue(setup.getBoolean("cleanSetup"))
+            assertEquals(0, repository.scanCalls)
+            assertEquals(0, repository.fingerprintCalls)
+            val scanning = action(controller, setup, "Start scan")
             assertEquals("progress", scanning.getString("view"))
             assertEquals("sheet", scanning.getString("presentation"))
             assertEquals("browser", scanning.getString("underlyingView"))
@@ -393,6 +481,18 @@ class FilesReviewPaginationTest {
             .put("operationToken", UUID.randomUUID().toString()).toString()))
     }
 
+    private fun cleanCheck(page: JSONObject, id: String): JSONObject =
+        (0 until page.getJSONArray("cleanChecks").length())
+            .map { page.getJSONArray("cleanChecks").getJSONObject(it) }
+            .single { it.getString("id") == id }
+
+    private fun toggleCleanCheck(controller: FilesPageController, from: JSONObject, id: String): JSONObject {
+        val command = cleanCheck(from, id).getJSONObject("action")
+        return JSONObject(controller.performAction(JSONObject().put("version", 1)
+            .put("actionId", command.getString("id"))
+            .put("operationToken", UUID.randomUUID().toString()).toString()))
+    }
+
     private class ReviewFixtureRepository(itemCount: Int = 105, private val largeFiles: Boolean = false,
         includeSubfolder: Boolean = false) : FilesRepository {
         private val root = entry("root", true)
@@ -402,6 +502,7 @@ class FilesReviewPaginationTest {
         var scanRelease: CountDownLatch? = null
         var scanSecondPage = CountDownLatch(1)
         var scanCalls = 0
+        var fingerprintCalls = 0
         val createdFiles = mutableListOf<Pair<String, String>>()
         var parentTotalCached = false
         var childTotalCached = false
@@ -471,7 +572,10 @@ class FilesReviewPaginationTest {
         override fun beginStagedWrite(id: String, expectedFingerprint: String): StagedWrite = error("Unexpected staged write")
         override fun commitStagedWrite(token: String): FileEntry = error("Unexpected staged commit")
         override fun cancelStagedWrite(token: String) = Unit
-        override fun fingerprint(id: String) = "fixture:$id"
+        override fun fingerprint(id: String): String {
+            fingerprintCalls++
+            return "fixture:$id"
+        }
         override fun scopedContent(id: String): ScopedContent = error("Unexpected content grant")
         override fun createDirectory(parentId: String, name: String): FileEntry = error("Unexpected create")
         override fun createFile(parentId: String, name: String, mimeType: String): FileEntry {

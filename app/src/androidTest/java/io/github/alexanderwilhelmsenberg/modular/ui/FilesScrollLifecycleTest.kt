@@ -43,7 +43,18 @@ class FilesScrollLifecycleTest {
             .put("view", "clean").put("state", "ready").put("title", "Clean folder")
             .put("folderId", "downloads").put("locationId", "phone")
             .put("presentation", "sheet").put("underlyingView", "browser")
-            .put("items", JSONArray()).put("actions", JSONArray()).toString()
+            .put("cleanSetup", true).put("cleanCanScan", true)
+            .put("cleanChecks", JSONArray().put(JSONObject().put("id", "NUMBERED_COPY")
+                .put("label", "Numbered copies").put("enabled", true)
+                .put("action", action("toggle-check", "toggleCleanCheck", "Numbered copies"))))
+            .put("items", JSONArray()).put("actions", JSONArray()
+                .put(action("start-scan", "scan", "Start scan"))).toString()
+        val progress = JSONObject().put("version", 1).put("kind", "files")
+            .put("view", "progress").put("state", "ready").put("title", "Scanning")
+            .put("folderId", "downloads").put("locationId", "phone")
+            .put("presentation", "sheet").put("progressFor", "clean")
+            .put("cleanScanRunning", true).put("items", JSONArray())
+            .put("actions", JSONArray()).toString()
         var page by mutableStateOf(browser)
         var visible by mutableStateOf(true)
         val requests = mutableListOf<String>()
@@ -55,7 +66,7 @@ class FilesScrollLifecycleTest {
                     if (visible) FilesPage(pageJson = page, onAction = {
                         val id = JSONObject(it).getString("actionId")
                         requests.add(id)
-                        page = if (id == "clean") clean else JSONObject()
+                        page = if (id == "clean") clean else if (id == "start-scan") progress else JSONObject()
                             .put("version", 1).put("kind", "files").put("view", "error")
                             .put("title", "Action expired").toString()
                     }, onOpenDocument = { _, _ -> }, onScrollState = { savedKey, _, _ -> savedKeys.add(savedKey) })
@@ -65,8 +76,10 @@ class FilesScrollLifecycleTest {
         rule.onNodeWithTag("files.action.more").performClick()
         rule.onNodeWithText("Clean").performClick()
         rule.onNodeWithTag("files.clean.sheet").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.start").performClick()
+        rule.onNodeWithTag("files.clean.progress").assertIsDisplayed()
         rule.runOnIdle {
-            assertEquals(listOf("clean"), requests)
+            assertEquals(listOf("clean", "start-scan"), requests)
             assertTrue("Leaving the browser must preserve its position", key in savedKeys)
             page = browser
         }
@@ -74,7 +87,7 @@ class FilesScrollLifecycleTest {
         rule.runOnIdle { owner.registry.currentState = Lifecycle.State.CREATED }
         rule.runOnIdle { visible = false }
         rule.runOnIdle {
-            assertEquals("Stop/disposal must not submit a file action", listOf("clean"), requests)
+            assertEquals("Stop/disposal must not submit a file action", listOf("clean", "start-scan"), requests)
             assertTrue(savedKeys.all { it == key })
             owner.registry.currentState = Lifecycle.State.DESTROYED
         }

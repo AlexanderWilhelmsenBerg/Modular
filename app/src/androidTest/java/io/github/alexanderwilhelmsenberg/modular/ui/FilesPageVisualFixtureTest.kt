@@ -12,10 +12,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -105,6 +109,25 @@ class FilesPageVisualFixtureTest {
                         if (args.has("color")) appearance.put("color", args.getString("color"))
                         page = updated.toString()
                     }
+                    val id = request.optString("actionId")
+                    if (id.startsWith("fixture-check-")) {
+                        val updated = JSONObject(page)
+                        val checks = updated.getJSONArray("cleanChecks")
+                        for (index in 0 until checks.length()) {
+                            val check = checks.getJSONObject(index)
+                            if (check.getString("id") == id.removePrefix("fixture-check-"))
+                                check.put("enabled", !check.getBoolean("enabled"))
+                        }
+                        updated.put("cleanCanScan", (0 until checks.length()).any {
+                            checks.getJSONObject(it).getBoolean("enabled")
+                        })
+                        page = updated.toString()
+                    }
+                    if (id == "fixture-toggle-subfolders") {
+                        val updated = JSONObject(page)
+                        updated.put("includeSubfolders", !updated.getBoolean("includeSubfolders"))
+                        page = updated.toString()
+                    }
                 },
                     onOpenDocument = { _, _ -> })
             }
@@ -138,6 +161,39 @@ class FilesPageVisualFixtureTest {
         rule.runOnIdle { assertEquals("#6795D4", requests.last().getJSONObject("args").getString("color")) }
         capture("folder-appearance", requestedTheme.lowercase(Locale.ROOT))
 
+        rule.runOnIdle { page = fixture("clean-options") }
+        rule.onNodeWithTag("files.clean.options").assertExists()
+        rule.onNodeWithTag("files.clean.start").assertIsDisplayed()
+        rule.runOnIdle {
+            val checks = JSONObject(page).getJSONArray("cleanChecks")
+            assertTrue(checks.getJSONObject(0).getBoolean("enabled"))
+            assertTrue(!checks.getJSONObject(1).getBoolean("enabled"))
+            assertTrue(!checks.getJSONObject(2).getBoolean("enabled"))
+            assertTrue(!checks.getJSONObject(3).getBoolean("enabled"))
+        }
+        rule.onAllNodesWithText("Slower").assertCountEquals(2)
+        rule.onNodeWithTag("files.clean.start").assertIsEnabled()
+        rule.onNodeWithTag("files.clean.check:NUMBERED_COPY").performClick()
+        rule.onNodeWithTag("files.clean.start").assertIsNotEnabled()
+        rule.onNodeWithTag("files.clean.check:NUMBERED_COPY").performClick()
+        rule.onNodeWithTag("files.clean.start").assertIsEnabled()
+        capture("clean-options", requestedTheme.lowercase(Locale.ROOT))
+        rule.onNodeWithTag("files.clean.options")
+            .performScrollToNode(hasTestTag("files.clean.check:OLD_DOWNLOAD"))
+        rule.onNodeWithTag("files.clean.check:OLD_DOWNLOAD").performClick()
+        rule.runOnIdle {
+            assertEquals("fixture-check-OLD_DOWNLOAD", requests.last().getString("actionId"))
+            val checks = JSONObject(page).getJSONArray("cleanChecks")
+            assertTrue(checks.getJSONObject(3).getBoolean("enabled"))
+        }
+        rule.onNodeWithTag("files.clean.options")
+            .performScrollToNode(hasTestTag("files.clean.subfolders"))
+        rule.onNodeWithTag("files.clean.subfolders").performClick()
+        rule.runOnIdle {
+            assertEquals("fixture-toggle-subfolders", requests.last().getString("actionId"))
+            assertTrue(JSONObject(page).getBoolean("includeSubfolders"))
+        }
+
         rule.runOnIdle { page = fixture("progress") }
         rule.onNodeWithTag("files.clean.sheet").assertIsDisplayed()
         rule.onNodeWithTag("files.clean.progress").assertIsDisplayed()
@@ -145,6 +201,8 @@ class FilesPageVisualFixtureTest {
         rule.onNodeWithText("Project notes").assertIsDisplayed()
         rule.onNodeWithTag("files.clean.close").assertIsDisplayed()
         rule.onNodeWithTag("files.clean.cancel").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.counters").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.scope").assertIsDisplayed()
         rule.onNodeWithText("Choose keeper").assertDoesNotExist()
         capture("clean-progress", requestedTheme.lowercase(Locale.ROOT))
         rule.runOnIdle { page = fixture("clean") }
@@ -152,6 +210,9 @@ class FilesPageVisualFixtureTest {
         rule.onNodeWithText("Clean folder").assertIsDisplayed()
         rule.onNodeWithText("Choose keeper").assertIsDisplayed()
         rule.onNodeWithText("Include").assertIsDisplayed()
+        rule.onNodeWithText("Scan options").assertIsDisplayed()
+        rule.onNodeWithText("High priority").assertIsDisplayed()
+        rule.onNodeWithText("known space", substring = true).assertIsDisplayed()
         capture("clean-sheet", requestedTheme.lowercase(Locale.ROOT))
 
         rule.runOnIdle { page = fixture("info") }
@@ -217,29 +278,52 @@ class FilesPageVisualFixtureTest {
                     .put(action("Choose color", "setFolderColor"))
                     .put(action("Reset appearance", "resetFolderAppearance"))
             }
+            "clean-options" -> {
+                page.put("view", "clean").put("title", "Clean folder")
+                    .put("presentation", "sheet").put("underlyingView", "browser")
+                    .put("cleanSetup", true).put("cleanCanScan", true)
+                    .put("includeSubfolders", false)
+                    .put("cleanChecks", JSONArray()
+                        .put(cleanCheck("NUMBERED_COPY", "Numbered copies", "Find names such as photo (1).jpg", true, false))
+                        .put(cleanCheck("OLDER_VERSION", "Older versions", "Find earlier versions of a file", false, true))
+                        .put(cleanCheck("EXACT_DUPLICATE", "Exact duplicates", "Compare file contents", false, true))
+                        .put(cleanCheck("OLD_DOWNLOAD", "Old downloads", "Include files older than your threshold", false, false))
+                        .put(cleanCheck("LARGE_FILE", "Large files", "Find files above your size threshold", false, false))
+                        .put(cleanCheck("DOWNLOADED_INSTALLER_OR_ARCHIVE", "Archives", "Downloaded installers and archives, for manual review", false, false)))
+                actions.put(action("Close", "back"))
+                    .put(JSONObject().put("id", "fixture-toggle-subfolders")
+                        .put("label", "Include subfolders").put("kind", "toggleSubfolders"))
+                    .put(action("Start scan", "scan"))
+            }
             "progress" -> {
                 page.put("title", "Working").put("summary", "Scanning cleanup candidates")
                     .put("presentation", "sheet").put("underlyingView", "browser")
                     .put("progressFor", "clean").put("cleanScanRunning", true).put("complete", false)
+                    .put("cleanChecksSummary", "Numbered copies")
+                    .put("foldersScanned", 3).put("filesScanned", 84).put("findingCount", 1)
                 actions.put(action("Close", "back")).put(action("Cancel", "cancel"))
                     .put(action("Refresh", "refresh"))
                 items.put(item("copies", "Project notes", "group", "Downloads/Project notes", 2048, null)
-                    .put("subtitle", "numbered copies · 2 items")
+                    .put("subtitle", "numbered copies · 2 items").put("priorityLabel", "Preliminary")
+                    .put("reclaimableKnownBytes", 2048)
                     .put("actions", JSONArray().put(action("Choose keeper", "keeper"))))
             }
             "clean" -> {
                 page.put("title", "Recommended cleanup")
                     .put("summary", "1 duplicate/copy/version groups · 1 other suggestions")
                     .put("presentation", "sheet").put("underlyingView", "browser")
+                    .put("cleanChecksSummary", "Numbered copies")
                 actions.put(action("Back to folder", "back"))
                     .put(action("Scan again", "scan"))
+                    .put(action("Scan options", "configureClean"))
                     .put(action("Review selected", "review"))
                 items.put(item("copies", "Project notes", "group", "Downloads/Project notes", 2048, null)
-                    .put("subtitle", "numbered copies · 2 items")
+                    .put("subtitle", "numbered copies · 2 items").put("priorityLabel", "High priority")
+                    .put("reclaimableKnownBytes", 2048).put("unknownSizeFiles", 1)
                     .put("actions", JSONArray().put(action("Included", "select"))
                         .put(action("Choose keeper", "keeper"))))
-                items.put(item("old", "old-installer.apk", "suggestion", "Downloads/old-installer.apk", 37_000_000, null)
-                    .put("subtitle", "old download · Older installer")
+                items.put(item("copy", "notes (1).md", "suggestion", "Downloads/notes (1).md", 14_208, null)
+                    .put("subtitle", "numbered copy · Check before including")
                     .put("actions", JSONArray().put(action("Include", "select"))))
             }
             "info" -> {
@@ -297,6 +381,13 @@ class FilesPageVisualFixtureTest {
         JSONObject().put("id", id).put("name", name).put("kind", kind).put("path", path)
             .put("sizeBytes", bytes).put("mimeType", mime).put("modifiedAt", 1_699_900_000_000L)
             .put("createdAt", JSONObject.NULL)
+
+    private fun cleanCheck(id: String, label: String, description: String,
+        enabled: Boolean, slow: Boolean): JSONObject = JSONObject()
+        .put("id", id).put("label", label).put("description", description)
+        .put("enabled", enabled).put("slow", slow)
+        .put("action", JSONObject().put("id", "fixture-check-$id")
+            .put("kind", "toggleCleanCheck").put("label", label))
 
     private fun appearance(id: String, name: String): JSONObject = JSONObject()
         .put("id", id).put("name", name).put("icon", "folder").put("color", "auto")

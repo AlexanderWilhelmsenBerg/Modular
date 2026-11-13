@@ -45,7 +45,7 @@ try:
         expected = [f"files-overview-{width}dp-{theme.lower()}-font{font}.png"]
         expected += [f"files-fixture-{scene}-{width}dp-{theme.lower()}-font{font}.png"
                      for scene in ("browser", "browser-details", "review", "trash", "map", "settings",
-                                   "browser-menu", "folder-menu", "folder-appearance", "clean-progress", "clean-sheet")]
+                                   "browser-menu", "folder-menu", "folder-appearance", "clean-options", "clean-progress", "clean-sheet")]
         for filename in expected:
             screenshot = OUT / filename
             if not screenshot.is_file() or screenshot.stat().st_size == 0:

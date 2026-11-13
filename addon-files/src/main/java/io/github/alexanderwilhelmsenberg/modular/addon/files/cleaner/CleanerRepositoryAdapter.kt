@@ -23,10 +23,12 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
     data class Snapshot(val entries: List<CleanerEngine.Entry>, val errors: List<String>)
     data class Execution(val trash: OperationResult?, val renames: List<FileOutcome>, val errors: List<String>)
 
+    @JvmOverloads
     fun snapshot(rootId: String, cancel: Cancellation = Cancellation { false },
                  excludedRules: Set<String> = emptySet(),
                  progressiveOptions: CleanerEngine.Options? = null,
-                 onProgress: ((CleanerEngine.Progress) -> Unit)? = null): Snapshot {
+                 onProgress: ((CleanerEngine.Progress) -> Unit)? = null,
+                 verifiedIds: Set<String>? = null): Snapshot {
         val entries = mutableListOf<CleanerEngine.Entry>()
         val errors = mutableListOf<String>()
         val root = repository.get(rootId)
@@ -36,6 +38,8 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
         val downloadFolders = mutableMapOf(root.id to isDownloadName(root.name))
         val rules = excludedRules + (progressiveOptions?.excludedIds() ?: emptySet()) +
             (progressiveOptions?.protectedIds() ?: emptySet())
+        val verifyFingerprint = progressiveOptions == null
+        val parseApk = progressiveOptions?.selectedCategories()?.contains(CleanerEngine.Category.OLDER_VERSION) == true
         val seen = mutableSetOf<String>()
         var foldersScanned = 0
         var filesScanned = 0
@@ -88,7 +92,9 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
                         pending.add(child)
                         downloadFolders[child.id] = inDownloads || isDownloadName(child.name)
                         null
-                    } else toCleaner(child, true, cancel)
+                    } else toCleaner(child, true, cancel, verifyFingerprint &&
+                        (verifiedIds == null || child.id in verifiedIds),
+                        parseApk && (progressiveOptions?.includeSubfolders() != false || folder.id == rootId))
                 }
                 children.addAll(converted)
                 if (children.size > 1_000 && !groupHintsDeferred) {
@@ -104,7 +110,8 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
                 offset = next
             }
             if (cancel.isCanceled()) throw IOException("Cleaner scan canceled")
-            entries.add(toCleaner(folder, complete, cancel))
+            entries.add(toCleaner(folder, complete, cancel, verifyFingerprint &&
+                (verifiedIds == null || folder.id in verifiedIds), false))
             entries.addAll(children)
             foldersScanned++
             if (progressiveOptions != null && onProgress != null &&
@@ -137,11 +144,61 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
         )
     }
 
+    /** Hydrates only the selected review manifest; preliminary revisions never become executable. */
+    fun prepareReview(analysis: CleanerEngine.Analysis, keeperByGroupId: Map<String, String>,
+                      selectedGroupIds: Set<String>, selectedSuggestionEntryIds: Set<String>,
+                      cancel: Cancellation = Cancellation { false }): CleanerEngine.Plan {
+        val preliminary = CleanerEngine.plan(analysis, keeperByGroupId, selectedGroupIds, selectedSuggestionEntryIds)
+        if (preliminary.blockers().any { !it.startsWith("File fingerprint requires review preparation:") })
+            return preliminary
+        if (preliminary.manifest().isEmpty()) return preliminary
+        val verifiedEntries = analysis.entries().toMutableMap()
+        for ((directoryId, expectedChildren) in preliminary.directoryChildren()) {
+            if (cancel.isCanceled()) throw CancellationException("Cleaner review canceled")
+            val actualChildren = listAllChildren(directoryId, cancel).map { it.id }.toSet()
+            if (actualChildren != expectedChildren) throw IOException("Folder contents changed since scan; scan again")
+        }
+        val parseApk = analysis.options().selectedCategories().contains(CleanerEngine.Category.OLDER_VERSION)
+        for (id in preliminary.manifest().keys) {
+            if (cancel.isCanceled()) throw CancellationException("Cleaner review canceled")
+            val captured = analysis.entries()[id] ?: throw IOException("File missing since scan; scan again")
+            val current = repository.get(id)
+            if (!sameMetadata(captured, current)) throw IOException("File changed since scan; scan again")
+            val verified = toCleaner(current, captured.childrenComplete(), cancel, true,
+                parseApk && captured.apk() != null)
+            if (!sameMetadata(captured, repository.get(id)))
+                throw IOException("File changed during review preparation; scan again")
+            if (captured.apk() != verified.apk())
+                throw IOException("APK identity changed since scan; scan again")
+            verifiedEntries[id] = verified
+        }
+        for (group in analysis.groups()) {
+            if (group.id() !in selectedGroupIds || group.category() != CleanerEngine.Category.EXACT_DUPLICATE) continue
+            val keeperId = keeperByGroupId[group.id()] ?: group.suggestedKeeperId()
+                ?: throw IOException("Choose a copy to keep")
+            for (id in group.memberIds()) if (id != keeperId && !byteEqual(keeperId, id, cancel))
+                throw IOException("Duplicate content changed since scan; scan again")
+        }
+        val verified = CleanerEngine.Analysis(verifiedEntries, analysis.groups(), analysis.suggestions(),
+            analysis.coverageWarnings(), analysis.options())
+        return CleanerEngine.plan(verified, keeperByGroupId, selectedGroupIds, selectedSuggestionEntryIds)
+    }
+
+    private fun sameMetadata(captured: CleanerEngine.Entry, current: FileEntry): Boolean =
+        captured.id() == current.id && captured.volumeId() == current.locationId &&
+            captured.parentId() == current.parentId && captured.path() == current.relativePath &&
+            captured.name() == current.name &&
+            (captured.kind() == CleanerEngine.Kind.DIRECTORY) == current.isDirectory &&
+            captured.size() == current.sizeBytes &&
+            captured.modified()?.toEpochMilli() == current.modifiedAtMillis &&
+            captured.created()?.toEpochMilli() == current.createdAtMillis
+
     /** Call only for the exact plan shown in the shared review after its Delete action is accepted. */
     fun executeReviewed(plan: CleanerEngine.Plan, cancel: Cancellation = Cancellation { false }): Execution {
         if (!plan.readyForReview()) return Execution(null, emptyList(), listOf("Cleaner plan is unresolved"))
         val roots = plan.trashSteps().map { it.entryId() }
-        val current = snapshot(plan.scopeId(), cancel, plan.excludedRules())
+        val current = snapshot(plan.scopeId(), cancel, plan.excludedRules(),
+            verifiedIds = plan.manifest().keys)
         val preflight = CleanerEngine.preflight(plan, current.entries)
         if (!preflight.safeToExecute()) return Execution(
             null, emptyList(), listOf("Files changed since review; refresh review")
@@ -187,10 +244,11 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
         return Execution(trash, renames, emptyList())
     }
 
-    private fun listAllChildren(parentId: String): List<FileEntry> {
+    private fun listAllChildren(parentId: String, cancel: Cancellation = Cancellation { false }): List<FileEntry> {
         val result = mutableListOf<FileEntry>()
         var offset = 0
         while (true) {
+            if (cancel.isCanceled()) throw CancellationException("Cleaner review canceled")
             val page = repository.list(parentId, offset, 100, showHidden = true)
             if (!page.complete) throw IOException("Incomplete collision check")
             result.addAll(page.entries)
@@ -213,18 +271,20 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
         entry.id, entry.locationId, entry.parentId, entry.relativePath, entry.name,
         if (entry.isDirectory) CleanerEngine.Kind.DIRECTORY else CleanerEngine.Kind.FILE,
         entry.sizeBytes, entry.modifiedAtMillis?.let(Instant::ofEpochMilli),
-        entry.createdAtMillis?.let(Instant::ofEpochMilli), "revision-pending", !entry.isDirectory, null
+        entry.createdAtMillis?.let(Instant::ofEpochMilli), CleanerEngine.PENDING_REVISION, !entry.isDirectory, null
     )
 
-    private fun toCleaner(entry: FileEntry, childrenComplete: Boolean, cancel: Cancellation): CleanerEngine.Entry =
+    private fun toCleaner(entry: FileEntry, childrenComplete: Boolean, cancel: Cancellation,
+                          verifyFingerprint: Boolean, parseApk: Boolean): CleanerEngine.Entry =
         CleanerEngine.Entry(
             entry.id, entry.locationId, entry.parentId, entry.relativePath, entry.name,
             if (entry.isDirectory) CleanerEngine.Kind.DIRECTORY else CleanerEngine.Kind.FILE,
             entry.sizeBytes, entry.modifiedAtMillis?.let(Instant::ofEpochMilli),
-            entry.createdAtMillis?.let(Instant::ofEpochMilli), repository.fingerprint(entry.id).also {
+            entry.createdAtMillis?.let(Instant::ofEpochMilli),
+            if (verifyFingerprint) repository.fingerprint(entry.id).also {
                 if (cancel.isCanceled()) throw CancellationException("Cleaner scan canceled")
-            },
-            childrenComplete, apkEvidence(entry, cancel)
+            } else CleanerEngine.PENDING_REVISION,
+            childrenComplete, if (parseApk) apkEvidence(entry, cancel) else null
         )
 
     private fun apkEvidence(entry: FileEntry, cancel: Cancellation): CleanerEngine.ApkEvidence? {

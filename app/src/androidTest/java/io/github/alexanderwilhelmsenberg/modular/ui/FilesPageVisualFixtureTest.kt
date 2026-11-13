@@ -20,6 +20,9 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.alexanderwilhelmsenberg.modular.filesui.FilesPage
 import java.io.File
@@ -50,8 +53,9 @@ class FilesPageVisualFixtureTest {
                 FilesPage(pageJson = page, onAction = {}, onOpenDocument = { _, _ -> })
             }
         }
-        for (view in listOf("browser", "review", "trash", "map", "settings")) {
-            rule.runOnIdle { page = fixture(view) }
+        for (scene in listOf("browser", "browser-details", "review", "trash", "map", "settings")) {
+            val view = if (scene == "browser-details") "browser" else scene
+            rule.runOnIdle { page = fixture(scene) }
             rule.waitForIdle()
             rule.onNodeWithTag(if (view == "map") "files-storage-map" else "files.page.$view")
                 .assertExists()
@@ -64,7 +68,12 @@ class FilesPageVisualFixtureTest {
                 rule.onNodeWithText("Large file threshold (MiB)").assertIsDisplayed()
                 rule.onNodeWithText("Android still protects", substring = true).assertDoesNotExist()
             }
-            capture(view, requestedTheme.lowercase(Locale.ROOT))
+            if (view == "browser") {
+                rule.onNodeWithTag("files.search.input").assertIsDisplayed()
+                rule.onNodeWithTag("files.create.menu").assertIsDisplayed()
+                rule.onNodeWithTag("files.folder.row:photos").assertIsDisplayed()
+            }
+            capture(scene, requestedTheme.lowercase(Locale.ROOT))
             if (view == "settings") {
                 rule.onNodeWithText("Theme: system").performScrollTo().assertIsDisplayed()
                 rule.onNodeWithTag("files.action.more").performClick()
@@ -100,10 +109,24 @@ class FilesPageVisualFixtureTest {
                     onOpenDocument = { _, _ -> })
             }
         }
-        rule.onNodeWithTag("files.folder.tile:photos").assertIsDisplayed()
+        rule.onNodeWithTag("files.folder.row:photos").assertIsDisplayed()
         rule.onNodeWithTag("files.action.more").performClick()
         rule.onNodeWithTag("files.action.info").assertIsDisplayed()
+        rule.onNodeWithTag("files.action.clean").assertIsDisplayed()
+        rule.onNodeWithTag("files.action.map").assertIsDisplayed()
         capture("browser-menu", requestedTheme.lowercase(Locale.ROOT))
+        rule.onNodeWithTag("files.action.info").performClick()
+        rule.onNodeWithTag("files.create.menu").performClick()
+        rule.onNodeWithTag("files.create.file").performClick()
+        rule.onNodeWithTag("files.create.name").performTextInput("notes")
+        rule.onNodeWithText("Create").performClick()
+        rule.runOnIdle {
+            assertEquals("notes", requests.last().getJSONObject("args").getString("name"))
+            assertEquals("txt", requests.last().getJSONObject("args").getString("extension"))
+        }
+        rule.onNodeWithTag("files.folder.row:photos").performTouchInput { longClick() }
+        rule.onNodeWithTag("files.item.action.folderAppearance").assertIsDisplayed()
+        capture("folder-menu", requestedTheme.lowercase(Locale.ROOT))
 
         rule.runOnIdle { page = fixture("folderAppearance") }
         rule.onNodeWithTag("files.folder.appearance").assertIsDisplayed()
@@ -118,6 +141,12 @@ class FilesPageVisualFixtureTest {
         rule.runOnIdle { page = fixture("progress") }
         rule.onNodeWithTag("files.clean.sheet").assertIsDisplayed()
         rule.onNodeWithTag("files.clean.progress").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.findings").assertExists()
+        rule.onNodeWithText("Project notes").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.close").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.cancel").assertIsDisplayed()
+        rule.onNodeWithText("Choose keeper").assertDoesNotExist()
+        capture("clean-progress", requestedTheme.lowercase(Locale.ROOT))
         rule.runOnIdle { page = fixture("clean") }
         rule.onNodeWithTag("files.clean.sheet").assertIsDisplayed()
         rule.onNodeWithText("Clean folder").assertIsDisplayed()
@@ -142,7 +171,8 @@ class FilesPageVisualFixtureTest {
             .put("label", label).put("kind", kind)
         val items = JSONArray()
         when (view) {
-            "browser" -> {
+            "browser", "browser-details" -> {
+                page.put("view", "browser").put("layout", if (view == "browser-details") "details" else "list")
                 page.put("title", "Downloads").put("summary", "12.8 GB · 10% of 128 GB")
                     .put("currentFolder", appearance("fixture-downloads", "Downloads"))
                     .put("breadcrumbs", JSONArray().put(JSONObject().put("name", "Phone storage")
@@ -151,13 +181,17 @@ class FilesPageVisualFixtureTest {
                 actions.put(action("Trash", "trash")).put(action("Search", "search"))
                     .put(action("Clean", "clean")).put(action("Info", "info"))
                     .put(action("Storage map", "map"))
+                    .put(action("New folder", "create").put("input", "name"))
+                    .put(action("New file", "createFile").put("input", "textFile"))
                     .put(action("Customize folder", "folderAppearance"))
-                    .put(action("Sort name", "sort")).put(action("Grid view", "layout"))
+                    .put(action("Sort name", "sort")).put(action("Details view", "layout"))
                     .put(action("Settings", "settings"))
                 items.put(item("photos", "Photos", "folder", "Downloads/Photos", null, null)
                     .put("folderAppearance", appearance("photos", "Photos"))
                     .put("actions", JSONArray().put(action("Open", "open"))
-                        .put(action("Customize folder", "folderAppearance"))))
+                        .put(action("Customize folder", "folderAppearance"))
+                        .put(action("Cut", "cut")).put(action("Copy", "copy"))
+                        .put(action("Move", "move")).put(action("Delete", "delete"))))
                 items.put(item("bookwave", "bookwave-0.10.0.apk", "file", "Downloads/bookwave-0.10.0.apk", 37_000_000, "application/vnd.android.package-archive"))
                 items.put(item("notes", "project-notes.md", "file", "Downloads/project-notes.md", 14_208, "text/markdown"))
                 items.put(item("manual", "user-manual.pdf", "file", "Downloads/user-manual.pdf", 8_400_000, "application/pdf"))
@@ -186,8 +220,12 @@ class FilesPageVisualFixtureTest {
             "progress" -> {
                 page.put("title", "Working").put("summary", "Scanning cleanup candidates")
                     .put("presentation", "sheet").put("underlyingView", "browser")
-                    .put("progressFor", "clean")
-                actions.put(action("Cancel", "cancel"))
+                    .put("progressFor", "clean").put("cleanScanRunning", true).put("complete", false)
+                actions.put(action("Close", "back")).put(action("Cancel", "cancel"))
+                    .put(action("Refresh", "refresh"))
+                items.put(item("copies", "Project notes", "group", "Downloads/Project notes", 2048, null)
+                    .put("subtitle", "numbered copies · 2 items")
+                    .put("actions", JSONArray().put(action("Choose keeper", "keeper"))))
             }
             "clean" -> {
                 page.put("title", "Recommended cleanup")

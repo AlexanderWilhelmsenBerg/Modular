@@ -72,6 +72,17 @@ public final class CleanerEngine {
             suggestions = List.copyOf(suggestions); coverageWarnings = List.copyOf(coverageWarnings);
         }
     }
+    /** A read-only scan update. Early entries may carry revision-pending, never a reviewed fingerprint.
+     * It is deliberately not an Analysis and cannot be passed to plan(). */
+    public record Progress(Map<String, Entry> entries, List<Group> groups, List<Suggestion> suggestions,
+                           List<String> coverageWarnings, int foldersScanned, int filesScanned,
+                           boolean partial) {
+        public Progress {
+            entries = Map.copyOf(entries); groups = List.copyOf(groups);
+            suggestions = List.copyOf(suggestions); coverageWarnings = List.copyOf(coverageWarnings);
+            if (!partial) throw new IllegalArgumentException("Progress cannot authorize review");
+        }
+    }
     public record ReviewedFile(String id, String volumeId, String path, String name, Long size,
                                Instant modified, Instant created, String revision, String parentId) {}
     public record TrashStep(String entryId, List<String> reviewedDescendantIds, String groupId) {
@@ -162,6 +173,51 @@ public final class CleanerEngine {
             }
         }
         return new Analysis(all, groups, suggestions, warnings, options);
+    }
+
+    /** Cheap page-level hints. The caller supplies whether this page is below a Downloads folder. */
+    public static List<Suggestion> progressiveSuggestions(Collection<Entry> page, boolean inDownloads,
+                                                          Options options) {
+        Objects.requireNonNull(page); Objects.requireNonNull(options);
+        List<Suggestion> result = new ArrayList<>();
+        Instant oldBefore = options.scannedAt().minusSeconds(Math.multiplyExact(options.oldDownloadDays(), 86400));
+        for (Entry entry : page) {
+            if (entry.kind() != Kind.FILE || excludedDirectly(entry, options)) continue;
+            if (entry.size() != null && entry.size() >= options.largeBytes())
+                result.add(new Suggestion(entry.id(), Category.LARGE_FILE, "Large file", false));
+            if (inDownloads || entry.name().equalsIgnoreCase("download") || entry.name().equalsIgnoreCase("downloads")) {
+                if (entry.modified() != null && entry.modified().isBefore(oldBefore))
+                    result.add(new Suggestion(entry.id(), Category.OLD_DOWNLOAD, "Old download", false));
+                if (DOWNLOAD_TYPES.contains(extension(entry.name())))
+                    result.add(new Suggestion(entry.id(), Category.DOWNLOADED_INSTALLER_OR_ARCHIVE,
+                            "Downloaded installer or archive", false));
+            }
+        }
+        return result;
+    }
+
+    /** Sibling-only groups have final membership once a folder's listing is complete. */
+    public static List<Group> progressiveGroups(Collection<Entry> folderChildren, boolean listingComplete,
+                                                Options options) {
+        Objects.requireNonNull(folderChildren); Objects.requireNonNull(options);
+        if (!listingComplete) return List.of();
+        List<Entry> eligible = new ArrayList<>();
+        for (Entry entry : folderChildren) if (!excludedDirectly(entry, options)) eligible.add(entry);
+        List<Group> groups = new ArrayList<>();
+        detectNumbered(eligible, groups);
+        detectVersions(eligible, groups);
+        return groups;
+    }
+
+    private static boolean excludedDirectly(Entry entry, Options options) {
+        if (options.excludedIds().contains(entry.id()) || options.protectedIds().contains(entry.id())) return true;
+        String path = entry.path().startsWith("/") ? entry.path() : "/" + entry.path();
+        for (String rule : options.excludedIds()) if (pathMatchesRule(path, rule)) return true;
+        for (String rule : options.protectedIds()) if (pathMatchesRule(path, rule)) return true;
+        return false;
+    }
+    private static boolean pathMatchesRule(String path, String rule) {
+        return rule.startsWith("/") && (path.equals(rule) || path.startsWith(rule.endsWith("/") ? rule : rule + "/"));
     }
 
     private static Map<String, Entry> index(Collection<Entry> entries) {

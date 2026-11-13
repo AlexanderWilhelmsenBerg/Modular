@@ -235,9 +235,32 @@ requirement is not evidence that its implementation has passed validation.
 
 ## 5. Cleaner — FILES-04
 
+### Compact browser controls
+
+- Keep a search bar visible, with an icon for adding a folder or an empty text
+  file. New file prompts for a name and an extension, defaulting to `txt`, and
+  must not overwrite an existing item.
+- Place the page overflow menu at the top. Clean and Storage map belong in
+  that menu, rather than large command tiles.
+- Use densely spaced folder rows: icon on the left at 1.5 times the label's
+  line height, with a single-line name on the right. Folder rows have no
+  individual overflow button; long press opens their menu, including Cut,
+  Copy, Move and Delete alongside existing properties and appearance actions.
+- Offer compact and details views. Details keeps names left aligned and
+  displays known sizes at the right. Unknown or partial folder sizes must be
+  distinguished from complete zero-byte sizes; reuse cached subtree totals.
+
+### Live manual scans
+
 - A folder's **Clean** action opens analysis scoped to that folder, with an
-  explicit Include subfolders control. It shows the last scan's date and
-  coverage and a **Scan** action. Cleanup does not run merely on page entry.
+  explicit Include subfolders control. Opening Clean starts a manual scan, or
+  reopens the existing scan and its captured scope. Findings appear progressively
+  while enumeration and verification continue. Closing the sheet leaves the scan
+  running; Cancel explicitly stops it. Background completion must not navigate
+  away from the user's chosen screen. Completed results expose the existing
+  full deletion review; provisional findings cannot execute a cleanup plan.
+  Cleanup does not run merely on page entry, and Scan again explicitly starts
+  a fresh scan after completion.
 - Standard recommendations include exact duplicate files, large files, old
   downloads, and downloaded installers/archives; thresholds are configurable.
   Add separate **Numbered copies** and **Older versions** groups as below.

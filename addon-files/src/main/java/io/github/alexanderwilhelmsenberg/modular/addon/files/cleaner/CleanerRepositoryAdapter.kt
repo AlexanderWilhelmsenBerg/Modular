@@ -15,6 +15,7 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.security.MessageDigest
 import java.time.Instant
+import java.util.concurrent.CancellationException
 import java.util.zip.ZipFile
 
 /** Performs blocking I/O. Call only from an I/O dispatcher after the user's explicit Scan action. */
@@ -23,52 +24,113 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
     data class Execution(val trash: OperationResult?, val renames: List<FileOutcome>, val errors: List<String>)
 
     fun snapshot(rootId: String, cancel: Cancellation = Cancellation { false },
-                 excludedRules: Set<String> = emptySet()): Snapshot {
+                 excludedRules: Set<String> = emptySet(),
+                 progressiveOptions: CleanerEngine.Options? = null,
+                 onProgress: ((CleanerEngine.Progress) -> Unit)? = null): Snapshot {
         val entries = mutableListOf<CleanerEngine.Entry>()
         val errors = mutableListOf<String>()
         val root = repository.get(rootId)
         if (!root.isDirectory) throw IllegalArgumentException("Cleaner scope must be a directory")
         val pending = ArrayDeque<FileEntry>()
         pending.add(root)
+        val downloadFolders = mutableMapOf(root.id to isDownloadName(root.name))
+        val rules = excludedRules + (progressiveOptions?.excludedIds() ?: emptySet()) +
+            (progressiveOptions?.protectedIds() ?: emptySet())
         val seen = mutableSetOf<String>()
+        var foldersScanned = 0
+        var filesScanned = 0
         while (pending.isNotEmpty()) {
             if (cancel.isCanceled()) throw IOException("Cleaner scan canceled")
             val folder = pending.removeFirst()
             if (!seen.add(folder.id)) continue
-            val children = mutableListOf<FileEntry>()
+            val children = mutableListOf<CleanerEngine.Entry>()
+            val directoryPreviews = mutableListOf<CleanerEngine.Entry>()
+            var groupHintsDeferred = false
             var offset = 0
             var complete = true
-            try {
-                while (true) {
-                    if (cancel.isCanceled()) throw IOException("Cleaner scan canceled")
-                    val page = repository.list(folder.id, offset, 100, showHidden = true)
-                    children.addAll(page.entries)
-                    if (!page.complete) complete = false
-                    val next = page.nextOffset ?: break
-                    if (next <= offset) {
-                        complete = false
-                        errors.add("Listing did not advance: ${folder.relativePath}")
-                        break
-                    }
-                    offset = next
+            val inDownloads = downloadFolders.remove(folder.id) == true
+            while (true) {
+                if (cancel.isCanceled()) throw IOException("Cleaner scan canceled")
+                val page = try {
+                    repository.list(folder.id, offset, 100, showHidden = true)
+                } catch (ex: Exception) {
+                    if (cancel.isCanceled()) throw IOException("Cleaner scan canceled", ex)
+                    complete = false
+                    errors.add("Could not fully list ${folder.relativePath}: ${ex.message ?: ex.javaClass.simpleName}")
+                    break
                 }
-            } catch (ex: Exception) {
-                complete = false
-                errors.add("Could not fully list ${folder.relativePath}: ${ex.message ?: ex.javaClass.simpleName}")
+                if (!page.complete) complete = false
+                val eligible = page.entries.filterNot { excluded(it, rules) }
+                if (eligible.size != page.entries.size) complete = false
+                val previews = eligible.map(::metadataPreview)
+                val filePreviews = previews.filter { it.kind() == CleanerEngine.Kind.FILE }
+                filesScanned += filePreviews.size
+                if (!groupHintsDeferred) {
+                    val directories = previews.filter { it.kind() == CleanerEngine.Kind.DIRECTORY }
+                    if (children.size + directoryPreviews.size + previews.size > 1_000) {
+                        groupHintsDeferred = true
+                        directoryPreviews.clear()
+                    } else directoryPreviews.addAll(directories)
+                }
+                if (progressiveOptions != null && onProgress != null &&
+                    (progressiveOptions.includeSubfolders() || folder.id == rootId)) {
+                    val suggestions = CleanerEngine.progressiveSuggestions(filePreviews, inDownloads, progressiveOptions)
+                    if (suggestions.isNotEmpty()) {
+                        val mentioned = suggestions.map { it.entryId() }.toSet()
+                        if (cancel.isCanceled()) throw IOException("Cleaner scan canceled")
+                        onProgress(CleanerEngine.Progress(filePreviews.filter { it.id() in mentioned }.associateBy { it.id() },
+                            emptyList(), suggestions, emptyList(), foldersScanned, filesScanned, true))
+                    }
+                }
+                val converted = eligible.mapNotNull { child ->
+                    if (cancel.isCanceled()) throw IOException("Cleaner scan canceled")
+                    if (child.isDirectory) {
+                        pending.add(child)
+                        downloadFolders[child.id] = inDownloads || isDownloadName(child.name)
+                        null
+                    } else toCleaner(child, true, cancel)
+                }
+                children.addAll(converted)
+                if (children.size > 1_000 && !groupHintsDeferred) {
+                    groupHintsDeferred = true
+                    directoryPreviews.clear()
+                }
+                val next = page.nextOffset ?: break
+                if (next <= offset) {
+                    complete = false
+                    errors.add("Listing did not advance: ${folder.relativePath}")
+                    break
+                }
+                offset = next
             }
-            val eligibleChildren = children.filterNot { excluded(it, excludedRules) }
-            if (eligibleChildren.size != children.size) complete = false
-            entries.add(toCleaner(folder, complete))
-            for (child in eligibleChildren) {
-                if (child.isDirectory) pending.add(child)
-                else entries.add(toCleaner(child, true))
+            if (cancel.isCanceled()) throw IOException("Cleaner scan canceled")
+            entries.add(toCleaner(folder, complete, cancel))
+            entries.addAll(children)
+            foldersScanned++
+            if (progressiveOptions != null && onProgress != null &&
+                (progressiveOptions.includeSubfolders() || folder.id == rootId)) {
+                val groupChildren = if (groupHintsDeferred) emptyList() else children + directoryPreviews
+                val groups = if (!groupHintsDeferred)
+                    CleanerEngine.progressiveGroups(groupChildren, complete, progressiveOptions)
+                    else emptyList()
+                val memberIds = groups.flatMap { it.memberIds() }.toSet()
+                val warnings = when {
+                    !complete -> listOf("Incomplete folder enumeration: ${folder.relativePath}")
+                    groupHintsDeferred -> listOf("Large folder: group hints deferred until scan finishes: ${folder.relativePath}")
+                    else -> emptyList()
+                }
+                onProgress(CleanerEngine.Progress(groupChildren.filter { it.id() in memberIds }.associateBy { it.id() },
+                    groups, emptyList(), warnings, foldersScanned, filesScanned, true))
             }
         }
         return Snapshot(entries, errors)
     }
 
-    fun analyze(snapshot: Snapshot, options: CleanerEngine.Options): CleanerEngine.Analysis {
-        val analysis = CleanerEngine.analyze(snapshot.entries, options) { left, right -> byteEqual(left.id(), right.id()) }
+    fun analyze(snapshot: Snapshot, options: CleanerEngine.Options,
+                cancel: Cancellation = Cancellation { false }): CleanerEngine.Analysis {
+        if (cancel.isCanceled()) throw CancellationException("Cleaner scan canceled")
+        val analysis = CleanerEngine.analyze(snapshot.entries, options) { left, right -> byteEqual(left.id(), right.id(), cancel) }
+        if (cancel.isCanceled()) throw CancellationException("Cleaner scan canceled")
         return CleanerEngine.Analysis(
             analysis.entries(), analysis.groups(), analysis.suggestions(),
             analysis.coverageWarnings() + snapshot.errors, analysis.options()
@@ -144,22 +206,42 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
         return rules.any { rule -> rule.startsWith('/') && (path == rule || path.startsWith(rule.trimEnd('/') + "/")) }
     }
 
-    private fun toCleaner(entry: FileEntry, childrenComplete: Boolean): CleanerEngine.Entry =
+    private fun isDownloadName(name: String) = name.equals("download", true) || name.equals("downloads", true)
+
+    /** Progress metadata is intentionally unverified; only snapshot entries carry repository fingerprints. */
+    private fun metadataPreview(entry: FileEntry): CleanerEngine.Entry = CleanerEngine.Entry(
+        entry.id, entry.locationId, entry.parentId, entry.relativePath, entry.name,
+        if (entry.isDirectory) CleanerEngine.Kind.DIRECTORY else CleanerEngine.Kind.FILE,
+        entry.sizeBytes, entry.modifiedAtMillis?.let(Instant::ofEpochMilli),
+        entry.createdAtMillis?.let(Instant::ofEpochMilli), "revision-pending", !entry.isDirectory, null
+    )
+
+    private fun toCleaner(entry: FileEntry, childrenComplete: Boolean, cancel: Cancellation): CleanerEngine.Entry =
         CleanerEngine.Entry(
             entry.id, entry.locationId, entry.parentId, entry.relativePath, entry.name,
             if (entry.isDirectory) CleanerEngine.Kind.DIRECTORY else CleanerEngine.Kind.FILE,
             entry.sizeBytes, entry.modifiedAtMillis?.let(Instant::ofEpochMilli),
-            entry.createdAtMillis?.let(Instant::ofEpochMilli), repository.fingerprint(entry.id),
-            childrenComplete, apkEvidence(entry)
+            entry.createdAtMillis?.let(Instant::ofEpochMilli), repository.fingerprint(entry.id).also {
+                if (cancel.isCanceled()) throw CancellationException("Cleaner scan canceled")
+            },
+            childrenComplete, apkEvidence(entry, cancel)
         )
 
-    private fun apkEvidence(entry: FileEntry): CleanerEngine.ApkEvidence? {
+    private fun apkEvidence(entry: FileEntry, cancel: Cancellation): CleanerEngine.ApkEvidence? {
         val appContext = context ?: return null
         if (entry.isDirectory || !entry.name.endsWith(".apk", ignoreCase = true)) return null
         val temp = File.createTempFile("cleaner-apk-", ".apk", appContext.cacheDir)
         try {
             ParcelFileDescriptor.AutoCloseInputStream(repository.openRead(entry.id)).use { input ->
-                FileOutputStream(temp).use { output -> input.copyTo(output, 32 * 1024) }
+                FileOutputStream(temp).use { output ->
+                    val buffer = ByteArray(32 * 1024)
+                    while (true) {
+                        if (cancel.isCanceled()) throw CancellationException("Cleaner scan canceled")
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                    }
+                }
             }
             val info = appContext.packageManager.getPackageArchiveInfo(temp.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES)
                 ?: return null
@@ -188,19 +270,21 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
                 (info.applicationInfo?.flags ?: 0) and ApplicationInfo.FLAG_DEBUGGABLE != 0
             )
         } catch (_: Exception) {
+            if (cancel.isCanceled()) throw IOException("Cleaner scan canceled")
             return null
         } finally {
             temp.delete()
         }
     }
 
-    private fun byteEqual(leftId: String, rightId: String): Boolean {
+    private fun byteEqual(leftId: String, rightId: String, cancel: Cancellation): Boolean {
         try {
             ParcelFileDescriptor.AutoCloseInputStream(repository.openRead(leftId)).use { left ->
                 ParcelFileDescriptor.AutoCloseInputStream(repository.openRead(rightId)).use { right ->
                     val a = ByteArray(32 * 1024)
                     val b = ByteArray(a.size)
                     while (true) {
+                        if (cancel.isCanceled()) throw CancellationException("Cleaner scan canceled")
                         val countA = fillChunk(left, a)
                         val countB = fillChunk(right, b)
                         if (countA != countB) return false
@@ -210,6 +294,7 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
                 }
             }
         } catch (ex: Exception) {
+            if (cancel.isCanceled()) throw CancellationException("Cleaner scan canceled")
             throw IOException("Content comparison failed", ex)
         }
     }

@@ -172,33 +172,35 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     override fun directoryTotal(folderId: String, cancel: Cancellation): DirectoryTotal {
         val root = resolve(folderId)
         require(root.directory)
-        var bytes = 0L
-        var files = 0L
-        var complete = true
+        val accumulator = DirectoryTotalAccumulator(folderId)
         val queue = ArrayDeque<Node>()
         queue.add(root)
         val seen = HashSet<String>()
         while (queue.isNotEmpty()) {
-            if (cancel.isCanceled()) { complete = false; break }
+            if (cancel.isCanceled()) break
             val folder = queue.removeFirst()
-            if (!seen.add(nodeIdentity(folder))) { complete = false; continue }
+            if (!seen.add(nodeIdentity(folder))) { accumulator.incomplete(folder.id); continue }
             try {
                 children(folder).forEach { child ->
                     if (child.name == trashName) return@forEach
-                    if (child.directory) queue.add(child) else {
-                        files++
-                        if (child.size == null) complete = false else bytes = safeAdd(bytes, child.size)
-                    }
+                    if (child.directory) {
+                        if (accumulator.discover(folder.id, child.id)) queue.add(child)
+                    } else accumulator.file(folder.id, child.size)
                 }
-            } catch (_: Exception) { complete = false }
+            } catch (_: Exception) { accumulator.incomplete(folder.id) }
+            accumulator.listed(folder.id)
         }
-        val value = DirectoryTotal(bytes, files, complete, System.currentTimeMillis())
-        totals[folderId] = value
+        val fresh = accumulator.finish(System.currentTimeMillis())
+        val value = fresh.getValue(folderId)
         mutationLock.withLock {
+            totals.putAll(fresh)
+            val staleKeys = (totals.keys - fresh.keys).sortedBy { totals[it]?.calculatedAtMillis ?: 0L }
+            staleKeys.take((totals.size - 128).coerceAtLeast(0)).forEach { totals.remove(it) }
             val cache = try { JSONObject(prefs.getString("total.cache", "{}")) } catch (_: Exception) { JSONObject() }
-            val key = digest(folderId.toByteArray())
-            cache.put(key, JSONObject().put("bytes", value.bytes).put("files", value.fileCount)
-                .put("complete", value.complete).put("at", value.calculatedAtMillis))
+            fresh.forEach { (id, total) ->
+                cache.put(digest(id.toByteArray()), JSONObject().put("bytes", total.bytes).put("files", total.fileCount)
+                    .put("complete", total.complete).put("at", total.calculatedAtMillis))
+            }
             if (cache.length() > 128) {
                 val keys = cache.keys().asSequence().toList().sortedBy { cache.optJSONObject(it)?.optLong("at") ?: 0L }
                 keys.take(cache.length() - 128).forEach { cache.remove(it) }

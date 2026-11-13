@@ -1,8 +1,8 @@
 package io.github.alexanderwilhelmsenberg.modular.filesui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -64,15 +64,20 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
@@ -186,9 +191,14 @@ fun FilesPage(
         }
     }
     LaunchedEffect(view, pageJson) {
-        if (view == "progress") {
-            delay(900)
-            actions.firstOrNull { it.kind == "refresh" }?.let { send(it, null) }
+        if (view == "progress" || page.optBoolean("sizesCalculating")) {
+            val refresh = actions.firstOrNull {
+                it.kind == if (view == "progress") "refresh" else "sizeProgress"
+            }
+            while (refresh != null) {
+                delay(900)
+                send(refresh, null)
+            }
         }
     }
     if (view == "map") {
@@ -251,8 +261,14 @@ fun FilesPage(
         FilesFolderAppearanceEditor(page, actions, send, modifier)
         return
     }
-    var formAction by remember(pageJson) { mutableStateOf<PageAction?>(null) }
-    var formValue by remember(pageJson) { mutableStateOf("") }
+    var formAction by remember(pageKey) { mutableStateOf<PageAction?>(null) }
+    var formValue by remember(pageKey) { mutableStateOf("") }
+    var newFileAction by remember(pageKey) { mutableStateOf<PageAction?>(null) }
+    var newFileName by remember(pageKey) { mutableStateOf("") }
+    var newFileExtension by remember(pageKey) { mutableStateOf("txt") }
+    var searchQuery by remember(pageKey) { mutableStateOf(page.optString("query")) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var createMenuExpanded by remember(pageKey) { mutableStateOf(false) }
     var pageMenuExpanded by remember(pageKey) { mutableStateOf(false) }
     var headerVisible by remember(pageKey) { mutableStateOf(false) }
     var contentVisible by remember(pageKey) { mutableStateOf(view != "browser" && view != "search") }
@@ -282,29 +298,91 @@ fun FilesPage(
                         Text(if (view == "browser" || view == "search") "Up" else "Back")
                     }
                 }
-                val trash = page.optJSONObject("trash")
-                val trashAction = actions.firstOrNull { it.kind == "trash" }
-                if (trashAction != null) {
+                actions.firstOrNull { it.kind == "trash" }?.let { trashAction ->
+                    val trash = page.optJSONObject("trash")
                     val count = trash?.optLong("fileCount", 0L) ?: 0L
-                    val folders = trash?.optLong("emptyFolderCount", 0L) ?: 0L
-                    val color = filesTrashColor(count, folders)
-                    TextButton(onClick = { send(trashAction, null) }, modifier = Modifier.testTag("files.trash.badge")) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Canvas(Modifier.size(22.dp)) {
-                                drawRoundRect(color, topLeft = Offset(size.width * .22f, size.height * .29f),
-                                    size = Size(size.width * .56f, size.height * .62f),
-                                    cornerRadius = CornerRadius(size.width * .06f))
-                                drawLine(color, Offset(size.width * .12f, size.height * .21f),
-                                    Offset(size.width * .88f, size.height * .21f), strokeWidth = size.width * .09f)
-                                drawLine(color, Offset(size.width * .4f, size.height * .1f),
-                                    Offset(size.width * .6f, size.height * .1f), strokeWidth = size.width * .09f)
-                            }
-                            Column(Modifier.padding(start = 4.dp)) {
-                                Text("$count", color = color, style = MaterialTheme.typography.labelLarge)
-                                if (trash != null) Text(formatBytes(trash.optLong("knownBytes")), color = color,
-                                    style = MaterialTheme.typography.labelSmall)
+                    TextButton(onClick = { send(trashAction, null) },
+                        modifier = Modifier.testTag("files.trash.badge")) {
+                        val color = filesTrashColor(count, trash?.optLong("emptyFolderCount", 0L) ?: 0L)
+                        Canvas(Modifier.size(20.dp)) {
+                            drawRoundRect(color, Offset(size.width * .22f, size.height * .29f),
+                                Size(size.width * .56f, size.height * .62f), CornerRadius(size.width * .06f))
+                            drawLine(color, Offset(size.width * .12f, size.height * .21f),
+                                Offset(size.width * .88f, size.height * .21f), size.width * .09f)
+                            drawLine(color, Offset(size.width * .4f, size.height * .1f),
+                                Offset(size.width * .6f, size.height * .1f), size.width * .09f)
+                        }
+                        Text(" $count", color = color)
+                    }
+                }
+                if (view == "overview" || view == "browser" || view == "search") {
+                    val headerActions = actions.filterNot { it.kind in setOf("back", "loadMore", "confirm", "cancel", "scroll", "sizeProgress", "documentCommit", "documentCancel", "create", "createFile", "search", "trash") }
+                    Box {
+                        FilesMoreButton(pageMenuExpanded, "files.action.more") { pageMenuExpanded = true }
+                        DropdownMenu(expanded = pageMenuExpanded, onDismissRequest = { pageMenuExpanded = false }) {
+                            headerActions.forEach { action ->
+                                DropdownMenuItem(text = { Text(action.label) },
+                                    modifier = Modifier.testTag("files.action.${action.kind}"), onClick = {
+                                        pageMenuExpanded = false
+                                        if (action.input != null) { formAction = action; formValue = action.initial }
+                                        else send(action, null)
+                                    })
                             }
                         }
+                    }
+                }
+            }
+            if (view == "overview" || view == "browser" || view == "search") {
+                val search = actions.firstOrNull { it.kind == "search" }
+                val createFolder = actions.firstOrNull { it.kind == "create" }
+                val createFile = actions.firstOrNull { it.kind == "createFile" }
+                Row(Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it.take(512) },
+                        modifier = Modifier.weight(1f).testTag("files.search.input"),
+                        singleLine = true, placeholder = { Text("Search files") },
+                        leadingIcon = {
+                            val color = MaterialTheme.colorScheme.onSurfaceVariant
+                            Canvas(Modifier.size(22.dp)) {
+                                drawCircle(color, size.width * .25f, Offset(size.width * .41f, size.height * .41f),
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(size.width * .08f))
+                                drawLine(color, Offset(size.width * .60f, size.height * .60f),
+                                    Offset(size.width * .86f, size.height * .86f), size.width * .08f)
+                            }
+                        },
+                        trailingIcon = { if (search != null) TextButton(onClick = {
+                            keyboardController?.hide(); send(search, JSONObject().put("query", searchQuery.trim()))
+                        }, modifier = Modifier.testTag("files.search.submit")) { Text("Go") } },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            keyboardController?.hide(); search?.let { send(it, JSONObject().put("query", searchQuery.trim())) }
+                        }))
+                    if (createFolder != null || createFile != null) Box {
+                        Surface(onClick = { createMenuExpanded = true },
+                            modifier = Modifier.size(48.dp).testTag("files.create.menu"), shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer) {
+                            Box(contentAlignment = Alignment.Center) { Text("+", style = MaterialTheme.typography.headlineMedium) }
+                        }
+                        DropdownMenu(expanded = createMenuExpanded, onDismissRequest = { createMenuExpanded = false }) {
+                            createFolder?.let { action -> DropdownMenuItem(text = { Text("Folder") },
+                                modifier = Modifier.testTag("files.create.folder"), onClick = {
+                                    createMenuExpanded = false; formAction = action; formValue = action.initial
+                                }) }
+                            createFile?.let { action -> DropdownMenuItem(text = { Text("File") },
+                                modifier = Modifier.testTag("files.create.file"), onClick = {
+                                    createMenuExpanded = false; newFileAction = action
+                                }) }
+                        }
+                    }
+                }
+            }
+            if (view == "overview") {
+                val setupActions = actions.filter { it.kind == "setup" }
+                if (setupActions.isNotEmpty()) FlowRow(Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    setupActions.forEach { action ->
+                        TextButton(onClick = { send(action, null) },
+                            modifier = Modifier.testTag("files.action.setup")) { Text(action.label) }
                     }
                 }
             }
@@ -332,7 +410,7 @@ fun FilesPage(
                 Spacer(Modifier.height(6.dp))
             }
             val commandActions = actions.filterNot { it.kind in setOf("trash", "loadMore", "confirm", "cancel", "scroll", "documentCommit", "documentCancel", "back") }
-            if (commandActions.isNotEmpty()) {
+            if (commandActions.isNotEmpty() && view !in setOf("overview", "browser", "search")) {
                 val primaryKinds = if (view == "overview") setOf("setup", "settings") else
                     if (view == "browser" || view == "search") setOf("search", "clean", "map", "create") else
                         setOf("scan", "review", "refresh", "setup")
@@ -394,46 +472,23 @@ fun FilesPage(
                 if (!page.optBoolean("complete", true)) Text("Review incomplete — action unavailable", color = MaterialTheme.colorScheme.error)
             }
             LazyColumn(Modifier.weight(1f).alpha(contentAlpha).testTag("files.items"), state = listState) {
-                val tileItems = if (view == "overview" || view == "browser" || view == "search")
-                    items.filter { it.optString("kind") == "folder" || it.optString("kind") == "location" } else emptyList()
-                val remainingItems = if (tileItems.isNotEmpty()) items.filterNot { it in tileItems } else items
-                if (tileItems.isNotEmpty()) {
-                    items(tileItems.chunked(2), key = { "folder:${it.first().optString("id")}" }) { pair ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            pair.forEach { item ->
-                                FilesFolderTile(item, flyingFolder?.id == item.optString("id"),
-                                    onOpen = { action, bounds -> openFolder(item, action, bounds) },
-                                    modifier = Modifier.weight(1f)) { action ->
-                                    if (action.input != null) { formAction = action; formValue = action.initial }
-                                    else send(action, null)
-                                }
-                            }
-                            if (pair.size == 1) Spacer(Modifier.weight(1f))
-                        }
-                        Spacer(Modifier.height(8.dp))
-                    }
-                }
-                if (page.optString("layout") == "grid" && (view == "browser" || view == "search")) {
-                    items(remainingItems.chunked(2), key = { "file:${it.first().optString("id")}" }) { pair ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            pair.forEach { item ->
-                                FileRow(item, view, send, onOpenDocument, documentLoader, Modifier.weight(1f), compact = true) { action ->
-                                    if (action.input != null) { formAction = action; formValue = action.initial }
-                                    else send(action, null)
-                                }
-                            }
-                            if (pair.size == 1) Spacer(Modifier.weight(1f))
-                        }
-                        HorizontalDivider()
-                    }
-                } else {
-                    items(remainingItems, key = { "item:${it.optString("id")}" }) { item ->
+                items(items, key = { "item:${it.optString("id")}" }) { item ->
+                    if (view == "overview" || view == "browser" || view == "search") {
+                        FilesEntryRow(item, page.optString("layout") == "details",
+                            flyingFolder?.id == item.optString("id"),
+                            onOpenFolder = { action, bounds -> openFolder(item, action, bounds) },
+                            onOpenFile = { action -> send(action, null) },
+                            onCommand = { action ->
+                                if (action.input != null) { formAction = action; formValue = action.initial }
+                                else send(action, null)
+                            }, onOpenDocument = onOpenDocument, documentLoader = documentLoader)
+                    } else {
                         FileRow(item, view, send, onOpenDocument, documentLoader) { action ->
                             if (action.input != null) { formAction = action; formValue = action.initial }
                             else send(action, null)
                         }
-                        HorizontalDivider()
                     }
+                    HorizontalDivider()
                 }
                 if (page.optString("nextCursor") != "null" && page.optString("nextCursor").isNotBlank()) {
                     item {
@@ -459,36 +514,13 @@ fun FilesPage(
         val fraction = flightProgress.value
         val targetLeft = with(density) { 12.dp.toPx() }
         val targetTop = with(density) { 8.dp.toPx() }
-        val targetSize = with(density) { 40.dp.toPx() }
+        val targetSize = with(density) { 36.dp.toPx() }
         val left = flight.bounds.left + (targetLeft - flight.bounds.left) * fraction
         val top = flight.bounds.top + (targetTop - flight.bounds.top) * fraction
         val width = flight.bounds.width + (targetSize - flight.bounds.width) * fraction
         val height = flight.bounds.height + (targetSize - flight.bounds.height) * fraction
-        Surface(Modifier.offset { IntOffset(left.roundToInt(), top.roundToInt()) }
-            .size(with(density) { width.toDp() }, with(density) { height.toDp() }),
-            shape = RoundedCornerShape(if (fraction < .8f) 18.dp else 10.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            shadowElevation = 4.dp) {
-            Column(Modifier.fillMaxSize().padding(start = (12 * (1f - fraction)).dp,
-                top = (6 * (1f - fraction)).dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    FilesFolderGlyph(flight.appearance, Modifier.size(40.dp))
-                    if (fraction < .5f) {
-                        Spacer(Modifier.weight(1f))
-                        Text("⋮", Modifier.padding(end = 17.dp), style = MaterialTheme.typography.headlineSmall)
-                    }
-                }
-                if (fraction < .6f) {
-                    Text(flight.name, style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (flight.subtitle.isNotBlank()) Text(flight.subtitle,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
+        FilesFolderGlyph(flight.appearance, Modifier.offset { IntOffset(left.roundToInt(), top.roundToInt()) }
+            .size(with(density) { width.toDp() }, with(density) { height.toDp() }))
     }
     }
     if (formAction != null) {
@@ -500,6 +532,23 @@ fun FilesPage(
                 send(action, JSONObject().put(action.input ?: "value", formValue)); formValue = ""; formAction = null
             }) { Text("Apply") } },
             dismissButton = { TextButton(onClick = { formValue = ""; formAction = null }) { Text("Cancel") } })
+    }
+    if (newFileAction != null) {
+        val action = newFileAction!!
+        AlertDialog(onDismissRequest = { newFileAction = null }, title = { Text("New file") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(newFileName, { newFileName = it.take(255) },
+                        label = { Text("Name") }, singleLine = true, modifier = Modifier.testTag("files.create.name"))
+                    OutlinedTextField(newFileExtension, { newFileExtension = it.take(32) },
+                        label = { Text("Extension") }, singleLine = true, modifier = Modifier.testTag("files.create.extension"))
+                }
+            }, confirmButton = { TextButton(onClick = {
+                send(action, JSONObject().put("name", newFileName.trim())
+                    .put("extension", newFileExtension.trim().removePrefix(".")))
+                newFileAction = null; newFileName = ""; newFileExtension = "txt"
+            }, enabled = newFileName.isNotBlank()) { Text("Create") } },
+            dismissButton = { TextButton(onClick = { newFileAction = null }) { Text("Cancel") } })
     }
     if (dialog != null) {
         val choices = dialog.optJSONArray("actions").objects().map(::PageAction)
@@ -555,44 +604,59 @@ private fun FilesMoreButton(expanded: Boolean, tag: String, onClick: () -> Unit)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FilesFolderTile(item: JSONObject, sourceHidden: Boolean,
-    onOpen: (PageAction, Rect) -> Unit, modifier: Modifier = Modifier,
-    onCommand: (PageAction) -> Unit) {
+private fun FilesEntryRow(item: JSONObject, details: Boolean, sourceHidden: Boolean,
+    onOpenFolder: (PageAction, Rect) -> Unit, onOpenFile: (PageAction) -> Unit,
+    onCommand: (PageAction) -> Unit, onOpenDocument: (String, String) -> Unit,
+    documentLoader: suspend (String, String) -> ParcelFileDescriptor?) {
     val id = item.optString("id")
+    val kind = item.optString("kind")
+    val isFolder = kind == "folder" || kind == "location"
     val actions = item.optJSONArray("actions").objects().map(::PageAction)
     val open = actions.firstOrNull { it.kind == "open" }
-    val other = actions.filterNot { it.kind == "open" }
+    val secondary = actions.filterNot { it.kind == "open" }
+    val glyphSize = with(LocalDensity.current) { MaterialTheme.typography.bodyLarge.lineHeight.toDp() * 1.5f }
     var expanded by remember(id) { mutableStateOf(false) }
-    var bounds by remember(id) { mutableStateOf(Rect.Zero) }
-    Surface(modifier = modifier.onGloballyPositioned { bounds = it.boundsInRoot() }
-        .alpha(if (sourceHidden) 0f else 1f)
-        .testTag("files.folder.tile:$id"), shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-        Column(Modifier.fillMaxWidth().heightIn(min = 108.dp)
-            .combinedClickable(onClick = { open?.let { onOpen(it, bounds) } }, onLongClick = { expanded = true })
-            .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 10.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                FilesFolderGlyph(FilesFolderAppearance.fromJson(item.optJSONObject("folderAppearance")),
-                    Modifier.size(40.dp))
-                Spacer(Modifier.weight(1f))
-                if (other.isNotEmpty()) Box {
-                    FilesMoreButton(expanded, "files.item.more") { expanded = true }
-                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        other.forEach { action ->
-                            DropdownMenuItem(text = { Text(action.label) }, onClick = {
-                                expanded = false; onCommand(action)
-                            })
-                        }
-                    }
+    var iconBounds by remember(id) { mutableStateOf(Rect.Zero) }
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        .testTag(if (isFolder) "files.folder.row:$id" else "files.item.$id")
+        .combinedClickable(onClick = {
+            when {
+                open != null && isFolder -> onOpenFolder(open, iconBounds)
+                open != null -> onOpenFile(open)
+                kind == "markdown" || kind == "pdf" -> onOpenDocument(id, "r")
+            }
+        }, onLongClick = { if (secondary.isNotEmpty()) expanded = true })
+        .padding(horizontal = 4.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (isFolder) {
+            FilesFolderGlyph(FilesFolderAppearance.fromJson(item.optJSONObject("folderAppearance")),
+                Modifier.size(glyphSize).onGloballyPositioned { iconBounds = it.boundsInRoot() }
+                    .alpha(if (sourceHidden) 0f else 1f).testTag("files.folder.icon:$id"))
+        } else if (item.optString("mimeType").startsWith("image/")) {
+            FileThumbnail(id, item.optString("mimeType"), documentLoader, Modifier.size(glyphSize),
+                contentDescription = item.optString("name"))
+        } else {
+            Box(Modifier.size(glyphSize), contentAlignment = Alignment.Center) {
+                Text("▤", style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text(item.optString("name"), Modifier.weight(1f).padding(start = 10.dp),
+            style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (details) {
+            val size = if (item.isNull("sizeBytes") || !item.has("sizeBytes")) "—"
+                else formatBytes(item.optLong("sizeBytes"))
+            Text(size, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
+        Box {
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                secondary.forEach { action ->
+                    DropdownMenuItem(text = { Text(action.label) },
+                        modifier = Modifier.testTag("files.item.action.${action.kind}"), onClick = {
+                            expanded = false; onCommand(action)
+                        })
                 }
             }
-            Text(item.optString("name"), style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val subtitle = item.optString("subtitle")
-            if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
-                overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -662,7 +726,10 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
     actions: List<PageAction>, send: (PageAction, JSONObject?) -> Unit,
     onOpenDocument: (String, String) -> Unit,
     documentLoader: suspend (String, String) -> ParcelFileDescriptor?, modifier: Modifier) {
-    val scanning = page.optString("view") == "progress"
+    val scanning = page.optBoolean("cleanScanRunning") || page.optString("view") == "progress"
+    val complete = page.optBoolean("complete", !scanning)
+    val back = actions.firstOrNull { it.kind == "back" }
+    BackHandler(enabled = back != null) { back?.let { send(it, null) } }
     Box(modifier.fillMaxSize().testTag("files.clean.sheet")) {
         Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
             .padding(16.dp).alpha(.55f)) {
@@ -676,7 +743,8 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
                 }
             }
         }
-        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = .36f)))
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = .36f))
+            .clickable(enabled = back != null) { back?.let { send(it, null) } })
         Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.82f),
             shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
             color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
@@ -687,9 +755,17 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(if (scanning) "Scanning folder" else "Clean folder",
                         style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    actions.firstOrNull { it.kind == "back" || it.kind == "cancel" }?.let { action ->
-                        TextButton(onClick = { send(action, null) }) { Text(if (scanning) "Cancel" else "Close") }
+                    if (scanning) actions.firstOrNull { it.kind == "cancel" }?.let { action ->
+                        TextButton(onClick = { send(action, null) }, modifier = Modifier.testTag("files.clean.cancel")) {
+                            Text("Cancel")
+                        }
                     }
+                    back?.let { action -> TextButton(onClick = { send(action, null) },
+                        modifier = Modifier.testTag("files.clean.close")) { Text("Close") } }
+                }
+                page.optString("cleanScopeName").takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 val summary = page.optString("jobStatus").ifBlank { page.optString("summary") }
                 if (summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodyMedium,
@@ -697,9 +773,12 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
                 if (scanning) {
                     Spacer(Modifier.height(18.dp))
                     CircularProgressIndicator(Modifier.size(32.dp).testTag("files.clean.progress"))
-                    Spacer(Modifier.height(18.dp))
-                } else {
-                    val buttons = actions.filter { it.kind in setOf("scan", "toggle", "review", "settings") }
+                    Spacer(Modifier.height(6.dp))
+                    Text("${page.optInt("findingCount", items.size)} findings so far", style = MaterialTheme.typography.bodySmall)
+                }
+                if (!scanning) {
+                    val buttons = actions.filter { it.kind == "scan" || (complete &&
+                        it.kind in setOf("toggle", "review", "settings")) }
                     FlowRow(Modifier.fillMaxWidth().padding(vertical = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -711,8 +790,10 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
                         Text(it, style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        items(items, key = { it.optString("id") }) { item ->
+                }
+                LazyColumn(Modifier.weight(1f).testTag("files.clean.findings"),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(items, key = { it.optString("id") }) { item ->
                             Surface(Modifier.fillMaxWidth().testTag("files.clean.recommendation"),
                                 shape = RoundedCornerShape(14.dp),
                                 color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -721,13 +802,21 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
                                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     Text(item.optString("subtitle"), style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        item.optJSONArray("actions").objects().map(::PageAction).forEach { action ->
-                                            TextButton(onClick = { send(action, null) },
-                                                modifier = Modifier.heightIn(min = 48.dp)) { Text(action.label) }
+                                    if (!scanning && complete) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            item.optJSONArray("actions").objects().map(::PageAction).forEach { action ->
+                                                TextButton(onClick = { send(action, null) },
+                                                    modifier = Modifier.heightIn(min = 48.dp)) { Text(action.label) }
+                                            }
                                         }
                                     }
                                 }
+                            }
+                    }
+                    actions.filter { it.kind == "loadMore" || it.kind == "previous" }.forEach { action ->
+                        item(key = "page:${action.kind}") {
+                            TextButton(onClick = { send(action, null) }, modifier = Modifier.fillMaxWidth()) {
+                                Text(action.label)
                             }
                         }
                     }

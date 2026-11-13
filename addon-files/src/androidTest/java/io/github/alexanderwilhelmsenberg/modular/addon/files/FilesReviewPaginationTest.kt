@@ -59,7 +59,13 @@ class FilesReviewPaginationTest {
             controller.recordScrollPosition("wrong-folder", 99, 999)
             assertEquals(2, page(controller).getInt("scrollAnchor"))
             controller.recordScrollPosition(browser.getString("scrollKey"), 3, 19)
-            val scanning = action(controller, browser, "Clean")
+            val cleanId = (0 until browser.getJSONArray("actions").length())
+                .map { browser.getJSONArray("actions").getJSONObject(it) }
+                .single { it.getString("kind") == "clean" }.getString("id")
+            val scanning = JSONObject(controller.performAction(JSONObject().put("version", 1)
+                .put("actionId", cleanId).put("operationToken", UUID.randomUUID().toString())
+                .put("restoreScroll", JSONObject().put("key", browser.getString("scrollKey"))
+                    .put("anchor", 7).put("offset", 41)).toString()))
             assertTrue(scanning.getString("view") in setOf("progress", "clean"))
 
             // A browser disposal write and a poll may arrive after Clean has changed routes.
@@ -73,6 +79,10 @@ class FilesReviewPaginationTest {
             val afterAnotherLateScroll = JSONObject(controller.performAction(oldScrollRequest))
             assertEquals("clean", afterAnotherLateScroll.getString("view"))
             assertFalse(afterAnotherLateScroll.optString("message").contains("Action expired"))
+            val returned = action(controller, afterAnotherLateScroll, "Back to folder")
+            assertEquals("browser", returned.getString("view"))
+            assertEquals(7, returned.getInt("scrollAnchor"))
+            assertEquals(41, returned.getInt("scrollOffset"))
             assertEquals(0, repository.moveCalls)
         } finally {
             context.getSharedPreferences("files-page", 0).edit().clear().commit()

@@ -172,6 +172,10 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val id = request.optString("actionId")
         val token = request.optString("operationToken")
         require(token.length in 16..128) { "Missing operation token" }
+        request.optJSONObject("restoreScroll")?.let { restored ->
+            recordScrollPosition(restored.optString("key"), restored.optInt("anchor", 0),
+                restored.optInt("offset", 0))
+        }
         scrollCommands[id]?.let { scroll ->
             if (scroll.revision == revision && (view == "browser" || view == "search") &&
                 scroll.key == scrollKey()) {

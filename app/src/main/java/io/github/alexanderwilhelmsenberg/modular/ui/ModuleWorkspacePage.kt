@@ -299,9 +299,15 @@ fun ModuleWorkspacePage(
         scope.launch {
             busy = true
             try {
-                WorkspacePageContract.validateActionRequest(request)
+                val actionRequest = JSONObject(request).apply {
+                    moduleComponent?.let(scrollStore::restore)?.let { saved ->
+                        put("restoreScroll", JSONObject().put("key", saved.key)
+                            .put("anchor", saved.anchor).put("offset", saved.offset))
+                    }
+                }.toString()
+                WorkspacePageContract.validateActionRequest(actionRequest)
                 val remote = capability()
-                val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(request) }
+                val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(actionRequest) }
                 check(currentSessionId == submittedSession && currentRoute == submittedRoute &&
                     currentComponent == moduleComponent) { "Files session changed. Refreshing the page." }
                 val validated = validatedPage(raw)

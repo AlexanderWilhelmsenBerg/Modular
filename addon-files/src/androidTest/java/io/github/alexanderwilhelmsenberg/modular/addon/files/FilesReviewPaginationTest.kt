@@ -38,6 +38,71 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun blockedBatchReturnsNamedConflictAndSingleFindingReviewStaysIndependent() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear()
+            .putStringSet("cleanExcludedIds", setOf("opaque-blocked-base")).commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        fun file(id: String, name: String, modified: Long) = FileEntry(id, "test-volume", "root",
+            name, "root/$name", false, "text/plain", 12L, modified, null, true, true)
+        repository.files.add(file("opaque-blocked-base", "report.txt", 1))
+        repository.files.add(file("opaque-conflict-one", "report (1).txt", 2))
+        repository.files.add(file("opaque-conflict-two", "report (2).txt", 3))
+        repository.files.add(file("opaque-safe-base", "safe.txt", 1))
+        repository.files.add(file("opaque-safe-copy", "safe (1).txt", 2))
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            action(controller, setup, "Start scan")
+            val results = awaitView(controller, "clean")
+            assertEquals(2, results.getJSONArray("items").length())
+            assertEquals(0, results.getInt("cleanSelectionCount"))
+            assertFalse(results.getBoolean("cleanCanReview"))
+            assertEquals(0, repository.fingerprintCalls)
+            val conflict = (0 until results.getJSONArray("items").length())
+                .map { results.getJSONArray("items").getJSONObject(it) }
+                .single { it.getString("name") == "report.txt" }
+            val selectedConflict = rowAction(controller, conflict, "Include")
+            val safe = (0 until selectedConflict.getJSONArray("items").length())
+                .map { selectedConflict.getJSONArray("items").getJSONObject(it) }
+                .single { it.getString("name") == "safe.txt" }
+            val selectedBoth = rowAction(controller, safe, "Include")
+            assertEquals(2, selectedBoth.getInt("cleanSelectionCount"))
+            action(controller, selectedBoth, "Review selected")
+            awaitCondition { page(controller).getString("view") == "clean" }
+            val blocked = page(controller)
+            assertEquals("clean", blocked.getString("view"))
+            val reason = blocked.getString("message")
+            assertTrue(reason.contains("report.txt"))
+            assertTrue(reason.contains("rename", ignoreCase = true) || reason.contains("exist", ignoreCase = true))
+            assertFalse(reason.contains("fingerprint", ignoreCase = true))
+            assertFalse(reason.contains("revision-pending"))
+            assertFalse(reason.contains("opaque-"))
+            assertEquals(0, repository.fingerprintCalls)
+            assertEquals(0, repository.moveCalls)
+
+            val cleared = action(controller, blocked, "Clear selection")
+            assertEquals(0, cleared.getInt("cleanSelectionCount"))
+            val safeOnly = (0 until cleared.getJSONArray("items").length())
+                .map { cleared.getJSONArray("items").getJSONObject(it) }
+                .single { it.getString("name") == "safe.txt" }
+            val focused = rowAction(controller, safeOnly, "Review")
+            assertEquals("progress", focused.getString("view"))
+            val review = awaitView(controller, "cleanReview")
+            val ids = (0 until review.getJSONArray("items").length())
+                .map { review.getJSONArray("items").getJSONObject(it).getString("id") }.toSet()
+            assertEquals(setOf("opaque-safe-base", "opaque-safe-copy"), ids)
+            assertTrue(repository.fingerprintCalls > 0)
+            assertEquals(0, repository.moveCalls)
+            val canceled = action(controller, review, "Cancel")
+            assertEquals("clean", canceled.getString("view"))
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
     @Test fun unknownSizesInNumberedFoldersRemainNullableThroughKeeperAndReview() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
@@ -57,16 +122,14 @@ class FilesReviewPaginationTest {
             val results = awaitView(controller, "clean")
             val group = results.getJSONArray("items").getJSONObject(0)
             assertEquals("group", group.getString("kind"))
-            val keeperPage = rowAction(controller, group, "Choose keeper")
+            val keeperPage = rowAction(controller, group, "Review")
             assertEquals("keeper", keeperPage.getString("view"))
             val candidates = keeperPage.getJSONArray("items")
             assertEquals(2, candidates.length())
             for (index in 0 until candidates.length()) assertUnknownSize(candidates.getJSONObject(index))
             val kept = (0 until candidates.length()).map { candidates.getJSONObject(it) }
                 .single { it.getString("id") == "kept" }
-            val selected = rowAction(controller, kept, "Keep this")
-            assertEquals("clean", selected.getString("view"))
-            val preparing = action(controller, selected, "Review selected")
+            val preparing = rowAction(controller, kept, "Keep this")
             assertEquals("progress", preparing.getString("view"))
             val review = awaitView(controller, "cleanReview")
             val reviewed = review.getJSONArray("items")

@@ -293,8 +293,18 @@ requirement is not evidence that its implementation has passed validation.
   A numbered folder may contain unique files; its contents are included in the
   deletion review rather than silently assumed to match the retained folder.
 - Each result shows name, location, size when known, selection state, and why it
-  was suggested. Large/old files are unselected by default. Duplicate groups can
-  offer a user-invoked Select extras action that preserves a chosen copy.
+  was suggested. Findings are unselected by default, including duplicate groups;
+  a suggested keeper does not automatically include its group for cleanup.
+  **Review** on a finding prepares only that finding, asking which copy to keep
+  when needed. **Include** builds an explicit batch, **Clear selection** resets
+  it, and **Review selected** is disabled for an empty selection.
+- Selection conflicts, occupied rename destinations, and incomplete verification
+  stay on the findings screen with the affected names and a reason. A compact
+  message can open a scrollable **Show issues** dialog. Never present internal
+  IDs or fingerprint-preparation markers as instructions to the user, and never
+  open the deletion review until its manifest is fully verified. Check actual
+  rename destinations, including excluded files, before reading file contents
+  for a review that cannot proceed.
 - Support excluded folders/files and protected locations that scans cannot
   select. Exclusions apply to future scans and are editable in module settings.
 - Review selected files and the action before cleanup. No automatic deletion,

@@ -111,13 +111,29 @@ public final class CleanerEngine {
                              List<String> requiredTrashIds) {
         public RenameStep { requiredTrashIds = List.copyOf(requiredTrashIds); }
     }
+    public enum ReviewIssueType { UNKNOWN_GROUP, KEEPER_REQUIRED, UNKNOWN_SUGGESTION, KEEPER_OVERLAP,
+        MISSING_ENTRY, INCOMPLETE_FOLDER, EXCLUDED_OR_PROTECTED, FINGERPRINT_PENDING, RENAME_COLLISION }
+    /** IDs are for routing; message is safe to show to a person. */
+    public record ReviewIssue(ReviewIssueType type, String groupId, String entryId,
+                              String relatedId, String message) {
+        public ReviewIssue { Objects.requireNonNull(type); Objects.requireNonNull(message); }
+    }
     /** A proposal to show in review. The storage executor still requires explicit user approval. */
     public record Plan(String scopeId, Set<String> excludedRules,
                        Map<String, ReviewedFile> manifest, Map<String, Set<String>> directoryChildren,
                        Map<String, Set<String>> removalReasons,
                        List<TrashStep> trashSteps, List<RenameStep> renameSteps,
                        Set<String> keeperIds, List<String> blockers,
-                       long knownSuggestedBytes, int unknownSizeFiles) {
+                       long knownSuggestedBytes, int unknownSizeFiles, List<ReviewIssue> issues) {
+        public Plan(String scopeId, Set<String> excludedRules,
+                    Map<String, ReviewedFile> manifest, Map<String, Set<String>> directoryChildren,
+                    Map<String, Set<String>> removalReasons,
+                    List<TrashStep> trashSteps, List<RenameStep> renameSteps,
+                    Set<String> keeperIds, List<String> blockers,
+                    long knownSuggestedBytes, int unknownSizeFiles) {
+            this(scopeId, excludedRules, manifest, directoryChildren, removalReasons, trashSteps,
+                    renameSteps, keeperIds, blockers, knownSuggestedBytes, unknownSizeFiles, List.of());
+        }
         public Plan {
             Objects.requireNonNull(scopeId);
             excludedRules = Set.copyOf(excludedRules);
@@ -130,8 +146,18 @@ public final class CleanerEngine {
             removalReasons = Map.copyOf(reasons);
             trashSteps = List.copyOf(trashSteps); renameSteps = List.copyOf(renameSteps);
             keeperIds = Set.copyOf(keeperIds); blockers = List.copyOf(blockers);
+            issues = List.copyOf(issues);
         }
-        public boolean readyForReview() { return blockers.isEmpty() && !trashSteps.isEmpty(); }
+        public boolean readyForReview() { return blockers.isEmpty() && issues.isEmpty() && !trashSteps.isEmpty(); }
+        public Plan withIssue(ReviewIssue issue) {
+            List<ReviewIssue> updatedIssues = new ArrayList<>(issues);
+            updatedIssues.add(0, Objects.requireNonNull(issue));
+            List<String> updatedBlockers = new ArrayList<>(blockers);
+            updatedBlockers.add(0, issue.message());
+            return new Plan(scopeId, excludedRules, manifest, directoryChildren, removalReasons,
+                    trashSteps, renameSteps, keeperIds, updatedBlockers,
+                    knownSuggestedBytes, unknownSizeFiles, updatedIssues);
+        }
     }
     public record Preflight(List<String> staleIds, List<String> newOrChangedDescendantIds,
                             List<String> renameCollisionKeeperIds) {
@@ -536,7 +562,7 @@ public final class CleanerEngine {
         Objects.requireNonNull(analysis); Objects.requireNonNull(keeperByGroupId);
         Objects.requireNonNull(selectedGroupIds); Objects.requireNonNull(selectedSuggestionEntryIds);
         Map<String, Entry> entries = analysis.entries();
-        List<String> blockers = new ArrayList<>();
+        List<ReviewIssue> issues = new ArrayList<>();
         Map<String, Group> groups = new HashMap<>();
         for (Group group : analysis.groups()) groups.put(group.id(), group);
         Set<String> keepers = new LinkedHashSet<>();
@@ -544,17 +570,25 @@ public final class CleanerEngine {
         List<RenameStep> renames = new ArrayList<>();
         for (String groupId : selectedGroupIds) {
             Group group = groups.get(groupId);
-            if (group == null) { blockers.add("Unknown group: " + groupId); continue; }
+            if (group == null) {
+                issues.add(new ReviewIssue(ReviewIssueType.UNKNOWN_GROUP, groupId, null, null,
+                        "Selected group is no longer in this scan; scan again"));
+                continue;
+            }
             String keeper = keeperByGroupId.getOrDefault(groupId, group.suggestedKeeperId());
             if (keeper == null || !group.memberIds().contains(keeper)) {
-                blockers.add("Choose a keeper for " + groupId); continue;
+                issues.add(new ReviewIssue(ReviewIssueType.KEEPER_REQUIRED, groupId, null, null,
+                        "Choose a keeper for " + displayGroup(group, entries)));
+                continue;
             }
             keepers.add(keeper);
             for (String id : group.memberIds()) if (!id.equals(keeper))
                 removalReasons.computeIfAbsent(id, ignored -> new LinkedHashSet<>()).add(groupId);
             if (group.category() == Category.NUMBERED_COPY) {
                 Entry retained = entries.get(keeper);
-                if (!retained.name().equals(group.baseName()))
+                if (retained == null) issues.add(new ReviewIssue(ReviewIssueType.MISSING_ENTRY,
+                        groupId, keeper, null, "Chosen keeper is missing from this scan; scan again"));
+                else if (!retained.name().equals(group.baseName()))
                     renames.add(new RenameStep(keeper, group.baseName(), groupId,
                             group.memberIds().stream().filter(id -> !id.equals(keeper)).collect(Collectors.toList())));
             }
@@ -562,11 +596,13 @@ public final class CleanerEngine {
         Set<String> suggested = new HashSet<>();
         for (Suggestion suggestion : analysis.suggestions()) suggested.add(suggestion.entryId());
         for (String id : selectedSuggestionEntryIds) {
-            if (!suggested.contains(id)) blockers.add("Unknown suggestion: " + id);
+            if (!suggested.contains(id)) issues.add(new ReviewIssue(ReviewIssueType.UNKNOWN_SUGGESTION,
+                    null, id, null, "Selected suggestion is no longer in this scan; scan again"));
             else removalReasons.computeIfAbsent(id, ignored -> new LinkedHashSet<>()).add("suggestion");
         }
         for (String id : keepers) if (removalReasons.containsKey(id))
-            blockers.add("Selected removal overlaps a keeper: " + id);
+            issues.add(new ReviewIssue(ReviewIssueType.KEEPER_OVERLAP, null, id, null,
+                    "Selected removal overlaps a keeper: " + display(entries.get(id))));
         Set<String> keeperTree = new LinkedHashSet<>(keepers);
         for (String keeperId : keepers) {
             Entry keeper = entries.get(keeperId);
@@ -574,24 +610,32 @@ public final class CleanerEngine {
                 keeperTree.addAll(descendants(entries, keeperId, true));
         }
         for (String id : removalReasons.keySet()) if (keeperTree.contains(id) && !keepers.contains(id))
-            blockers.add("Selected removal overlaps a kept folder: " + id);
+            issues.add(new ReviewIssue(ReviewIssueType.KEEPER_OVERLAP, null, id, null,
+                    "Selected removal overlaps a kept folder: " + display(entries.get(id))));
         Map<String, ReviewedFile> manifest = new LinkedHashMap<>();
         Map<String, Set<String>> children = new LinkedHashMap<>();
         List<TrashStep> trash = new ArrayList<>();
         Set<String> alreadyCovered = new HashSet<>();
         for (String id : removalReasons.keySet()) {
             Entry entry = entries.get(id);
-            if (entry == null) { blockers.add("Missing selected entry: " + id); continue; }
+            if (entry == null) {
+                issues.add(new ReviewIssue(ReviewIssueType.MISSING_ENTRY, null, id, null,
+                        "Selected item is missing from this scan; scan again"));
+                continue;
+            }
             if (hasSelectedAncestor(entry, entries, removalReasons.keySet())) continue;
             Set<String> descendants = entry.kind() == Kind.DIRECTORY ? descendants(entries, id, true) : Set.of();
             Set<String> included = new LinkedHashSet<>(descendants); included.add(id);
             for (String childId : included) {
                 Entry child = entries.get(childId);
                 if (child == null || child.kind() == Kind.DIRECTORY && !child.childrenComplete())
-                    blockers.add("Folder requires complete descendant review: " + id);
+                    issues.add(new ReviewIssue(ReviewIssueType.INCOMPLETE_FOLDER, null, id, childId,
+                            "Selected folder needs a complete descendant review: " + display(entry)));
                 if (child != null && excluded(child, entries, analysis.options()))
-                    blockers.add("Selected folder contains an excluded or protected entry: " + childId);
-                if (keeperTree.contains(childId)) blockers.add("Selected folder contains a keeper: " + childId);
+                    issues.add(new ReviewIssue(ReviewIssueType.EXCLUDED_OR_PROTECTED, null, id, childId,
+                            "Selected folder contains an excluded or protected item: " + display(child)));
+                if (keeperTree.contains(childId)) issues.add(new ReviewIssue(ReviewIssueType.KEEPER_OVERLAP,
+                        null, id, childId, "Selected folder contains a keeper: " + display(child)));
                 if (child != null) {
                     manifest.put(childId, reviewed(child));
                     if (child.kind() == Kind.DIRECTORY)
@@ -605,13 +649,15 @@ public final class CleanerEngine {
             Entry keeper = entries.get(keeperId);
             if (keeper == null) continue;
             if (keeper.kind() == Kind.DIRECTORY && !keeper.childrenComplete())
-                blockers.add("Kept folder requires complete descendant review: " + keeperId);
+                issues.add(new ReviewIssue(ReviewIssueType.INCOMPLETE_FOLDER, null, keeperId, null,
+                        "Kept folder needs a complete descendant review: " + display(keeper)));
             manifest.put(keeperId, reviewed(keeper));
             if (keeper.kind() == Kind.DIRECTORY)
                 children.put(keeperId, descendants(entries, keeperId, false));
         }
         for (ReviewedFile file : manifest.values()) if (PENDING_REVISION.equals(file.revision()))
-            blockers.add("File fingerprint requires review preparation: " + file.id());
+            issues.add(new ReviewIssue(ReviewIssueType.FINGERPRINT_PENDING, null, file.id(), null,
+                    "File fingerprint requires review preparation: " + file.name() + " (" + file.path() + ")"));
         for (RenameStep rename : renames) {
             Entry keeper = entries.get(rename.keeperId());
             for (Entry other : entries.values()) {
@@ -619,7 +665,9 @@ public final class CleanerEngine {
                         && Objects.equals(other.parentId(), keeper.parentId())
                         && other.name().equals(rename.newName()) && !other.id().equals(keeper.id())
                         && !removalReasons.containsKey(other.id()))
-                    blockers.add("Rename destination is not reviewed for removal: " + rename.newName());
+                    issues.add(new ReviewIssue(ReviewIssueType.RENAME_COLLISION, rename.groupId(),
+                            rename.keeperId(), other.id(), "Cannot rename " + display(keeper) + " to "
+                            + rename.newName() + "; existing " + display(other) + " occupies that name"));
             }
         }
         long bytes = 0; int unknown = 0;
@@ -631,8 +679,18 @@ public final class CleanerEngine {
         }
         Set<String> rules = new HashSet<>(analysis.options().excludedIds());
         rules.addAll(analysis.options().protectedIds());
+        issues.sort(Comparator.comparingInt(issue -> issue.type() == ReviewIssueType.FINGERPRINT_PENDING ? 1 : 0));
+        List<String> blockers = issues.stream().map(ReviewIssue::message).collect(Collectors.toList());
         return new Plan(analysis.options().scopeId(), rules, manifest, children, removalReasons,
-                trash, renames, keeperTree, blockers, bytes, unknown);
+                trash, renames, keeperTree, blockers, bytes, unknown, issues);
+    }
+    private static String display(Entry entry) {
+        return entry == null ? "selected item" : entry.name() + " (" + entry.path() + ")";
+    }
+    private static String displayGroup(Group group, Map<String, Entry> entries) {
+        if (group.baseName() != null) return group.baseName();
+        return group.memberIds().stream().map(entries::get).filter(Objects::nonNull)
+                .map(Entry::name).findFirst().orElse("selected group");
     }
     private static ReviewedFile reviewed(Entry entry) {
         return new ReviewedFile(entry.id(), entry.volumeId(), entry.path(), entry.name(),

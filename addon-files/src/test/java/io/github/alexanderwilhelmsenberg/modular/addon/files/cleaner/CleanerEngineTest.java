@@ -85,6 +85,66 @@ public class CleanerEngineTest {
         var plan = CleanerEngine.plan(analysis, Map.of(), Set.of(analysis.groups().get(0).id()), Set.of());
         assertFalse(plan.readyForReview());
         assertTrue(plan.blockers().stream().anyMatch(b -> b.contains("fingerprint requires review preparation")));
+        assertTrue(plan.issues().stream().allMatch(i -> i.type() == CleanerEngine.ReviewIssueType.FINGERPRINT_PENDING));
+    }
+
+    @Test public void realRenameCollisionPrecedesPendingIssuesAndSkipsFingerprintHydration() {
+        var root = directory("root", null, "root", NOW);
+        var first = new CleanerEngine.Entry("first", "volume", "root", "/copy(1).zip", "copy(1).zip",
+                CleanerEngine.Kind.FILE, 5L, NOW.minusSeconds(10), null, CleanerEngine.PENDING_REVISION, true, null);
+        var second = new CleanerEngine.Entry("second", "volume", "root", "/copy(2).zip", "copy(2).zip",
+                CleanerEngine.Kind.FILE, 5L, NOW, null, CleanerEngine.PENDING_REVISION, true, null);
+        var occupied = file("occupied-opaque-id", "root", "copy.zip", 9, NOW);
+        var options = new CleanerEngine.Options("root", true, Set.of(occupied.id()), Set.of(), 100, 30, NOW);
+        var analysis = CleanerEngine.analyze(List.of(root, first, second, occupied), options, (a, b) -> false);
+        var selected = Set.of(analysis.groups().get(0).id());
+        var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
+                new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> {
+                    throw new AssertionError("Unresolved rename collision must not touch storage: " + method.getName());
+                });
+        var plan = new CleanerRepositoryAdapter(repository, null).prepareReview(analysis, Map.of(), selected,
+                Set.of(), (Cancellation) () -> false);
+        assertFalse(plan.readyForReview());
+        assertEquals(CleanerEngine.ReviewIssueType.RENAME_COLLISION, plan.issues().get(0).type());
+        assertTrue(plan.issues().stream().anyMatch(i -> i.type() == CleanerEngine.ReviewIssueType.FINGERPRINT_PENDING));
+        assertTrue(plan.blockers().get(0).contains("copy.zip"));
+        assertFalse(plan.blockers().get(0).contains("occupied-opaque-id"));
+    }
+
+    @Test public void excludedOnDiskRenameDestinationBlocksBeforeFingerprinting() {
+        var root = new FileEntry("root", "volume", null, "root", "/root", true,
+                null, null, NOW.toEpochMilli(), null, true, true);
+        var first = new FileEntry("first", "volume", "root", "copy(1).zip", "/root/copy(1).zip", false,
+                "application/zip", 5L, NOW.minusSeconds(10).toEpochMilli(), null, true, true);
+        var second = new FileEntry("second", "volume", "root", "copy(2).zip", "/root/copy(2).zip", false,
+                "application/zip", 5L, NOW.toEpochMilli(), null, true, true);
+        var occupied = new FileEntry("hidden-opaque-id", "volume", "root", "copy.zip", "/root/copy.zip", false,
+                "application/zip", 8L, NOW.toEpochMilli(), null, true, true);
+        var fingerprints = new ArrayList<String>();
+        var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
+                new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "get" -> root;
+                    case "list" -> new FilePage(List.of(first, second, occupied), null, 3, true);
+                    case "fingerprint" -> {
+                        fingerprints.add((String) args[0]);
+                        yield "rev-" + args[0];
+                    }
+                    case "openRead" -> throw new AssertionError("Rename collision must not open content");
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        var adapter = new CleanerRepositoryAdapter(repository, null);
+        var options = new CleanerEngine.Options("root", true, Set.of(occupied.getId()), Set.of(), 100, 30, NOW);
+        var snapshot = adapter.snapshot("root", (Cancellation) () -> false, options.excludedIds(), options, null);
+        var analysis = adapter.analyze(snapshot, options, (Cancellation) () -> false);
+        assertFalse(analysis.entries().containsKey(occupied.getId()));
+        var plan = adapter.prepareReview(analysis, Map.of(), Set.of(analysis.groups().get(0).id()),
+                Set.of(), (Cancellation) () -> false);
+        assertFalse(plan.readyForReview());
+        assertEquals(CleanerEngine.ReviewIssueType.RENAME_COLLISION, plan.issues().get(0).type());
+        assertEquals(occupied.getId(), plan.issues().get(0).relatedId());
+        assertTrue(plan.issues().get(0).message().contains("copy.zip"));
+        assertFalse(plan.issues().get(0).message().contains(occupied.getId()));
+        assertTrue(fingerprints.isEmpty());
     }
 
     @Test public void pageHintsArriveBeforeLaterFoldersAndClosedGroupIdsMatchFinalAnalysis() {
@@ -210,6 +270,7 @@ public class CleanerEngineTest {
         assertFalse(CleanerEngine.plan(analysis, Map.of(), selected, Set.of()).readyForReview());
         var reviewed = adapter.prepareReview(analysis, Map.of(), selected, Set.of(), (Cancellation) () -> false);
         assertTrue(reviewed.blockers().toString(), reviewed.readyForReview());
+        assertTrue(reviewed.issues().isEmpty());
         assertEquals(Set.of("one", "two"), Set.copyOf(fingerprinted));
         assertFalse(fingerprinted.contains("unrelated"));
         current.put("one", new FileEntry("one", "volume", "root", "copy(1).zip", "/root/copy(1).zip", false,

@@ -566,8 +566,9 @@ fun FilesPage(
 }
 
 @Composable
-private fun FilesActionTile(action: PageAction, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(onClick = onClick, modifier = modifier.heightIn(min = 68.dp)
+private fun FilesActionTile(action: PageAction, modifier: Modifier = Modifier,
+    enabled: Boolean = action.enabled, onClick: () -> Unit) {
+    Surface(onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 68.dp)
         .testTag("files.action.${action.kind}")
         .semantics { contentDescription = action.label }, shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -593,7 +594,7 @@ private fun FilesMoreButton(expanded: Boolean, tag: String, onClick: () -> Unit)
     }
     val rotation by androidx.compose.animation.core.animateFloatAsState(
         if (expanded) 90f else 0f, animationSpec = tween(if (motionEnabled) 160 else 0), label = "More menu")
-    Surface(onClick = onClick, modifier = Modifier.size(52.dp).testTag(tag)
+    Surface(onClick = onClick, modifier = Modifier.size(48.dp).testTag(tag)
         .semantics { contentDescription = "More options" }, shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceVariant,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
@@ -732,6 +733,11 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
     val setup = page.optBoolean("cleanSetup") && !scanning
     val checks = page.optJSONArray("cleanChecks").objects()
     val enabledChecks = checks.filter { it.optBoolean("enabled") }
+    val cleanIssues = page.optJSONArray("cleanIssues").objects()
+        .map { it.optString("message") }.filter { it.isNotBlank() }
+    val cleanIssueCount = page.optInt("cleanIssueCount", cleanIssues.size)
+    var issuesOpen by remember(page.optString("folderId"), page.optString("view")) { mutableStateOf(false) }
+    var cleanMenuExpanded by remember(page.optString("folderId"), page.optString("view")) { mutableStateOf(false) }
     val back = actions.firstOrNull { it.kind == "back" }
     BackHandler(enabled = back != null) { back?.let { send(it, null) } }
     Box(modifier.fillMaxSize().testTag("files.clean.sheet")) {
@@ -848,18 +854,45 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
                         style = MaterialTheme.typography.bodySmall)
                 }
                 if (!scanning) {
-                    val buttons = actions.filter { it.kind == "scan" || it.kind == "configureClean" ||
-                        (complete && it.kind in setOf("toggle", "review", "settings")) }
-                    FlowRow(Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        buttons.forEach { action -> FilesActionTile(action, Modifier.widthIn(min = 132.dp)) {
-                            send(action, null)
-                        } }
+                    val selectionCount = page.optInt("cleanSelectionCount")
+                    val canReview = selectionCount > 0 && page.optBoolean("cleanCanReview", false)
+                    val menuActions = actions.filter { it.kind in setOf("scan", "configureClean", "settings", "clearCleanSelection") }
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("$selectionCount selected", Modifier.weight(1f)
+                            .testTag("files.clean.selection.count"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        actions.firstOrNull { it.kind == "review" }?.let { action ->
+                            TextButton(onClick = { send(action, null) },
+                                enabled = complete && action.enabled && canReview,
+                                modifier = Modifier.testTag("files.action.review")) {
+                                Text(action.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        if (menuActions.isNotEmpty()) Box {
+                            FilesMoreButton(cleanMenuExpanded, "files.clean.more") { cleanMenuExpanded = true }
+                            DropdownMenu(expanded = cleanMenuExpanded,
+                                onDismissRequest = { cleanMenuExpanded = false }) {
+                                menuActions.forEach { action ->
+                                    DropdownMenuItem(text = { Text(action.label) }, enabled = action.enabled,
+                                        modifier = Modifier.testTag("files.action.${action.kind}"), onClick = {
+                                            cleanMenuExpanded = false; send(action, null)
+                                        })
+                                }
+                            }
+                        }
                     }
                     page.optString("message").takeIf { it.isNotBlank() }?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("files.clean.message"))
+                    }
+                    if (cleanIssues.isNotEmpty()) {
+                        TextButton(onClick = { issuesOpen = true },
+                            modifier = Modifier.testTag("files.clean.showIssues")) { Text("Show issues") }
                     }
                 }
                 LazyColumn(Modifier.weight(1f).testTag("files.clean.findings"),
@@ -888,10 +921,13 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     if (!scanning && complete) {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        FlowRow(Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                             item.optJSONArray("actions").objects().map(::PageAction).forEach { action ->
-                                                TextButton(onClick = { send(action, null) },
-                                                    modifier = Modifier.heightIn(min = 48.dp)) { Text(action.label) }
+                                                TextButton(onClick = { send(action, null) }, enabled = action.enabled,
+                                                    modifier = Modifier.heightIn(min = 48.dp)
+                                                        .testTag("files.clean.item.${action.kind}")) { Text(action.label) }
                                             }
                                         }
                                     }
@@ -909,6 +945,25 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
                 }
             }
         }
+    }
+    if (issuesOpen && cleanIssues.isNotEmpty()) {
+        AlertDialog(onDismissRequest = { issuesOpen = false },
+            modifier = Modifier.testTag("files.clean.issues.dialog"),
+            title = { Text("Review issues") },
+            text = {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    cleanIssues.forEach { issue -> Text(issue, style = MaterialTheme.typography.bodyMedium) }
+                    if (cleanIssueCount > cleanIssues.size) {
+                        Text("Review a smaller selection to see remaining issues.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }, confirmButton = {
+                TextButton(onClick = { issuesOpen = false },
+                    modifier = Modifier.testTag("files.clean.issues.close")) { Text("Close") }
+            })
     }
 }
 
@@ -987,6 +1042,7 @@ private class PageAction(value: JSONObject?) {
     val kind: String = value?.optString("kind") ?: ""
     val input: String? = value?.optString("input")?.takeIf { it.isNotBlank() }
     val initial: String = value?.optString("initial") ?: ""
+    val enabled: Boolean = value?.optBoolean("enabled", true) ?: true
 }
 
 @Composable

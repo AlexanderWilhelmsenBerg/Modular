@@ -1204,7 +1204,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             }
             items.put(JSONObject().put("id", id).put("name", entry.name())
                 .put("kind", "candidate").put("path", entry.path())
-                .put("sizeBytes", entry.size()).put("modifiedAt", entry.modified()?.toEpochMilli())
+                .put("sizeBytes", entry.size() ?: JSONObject.NULL).put("modifiedAt", entry.modified()?.toEpochMilli())
                 .put("createdAt", entry.created()?.toEpochMilli()).put("actions", row))
         }
         next(page, actions, offset, limit, group.memberIds().size)
@@ -1223,7 +1223,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             items.put(JSONObject().put("id", entry.id()).put("name", entry.name())
                 .put("kind", "review").put("path", entry.path())
                 .put("subtitle", status + (rename?.let { " · Rename to ${it.newName()} after removal" } ?: ""))
-                .put("sizeBytes", entry.size())
+                .put("sizeBytes", entry.size() ?: JSONObject.NULL)
                 .put("modifiedAt", entry.modified()?.toEpochMilli())
                 .put("createdAt", entry.created()?.toEpochMilli()))
         }

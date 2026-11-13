@@ -38,6 +38,56 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun unknownSizesInNumberedFoldersRemainNullableThroughKeeperAndReview() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        fun fixture(id: String, parent: String, name: String, directory: Boolean) = FileEntry(
+            id, "test-volume", parent, name, "$parent/$name", directory,
+            if (directory) null else "text/plain", null, 1, null, true, true)
+        repository.files.add(fixture("kept", "root", "archive", true))
+        repository.files.add(fixture("removed", "root", "archive (1)", true))
+        repository.files.add(fixture("kept-file", "kept", "notes.txt", false))
+        repository.files.add(fixture("removed-file", "removed", "notes.txt", false))
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            action(controller, setup, "Start scan")
+            val results = awaitView(controller, "clean")
+            val group = results.getJSONArray("items").getJSONObject(0)
+            assertEquals("group", group.getString("kind"))
+            val keeperPage = rowAction(controller, group, "Choose keeper")
+            assertEquals("keeper", keeperPage.getString("view"))
+            val candidates = keeperPage.getJSONArray("items")
+            assertEquals(2, candidates.length())
+            for (index in 0 until candidates.length()) assertUnknownSize(candidates.getJSONObject(index))
+            val kept = (0 until candidates.length()).map { candidates.getJSONObject(it) }
+                .single { it.getString("id") == "kept" }
+            val selected = rowAction(controller, kept, "Keep this")
+            assertEquals("clean", selected.getString("view"))
+            val preparing = action(controller, selected, "Review selected")
+            assertEquals("progress", preparing.getString("view"))
+            val review = awaitView(controller, "cleanReview")
+            val reviewed = review.getJSONArray("items")
+            assertEquals(setOf("kept", "removed", "kept-file", "removed-file"),
+                (0 until reviewed.length()).map { reviewed.getJSONObject(it).getString("id") }.toSet())
+            for (index in 0 until reviewed.length()) assertUnknownSize(reviewed.getJSONObject(index))
+            assertTrue(review.getString("summary").contains("unknown-size files"))
+            assertEquals(0, repository.moveCalls)
+
+            val back = action(controller, review, "Back")
+            assertEquals("clean", back.getString("view"))
+            action(controller, back, "Review selected")
+            val secondReview = awaitView(controller, "cleanReview")
+            val canceled = action(controller, secondReview, "Cancel")
+            assertEquals("clean", canceled.getString("view"))
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
     @Test fun choosingAnotherKeeperUpdatesTheReclaimableSpaceEstimate() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
@@ -515,6 +565,11 @@ class FilesReviewPaginationTest {
             .map { page.getJSONArray("cleanChecks").getJSONObject(it) }
             .single { it.getString("id") == id }
 
+    private fun assertUnknownSize(item: JSONObject) {
+        assertTrue("Expected nullable size for ${item.optString("id")}",
+            !item.has("sizeBytes") || item.isNull("sizeBytes"))
+    }
+
     private fun toggleCleanCheck(controller: FilesPageController, from: JSONObject, id: String): JSONObject {
         val command = cleanCheck(from, id).getJSONObject("action")
         return JSONObject(controller.performAction(JSONObject().put("version", 1)
@@ -547,7 +602,7 @@ class FilesReviewPaginationTest {
         override fun removeSelectedFolder(locationId: String) = Unit
         override fun list(folderId: String, offset: Int, limit: Int, sort: FileSort,
             showHidden: Boolean): FilePage {
-            if (folderId == "subfolder") return FilePage(emptyList(), null, 0, true)
+            val children = files.filter { it.parentId == folderId }
             if (Thread.currentThread().name == "files-worker") {
                 if (offset == 0 && folderId == "root") scanCalls++
                 if (offset == 100 && scanRelease != null) {
@@ -555,8 +610,8 @@ class FilesReviewPaginationTest {
                     check(scanRelease!!.await(10, TimeUnit.SECONDS)) { "Scan fixture timed out" }
                 }
             }
-            return FilePage(files.drop(offset).take(limit),
-                (offset + limit).takeIf { it < files.size }, files.size, true)
+            return FilePage(children.drop(offset).take(limit),
+                (offset + limit).takeIf { it < children.size }, children.size, true)
         }
         override fun get(id: String): FileEntry = if (id == "root") root else files.single { it.id == id }
         override fun search(folderIds: List<String>, filter: SearchFilter,
@@ -626,6 +681,6 @@ class FilesReviewPaginationTest {
 
         private fun entry(name: String, folder: Boolean) = FileEntry(name, "test-volume",
             if (folder) null else "root", name, name, folder, if (folder) null else "text/plain",
-            if (folder) null else if (largeFiles) 2L * 1024 * 1024 else 1, 1, null, true, true)
+            if (folder) null else if (largeFiles) 2L * 1024 * 1024 else 1L, 1, null, true, true)
     }
 }

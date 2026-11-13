@@ -38,6 +38,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private val folderAppearance = FolderAppearance(preferences)
     private val lock = Any()
     private val commands = LinkedHashMap<String, Command>()
+    private data class ScrollCommand(val revision: Long, val key: String)
+    private val scrollCommands = LinkedHashMap<String, ScrollCommand>()
     private val completedTokens = LinkedHashSet<String>(preferences.getStringSet("completedTokens", emptySet()) ?: emptySet())
     private val pendingTokens = LinkedHashSet<String>(preferences.getStringSet("pendingTokens", emptySet()) ?: emptySet())
     private var revision = 0L
@@ -142,18 +144,26 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val request = JSONObject(requestJson)
         require(request.optInt("version") == 1) { "Unsupported page version" }
         request.optJSONObject("restoreScroll")?.let { restored ->
-            if (view == "browser" || view == "search") {
-                if (restored.optString("key") == scrollKey()) {
-                    scrollAnchor = restored.optInt("anchor", 0).coerceIn(0, 100)
-                    scrollOffset = restored.optInt("offset", 0).coerceIn(0, 100_000)
-                    persist()
-                }
-            }
+            recordScrollPosition(restored.optString("key"), restored.optInt("anchor", 0),
+                restored.optInt("offset", 0))
         }
         val offset = request.optString("cursor").toIntOrNull()?.coerceAtLeast(0) ?: currentOffset
         val pageSize = request.optInt("pageSize", 100).coerceIn(1, 100)
         currentOffset = offset
         render(offset, pageSize)
+    }
+
+    /** Saves position without replacing page actions or triggering a page render. */
+    fun recordScrollPosition(key: String, anchor: Int, offset: Int): Unit = synchronized(lock) {
+        if ((view == "browser" || view == "search") && key == scrollKey()) {
+            val safeAnchor = anchor.coerceIn(0, 100)
+            val safeOffset = offset.coerceIn(0, 100_000)
+            if (scrollAnchor != safeAnchor || scrollOffset != safeOffset) {
+                scrollAnchor = safeAnchor
+                scrollOffset = safeOffset
+                persist()
+            }
+        }
     }
 
     fun performAction(requestJson: String): String = synchronized(lock) {
@@ -162,8 +172,22 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val id = request.optString("actionId")
         val token = request.optString("operationToken")
         require(token.length in 16..128) { "Missing operation token" }
-        val command = commands[id] ?: return@synchronized errorPage("Action expired. Refresh the Files page.")
-        if (command.revision != revision) return@synchronized errorPage("Files changed. Review the latest page.")
+        scrollCommands[id]?.let { scroll ->
+            if (scroll.revision == revision && (view == "browser" || view == "search") &&
+                scroll.key == scrollKey()) {
+                val args = request.optJSONObject("args") ?: JSONObject()
+                recordScrollPosition(scroll.key, args.optInt("anchor", 0), args.optInt("offset", 0))
+            }
+            return@synchronized render(currentOffset, 100)
+        }
+        val command = commands[id] ?: run {
+            message = "Action expired. Review the latest Files page."
+            return@synchronized render(currentOffset, 100)
+        }
+        if (command.revision != revision) {
+            message = "Files changed. Review the latest page."
+            return@synchronized render(currentOffset, 100)
+        }
         if (command.destructive && token in completedTokens) return@synchronized render(currentOffset, 100)
         if (command.destructive && token in pendingTokens) {
             message = "This operation was interrupted. Refresh and review storage before retrying."
@@ -1442,6 +1466,10 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         documentId: String? = null, handler: (JSONObject) -> Unit): JSONObject {
         val id = UUID.randomUUID().toString()
         commands[id] = Command(revision, kind, destructive, hostAction, documentId, handler)
+        if (kind == "scroll") {
+            scrollCommands[id] = ScrollCommand(revision, scrollKey())
+            while (scrollCommands.size > 512) scrollCommands.remove(scrollCommands.keys.first())
+        }
         return JSONObject().put("id", id).put("label", label).put("kind", kind)
             .put("input", input).put("initial", initial).put("hostAction", hostAction).put("documentId", documentId)
     }

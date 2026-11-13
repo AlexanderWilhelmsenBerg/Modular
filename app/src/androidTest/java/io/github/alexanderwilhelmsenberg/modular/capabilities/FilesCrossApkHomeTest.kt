@@ -9,6 +9,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -93,6 +96,13 @@ class FilesCrossApkHomeTest {
                 rule.onAllNodesWithTag("files.page.overview").fetchSemanticsNodes().isNotEmpty()
             }
             rule.onNodeWithTag("files.page.overview").assertIsDisplayed()
+            val statusBarBottom = rule.runOnIdle {
+                ViewCompat.getRootWindowInsets(rule.activity.window.decorView)
+                    ?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0
+            }
+            val titleTop = rule.onNode(hasText("Files") and
+                hasAnyAncestor(hasTestTag("files.page.overview"))).fetchSemanticsNode().boundsInRoot.top
+            assertTrue("Embedded Files title overlaps the status bar", titleTop >= statusBarBottom)
             rule.onNodeWithTag("files.trash.badge").assertIsDisplayed()
             rule.onNodeWithTag("alphabet-rail").assertDoesNotExist()
             rule.onNodeWithTag("home-search-field").assertIsDisplayed()

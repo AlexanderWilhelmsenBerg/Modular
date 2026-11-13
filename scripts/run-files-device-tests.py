@@ -16,10 +16,11 @@ BROAD_TESTS = (
     "PdfRealDocumentTest",
     "FilesNativeDocumentUiTest",
     "FilesReviewPaginationTest",
+    "FilesActivityInsetsTest",
     "FilesHandoffNonceTest",
     "ArchiveRealStorageTest",
 )
-EXPECTED_COUNTS = {"FilesReviewPaginationTest": 2}
+EXPECTED_COUNTS = {"FilesReviewPaginationTest": 3}
 
 
 def adb(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -80,7 +81,7 @@ def main() -> None:
         report = REPORT_DIR / "addon-files-summary.log"
         report.write_text("\n".join(failures) + "\n")
         raise RuntimeError(f"Files device tests failed; see {report}:\n" + "\n".join(failures))
-    print("All eight Files device test classes passed (nine tests)", flush=True)
+    print("All nine Files device test classes passed (eleven tests)", flush=True)
 
 
 if __name__ == "__main__":

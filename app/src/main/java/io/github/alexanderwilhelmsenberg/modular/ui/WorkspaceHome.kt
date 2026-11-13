@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -161,7 +162,8 @@ internal fun WorkspaceHome(
     val sectionOrder = if (mainHome) preferences.sectionOrder.distinct().let { order ->
         if (editMode && WorkspaceSection.WIDGETS !in order) listOf(WorkspaceSection.WIDGETS) + order else order
     } else listOf(WorkspaceSection.CLOCK, WorkspaceSection.WIDGETS)
-    BoxWithConstraints(modifier, contentAlignment = AbsoluteAlignment.TopLeft) {
+    BoxWithConstraints(modifier.then(if (mainHome) Modifier else Modifier.statusBarsPadding()),
+        contentAlignment = AbsoluteAlignment.TopLeft) {
     // Primary Home keeps the rail lane. Widget pages use the full physical width.
     val geometry = calculateWidgetAreaGeometry(maxWidth.value.roundToInt() +
         if (mainHome) 0 else WIDGET_RAIL_INSET_DP, preferences)

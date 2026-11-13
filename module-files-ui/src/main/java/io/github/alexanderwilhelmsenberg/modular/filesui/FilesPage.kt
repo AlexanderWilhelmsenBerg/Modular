@@ -93,14 +93,10 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.FlowPreview
 import kotlin.math.roundToInt
 
 /** Trusted native renderer. Module data is text and typed actions; it is never executable UI code. */
-@OptIn(FlowPreview::class)
 @Composable
 fun FilesPage(
     pageJson: String,
@@ -158,15 +154,10 @@ fun FilesPage(
     LaunchedEffect(pageJson) {
         if (view == "browser" || view == "search") lastBrowserPage = page
     }
-    val scrollAction = actions.firstOrNull { it.kind == "scroll" }
     val scrollKey = page.optString("scrollKey")
     val lifecycleOwner = LocalLifecycleOwner.current
-    val latestScrollAction by rememberUpdatedState(scrollAction)
-    val latestSend by rememberUpdatedState(send)
     val latestOnScrollState by rememberUpdatedState(onScrollState)
     DisposableEffect(pageKey, lifecycleOwner) {
-        val capturedAction = scrollAction
-        val capturedSend = send
         val flushLocal = {
             if (view == "browser" || view == "search") {
                 if (scrollKey.matches(Regex("[0-9a-f]{64}"))) latestOnScrollState(scrollKey,
@@ -175,19 +166,11 @@ fun FilesPage(
         }
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) {
             flushLocal()
-            latestScrollAction?.let { action ->
-                latestSend(action, JSONObject().put("anchor", listState.firstVisibleItemIndex)
-                    .put("offset", listState.firstVisibleItemScrollOffset))
-            }
         } }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             flushLocal()
-            capturedAction?.let { action ->
-                capturedSend(action, JSONObject().put("anchor", listState.firstVisibleItemIndex)
-                    .put("offset", listState.firstVisibleItemScrollOffset))
-            }
         }
     }
     LaunchedEffect(pageKey, scrollKey) {
@@ -200,14 +183,6 @@ fun FilesPage(
         if ((view == "browser" || view == "search") && scrollKey.matches(Regex("[0-9a-f]{64}"))) {
             snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
                 .collect { (anchor, offset) -> latestOnScrollState(scrollKey, anchor, offset) }
-        }
-    }
-    LaunchedEffect(pageKey, scrollAction?.id) {
-        if ((view == "browser" || view == "search") && scrollAction != null) {
-            snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-                .debounce(250).drop(1).collect { (anchor, offset) ->
-                    send(scrollAction, JSONObject().put("anchor", anchor).put("offset", offset))
-                }
         }
     }
     LaunchedEffect(view, pageJson) {

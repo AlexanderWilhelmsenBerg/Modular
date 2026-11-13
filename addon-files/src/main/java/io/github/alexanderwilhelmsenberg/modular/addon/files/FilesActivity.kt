@@ -12,9 +12,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.background
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -23,6 +26,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,11 +35,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
 import io.github.alexanderwilhelmsenberg.modular.filesui.FilesPage
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.WorkspacePageContract
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
 /** Standalone setup and file browser share the same trusted renderer as Core. */
@@ -64,6 +78,24 @@ open class FilesActivity : ComponentActivity() {
             }
     }
     private var refresh: (() -> Unit)? = null
+    private val scrollScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scrollMutex = Mutex()
+    private var pendingScroll: Triple<String, Int, Int>? = null
+    private var scrollJob: Job? = null
+
+    private fun saveScroll(position: Triple<String, Int, Int>, debounce: Boolean) {
+        scrollJob?.cancel()
+        scrollJob = scrollScope.launch {
+            if (debounce) delay(250)
+            scrollMutex.withLock {
+                controller.recordScrollPosition(position.first, position.second, position.third)
+            }
+        }
+    }
+
+    private fun flushScroll() {
+        pendingScroll?.let { saveScroll(it, debounce = false) }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,10 +109,18 @@ open class FilesActivity : ComponentActivity() {
                 window.decorView.post { handleHandoff(handoff, true) }
             }
         }
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        window.isStatusBarContrastEnforced = false
+        window.isNavigationBarContrastEnforced = false
         setContent {
             var page by remember { mutableStateOf<String?>(null) }
             var error by remember { mutableStateOf<String?>(null) }
             val scope = rememberCoroutineScope()
+            DisposableEffect(Unit) {
+                onDispose { flushScroll() }
+            }
             fun load() {
                 scope.launch {
                     page = withContext(Dispatchers.IO) {
@@ -96,12 +136,23 @@ open class FilesActivity : ComponentActivity() {
             MaterialTheme(colorScheme = if (themeName == "amoled") darkColorScheme(background = Color.Black,
                 surface = Color.Black, surfaceContainer = Color(0xFF101010))
                 else if (dark) darkColorScheme() else lightColorScheme()) {
+                SideEffect {
+                    WindowInsetsControllerCompat(window, window.decorView).apply {
+                        isAppearanceLightStatusBars = !dark
+                        isAppearanceLightNavigationBars = !dark
+                    }
+                }
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
                 if (page == null) {
                     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(error ?: "Loading Files…")
                         Button(onClick = { chooseFolder.launch(null) }) { Text("Choose folder") }
                     }
-                } else FilesPage(page!!, documentLoader = { id, mode ->
+                } else FilesPage(page!!, onScrollState = { key, anchor, offset ->
+                    val position = Triple(key, anchor, offset)
+                    pendingScroll = position
+                    saveScroll(position, debounce = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+                }, documentLoader = { id, mode ->
                     withContext(Dispatchers.IO) { controller.openDocument(id, mode) }
                 }, documentCommit = { request ->
                     val response = withContext(Dispatchers.IO) { controller.performAction(request) }
@@ -110,11 +161,19 @@ open class FilesActivity : ComponentActivity() {
                 }, documentCancel = { request ->
                     page = withContext(Dispatchers.IO) { controller.performAction(request) }
                 }, onAction = { request ->
+                    scrollJob?.cancel()
+                    val position = pendingScroll
                     scope.launch {
-                        page = withContext(Dispatchers.IO) {
-                            runCatching { controller.performAction(request) }
-                                .onFailure { error = it.message }.getOrNull()
-                        } ?: page
+                        val result = withContext(Dispatchers.IO) {
+                            runCatching {
+                                scrollMutex.withLock {
+                                    position?.let { controller.recordScrollPosition(it.first, it.second, it.third) }
+                                    controller.performAction(request)
+                                }
+                            }
+                        }
+                        result.exceptionOrNull()?.let { error = it.message }
+                        page = result.getOrNull() ?: page
                         page?.let { response ->
                             val host = JSONObject(response).optJSONObject("hostLaunch")
                             host?.optString("nonce")?.let(controller::consumeHostHandoff)?.let {
@@ -123,6 +182,7 @@ open class FilesActivity : ComponentActivity() {
                         }
                     }
                 }, onOpenDocument = { documentId, _ -> openOrShare(documentId, false) })
+                }
             }
         }
     }
@@ -130,6 +190,11 @@ open class FilesActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refresh?.invoke()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        flushScroll()
     }
 
     private fun openOrShare(documentId: String, share: Boolean, finishAfter: Boolean = false) {

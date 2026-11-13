@@ -38,6 +38,35 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun choosingAnotherKeeperUpdatesTheReclaimableSpaceEstimate() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 2)
+        repository.files[0] = repository.files[0].copy(name = "report.txt", sizeBytes = 1024L * 1024,
+            modifiedAtMillis = 1)
+        repository.files[1] = repository.files[1].copy(name = "report (1).txt", sizeBytes = 4L * 1024 * 1024,
+            modifiedAtMillis = 2)
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            action(controller, setup, "Start scan")
+            val results = awaitView(controller, "clean")
+            val group = results.getJSONArray("items").getJSONObject(0)
+            assertEquals(1024L * 1024, group.getLong("reclaimableKnownBytes"))
+            val keepers = rowAction(controller, group, "Choose keeper").getJSONArray("items")
+            val smaller = (0 until keepers.length()).map { keepers.getJSONObject(it) }
+                .single { it.getString("id") == repository.files[0].id }
+            val changed = rowAction(controller, smaller, "Keep this")
+            assertEquals(4L * 1024 * 1024,
+                changed.getJSONArray("items").getJSONObject(0).getLong("reclaimableKnownBytes"))
+            assertEquals(0, repository.fingerprintCalls)
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
     @Test fun largeFileFindingsRankByKnownBytesAndFingerprintOnlyAfterReview() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().putInt("cleanLargeMiB", 1).commit()

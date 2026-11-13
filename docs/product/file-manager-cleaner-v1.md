@@ -275,10 +275,16 @@ requirement is not evidence that its implementation has passed validation.
   retained copy. Priority helps order review; it does not authorize deletion.
 - Use metadata for the initial filename scan. Do not hash every file merely to
   list recommendations. Only selected checks may read contents while scanning.
+  With subfolders off, enumerate only the chosen folder. If a directory-copy
+  group is selected for review, enumerate just that group's folders at review
+  time, including the retained folder. Unknown folder sizes remain unavailable
+  until those contents are enumerated.
   Explicit **Review selected** verifies fingerprints of the selected manifest,
   including keepers and selected directory descendants, before presenting the
   deletion review. Deletion still revalidates that manifest and directory child
-  sets. Unrelated file contents do not need to be hashed for that review.
+  sets, including every kept directory's descendants. A changed or missing
+  kept file blocks deletion of its other copy. Unrelated file contents do not
+  need to be hashed for that review.
 - Exact duplicates must be confirmed by content, not just names or sizes. Use staged
   comparison to avoid reading unrelated files; confirm equality before offering
   removal, retain at least one copy, and revalidate changed files before acting.

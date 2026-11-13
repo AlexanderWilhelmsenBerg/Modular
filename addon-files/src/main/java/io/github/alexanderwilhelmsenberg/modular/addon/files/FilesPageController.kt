@@ -984,7 +984,12 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         action(actions, "Review selected", "review") {
             prepareCleanReview(analysis)
         }
-        val findings = CleanerEngine.rankedFindings(analysis.entries(), analysis.groups(), analysis.suggestions())
+        val displayGroups = analysis.groups().map { group ->
+            val chosen = cleanerKeepers[group.id()] ?: return@map group
+            CleanerEngine.Group(group.id(), group.category(), group.memberIds(), chosen,
+                group.requiresKeeperChoice(), group.baseName(), group.evidence())
+        }
+        val findings = CleanerEngine.rankedFindings(analysis.entries(), displayGroups, analysis.suggestions())
         page.put("findingCount", findings.size)
         findings.drop(offset).take(limit).forEach { finding ->
             val item = cleanFindingItem(finding, analysis.entries(), preliminary = false)
@@ -1017,8 +1022,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .put("kind", if (group != null) "group" else "suggestion")
             .put("subtitle", (if (preliminary) "Preliminary · " else "") + details)
             .put("priorityTier", finding.priorityTier()).put("priorityLabel", finding.priorityLabel())
-            .put("reclaimableKnownBytes", if (preliminary && group?.memberIds()?.any {
-                entries[it]?.kind() == CleanerEngine.Kind.DIRECTORY
+            .put("reclaimableKnownBytes", if (group?.memberIds()?.any {
+                val member = entries[it]
+                member?.kind() == CleanerEngine.Kind.DIRECTORY && (preliminary || !member.childrenComplete())
             } == true) JSONObject.NULL else finding.knownReclaimableBytes())
             .put("unknownSizeFiles", finding.unknownSizeFiles()).put("sizeBytes", entry?.size())
     }

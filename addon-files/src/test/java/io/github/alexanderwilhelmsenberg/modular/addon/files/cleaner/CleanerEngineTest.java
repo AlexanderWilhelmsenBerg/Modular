@@ -258,6 +258,77 @@ public class CleanerEngineTest {
         assertEquals(Set.of("one", "two"), Set.copyOf(fingerprinted));
     }
 
+    @Test public void shallowScanExpandsOnlySelectedFolderGroupsForReview() {
+        var root = new FileEntry("root", "volume", null, "root", "/root", true,
+                null, null, NOW.toEpochMilli(), null, true, true);
+        var old = new FileEntry("old", "volume", "root", "folder", "/root/folder", true,
+                null, null, NOW.minusSeconds(10).toEpochMilli(), null, true, true);
+        var keeper = new FileEntry("keeper", "volume", "root", "folder(1)", "/root/folder(1)", true,
+                null, null, NOW.toEpochMilli(), null, true, true);
+        var unrelated = new FileEntry("unrelated", "volume", "root", "unrelated", "/root/unrelated", true,
+                null, null, NOW.toEpochMilli(), null, true, true);
+        var oldChild = new FileEntry("oldChild", "volume", "old", "a.txt", "/root/folder/a.txt", false,
+                "text/plain", 4L, NOW.toEpochMilli(), null, true, true);
+        var keptChild = new FileEntry("keptChild", "volume", "keeper", "b.txt", "/root/folder(1)/b.txt", false,
+                "text/plain", 7L, NOW.toEpochMilli(), null, true, true);
+        var entries = Map.of("root", root, "old", old, "keeper", keeper, "unrelated", unrelated,
+                "oldChild", oldChild, "keptChild", keptChild);
+        var listed = new ArrayList<String>();
+        var fingerprinted = new ArrayList<String>();
+        var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
+                new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "get" -> entries.get(args[0]);
+                    case "list" -> {
+                        var id = (String) args[0];
+                        listed.add(id);
+                        if (id.equals("unrelated")) throw new AssertionError("Unrelated sibling traversed");
+                        yield new FilePage(id.equals("root") ? List.of(old, keeper, unrelated)
+                                : id.equals("old") ? List.of(oldChild)
+                                : id.equals("keeper") ? List.of(keptChild) : List.of(), null, null, true);
+                    }
+                    case "fingerprint" -> {
+                        fingerprinted.add((String) args[0]);
+                        yield "rev-" + args[0];
+                    }
+                    case "openRead" -> throw new AssertionError("Shallow review opened file contents");
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        var adapter = new CleanerRepositoryAdapter(repository, null);
+        var options = new CleanerEngine.Options("root", false, Set.of(), Set.of(), 100, 30, NOW);
+        var snapshot = adapter.snapshot("root", (Cancellation) () -> false, Set.of(), options, null);
+        assertEquals(List.of("root"), listed);
+        assertTrue(fingerprinted.isEmpty());
+        assertEquals(4, snapshot.getEntries().size());
+        var analysis = adapter.analyze(snapshot, options, (Cancellation) () -> false);
+        assertTrue(analysis.coverageWarnings().isEmpty());
+        var group = analysis.groups().get(0);
+        var plan = adapter.prepareReview(analysis, Map.of(), Set.of(group.id()), Set.of(), (Cancellation) () -> false);
+        assertTrue(plan.blockers().toString(), plan.readyForReview());
+        assertTrue(listed.containsAll(List.of("old", "keeper")));
+        assertFalse(listed.contains("unrelated"));
+        assertEquals(Set.of("old", "keeper", "oldChild", "keptChild"), Set.copyOf(fingerprinted));
+        assertTrue(plan.keeperIds().contains("keptChild"));
+    }
+
+    @Test public void keptFolderChildChangesInvalidateReviewDespiteStableFolderMetadata() {
+        var root = directory("root", null, "root", NOW);
+        var removed = directory("removed", "root", "folder", NOW.minusSeconds(10));
+        var kept = directory("kept", "root", "folder(1)", NOW);
+        var child = file("child", "kept", "data.bin", 8, NOW);
+        var analysis = CleanerEngine.analyze(List.of(root, removed, kept, child),
+                new CleanerEngine.Options("root", true, Set.of(), Set.of(), 100, 30, NOW), (a, b) -> false);
+        var plan = CleanerEngine.plan(analysis, Map.of(), Set.of(analysis.groups().get(0).id()), Set.of());
+        assertTrue(plan.blockers().toString(), plan.readyForReview());
+        assertTrue(plan.keeperIds().contains("child"));
+        assertTrue(plan.directoryChildren().containsKey("kept"));
+        assertFalse(CleanerEngine.preflight(plan, List.of(root, removed, kept, child,
+                file("added", "kept", "new.bin", 3, NOW))).safeToExecute());
+        assertFalse(CleanerEngine.preflight(plan, List.of(root, removed, kept)).safeToExecute());
+        var replaced = new CleanerEngine.Entry("child", "volume", "kept", child.path(), child.name(),
+                child.kind(), child.size(), child.modified(), child.created(), "new-content", true, null);
+        assertFalse(CleanerEngine.preflight(plan, List.of(root, removed, kept, replaced)).safeToExecute());
+    }
+
     @Test public void numberedConflictRequiresKeeperAndRenamesOnlyAfterReviewedRemovals() {
         var root = directory("root", null, "root", NOW);
         var original = directory("original", "root", "foldername", NOW.minusSeconds(300));

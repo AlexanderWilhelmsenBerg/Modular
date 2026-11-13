@@ -172,7 +172,8 @@ public final class CleanerEngine {
             Entry entry = eligible.get(id);
             if (entry == null) continue;
             scoped.put(id, entry);
-            if (entry.kind() == Kind.DIRECTORY && !entry.childrenComplete())
+            if (entry.kind() == Kind.DIRECTORY && !entry.childrenComplete()
+                    && (options.includeSubfolders() || entry.id().equals(root.id())))
                 warnings.add("Incomplete folder enumeration: " + entry.path());
         }
         List<Group> groups = new ArrayList<>();
@@ -566,6 +567,14 @@ public final class CleanerEngine {
         }
         for (String id : keepers) if (removalReasons.containsKey(id))
             blockers.add("Selected removal overlaps a keeper: " + id);
+        Set<String> keeperTree = new LinkedHashSet<>(keepers);
+        for (String keeperId : keepers) {
+            Entry keeper = entries.get(keeperId);
+            if (keeper != null && keeper.kind() == Kind.DIRECTORY)
+                keeperTree.addAll(descendants(entries, keeperId, true));
+        }
+        for (String id : removalReasons.keySet()) if (keeperTree.contains(id) && !keepers.contains(id))
+            blockers.add("Selected removal overlaps a kept folder: " + id);
         Map<String, ReviewedFile> manifest = new LinkedHashMap<>();
         Map<String, Set<String>> children = new LinkedHashMap<>();
         List<TrashStep> trash = new ArrayList<>();
@@ -582,7 +591,7 @@ public final class CleanerEngine {
                     blockers.add("Folder requires complete descendant review: " + id);
                 if (child != null && excluded(child, entries, analysis.options()))
                     blockers.add("Selected folder contains an excluded or protected entry: " + childId);
-                if (keepers.contains(childId)) blockers.add("Selected folder contains a keeper: " + childId);
+                if (keeperTree.contains(childId)) blockers.add("Selected folder contains a keeper: " + childId);
                 if (child != null) {
                     manifest.put(childId, reviewed(child));
                     if (child.kind() == Kind.DIRECTORY)
@@ -592,9 +601,14 @@ public final class CleanerEngine {
             trash.add(new TrashStep(id, List.copyOf(descendants), removalReasons.get(id).iterator().next()));
             alreadyCovered.addAll(included);
         }
-        for (String keeperId : keepers) {
+        for (String keeperId : keeperTree) {
             Entry keeper = entries.get(keeperId);
-            if (keeper != null) manifest.put(keeperId, reviewed(keeper));
+            if (keeper == null) continue;
+            if (keeper.kind() == Kind.DIRECTORY && !keeper.childrenComplete())
+                blockers.add("Kept folder requires complete descendant review: " + keeperId);
+            manifest.put(keeperId, reviewed(keeper));
+            if (keeper.kind() == Kind.DIRECTORY)
+                children.put(keeperId, descendants(entries, keeperId, false));
         }
         for (ReviewedFile file : manifest.values()) if (PENDING_REVISION.equals(file.revision()))
             blockers.add("File fingerprint requires review preparation: " + file.id());
@@ -618,7 +632,7 @@ public final class CleanerEngine {
         Set<String> rules = new HashSet<>(analysis.options().excludedIds());
         rules.addAll(analysis.options().protectedIds());
         return new Plan(analysis.options().scopeId(), rules, manifest, children, removalReasons,
-                trash, renames, keepers, blockers, bytes, unknown);
+                trash, renames, keeperTree, blockers, bytes, unknown);
     }
     private static ReviewedFile reviewed(Entry entry) {
         return new ReviewedFile(entry.id(), entry.volumeId(), entry.path(), entry.name(),

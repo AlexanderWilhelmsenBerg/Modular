@@ -22,6 +22,35 @@ import org.junit.runner.RunWith
 /** Real direct-storage operations, scoped to a unique folder created by this test. */
 @RunWith(AndroidJUnit4::class)
 class DirectStorageSafetyTest {
+    @Test fun parentScanCachesNestedSizesAndCreatingTextNeverOverwrites() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "ModularFilesSizes-${UUID.randomUUID()}"
+        val fixture = File(Environment.getExternalStorageDirectory(), name)
+        try {
+            assertTrue(Environment.isExternalStorageManager())
+            val repository = createFilesRepository(context)
+            val root = repository.locations().single { it.kind == StorageLocation.Kind.PHONE }
+            val directory = repository.createDirectory(root.rootId, name)
+            val child = repository.createDirectory(directory.id, "nested")
+            val deep = repository.createDirectory(child.id, "deep")
+            repository.createFile(directory.id, "root.txt", "text/plain")
+            repository.createFile(child.id, "notes.txt", "text/plain")
+            repository.createFile(deep.id, "last.txt", "text/plain")
+            File(fixture, "root.txt").writeText("aa")
+            File(fixture, "nested/notes.txt").writeText("abc")
+            File(fixture, "nested/deep/last.txt").writeText("defg")
+            assertTrue(runCatching { repository.createFile(child.id, "notes.txt", "text/plain") }.isFailure)
+            assertEquals("abc", File(fixture, "nested/notes.txt").readText())
+            val total = repository.directoryTotal(directory.id)
+            assertTrue(total.complete)
+            assertEquals(9L, total.bytes)
+            assertEquals(3L, total.fileCount)
+            assertEquals(7L, repository.cachedDirectoryTotal(child.id)?.bytes)
+            assertEquals(4L, repository.cachedDirectoryTotal(deep.id)?.bytes)
+            assertTrue(repository.cachedDirectoryTotal(child.id)?.complete == true)
+        } finally { fixture.deleteRecursively() }
+    }
+
     @Test fun reviewedTrashRestoreAndChangedChildStayRecoverable() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "ModularFilesValidation-${UUID.randomUUID()}"

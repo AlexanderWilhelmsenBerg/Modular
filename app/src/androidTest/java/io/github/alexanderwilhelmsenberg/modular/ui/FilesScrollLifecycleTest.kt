@@ -62,6 +62,7 @@ class FilesScrollLifecycleTest {
                 }
             }
         }
+        rule.onNodeWithTag("files.action.more").performClick()
         rule.onNodeWithText("Clean").performClick()
         rule.onNodeWithTag("files.clean.sheet").assertIsDisplayed()
         rule.runOnIdle {

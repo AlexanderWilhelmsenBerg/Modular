@@ -1,11 +1,18 @@
 package io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner;
 
+import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Cancellation;
+import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FileEntry;
+import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FilePage;
+import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FilesRepository;
 import static org.junit.Assert.*;
 
+import java.lang.reflect.Proxy;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import kotlin.Unit;
 import org.junit.Test;
 
 public class CleanerEngineTest {
@@ -22,6 +29,95 @@ public class CleanerEngineTest {
         return CleanerEngine.analyze(entries,
                 new CleanerEngine.Options("root", true, Set.of(), Set.of(), 1_000_000, 30, NOW),
                 (a, b) -> false);
+    }
+
+    @Test public void pageHintsArriveBeforeLaterFoldersAndClosedGroupIdsMatchFinalAnalysis() {
+        var options = new CleanerEngine.Options("root", true, Set.of(), Set.of(), 100, 30, NOW);
+        var root = directory("root", null, "root", NOW);
+        var downloads = directory("downloads", "root", "Downloads", NOW);
+        var largeOld = file("old", "downloads", "backup(1).zip", 200, NOW.minusSeconds(40L * 86400));
+        var another = file("new", "downloads", "backup(2).zip", 200, NOW);
+        var versionOne = file("v1", "downloads", "app-1.0.zip", 5, NOW);
+        var versionTwo = file("v2", "downloads", "app-2.0.zip", 6, NOW);
+
+        var firstPage = CleanerEngine.progressiveSuggestions(List.of(largeOld), true, options);
+        assertTrue(firstPage.stream().anyMatch(s -> s.category() == CleanerEngine.Category.LARGE_FILE));
+        assertTrue(firstPage.stream().anyMatch(s -> s.category() == CleanerEngine.Category.OLD_DOWNLOAD));
+        assertTrue(CleanerEngine.progressiveGroups(List.of(largeOld), false, options).isEmpty());
+
+        var groups = CleanerEngine.progressiveGroups(List.of(largeOld, another, versionOne, versionTwo), true, options);
+        var group = groups.stream()
+                .filter(g -> g.category() == CleanerEngine.Category.NUMBERED_COPY).findFirst().orElseThrow();
+        var finalAnalysis = CleanerEngine.analyze(List.of(root, downloads, largeOld, another, versionOne, versionTwo), options,
+                (left, right) -> false);
+        assertEquals(group.id(), finalAnalysis.groups().stream()
+                .filter(g -> g.category() == CleanerEngine.Category.NUMBERED_COPY).findFirst().orElseThrow().id());
+        assertEquals(groups.stream().filter(g -> g.category() == CleanerEngine.Category.OLDER_VERSION)
+                .findFirst().orElseThrow().id(), finalAnalysis.groups().stream()
+                .filter(g -> g.category() == CleanerEngine.Category.OLDER_VERSION).findFirst().orElseThrow().id());
+        assertTrue(finalAnalysis.groups().stream().noneMatch(g -> g.category() == CleanerEngine.Category.EXACT_DUPLICATE));
+    }
+
+    @Test public void progressIsAlwaysPartialAndNeverBecomesAReviewPlan() {
+        var entry = file("large", "root", "large.bin", 200, NOW);
+        var hint = new CleanerEngine.Suggestion("large", CleanerEngine.Category.LARGE_FILE, "Large file", false);
+        var progress = new CleanerEngine.Progress(Map.of(entry.id(), entry), List.of(), List.of(hint),
+                List.of(), 0, 1, true);
+        assertTrue(progress.partial());
+        assertThrows(IllegalArgumentException.class, () -> new CleanerEngine.Progress(
+                progress.entries(), progress.groups(), progress.suggestions(), List.of(), 1, 1, false));
+        assertTrue(CleanerEngine.progressiveGroups(List.of(entry), false,
+                new CleanerEngine.Options("root", true, Set.of(), Set.of(), 100, 30, NOW)).isEmpty());
+    }
+
+    @Test public void adapterPublishesFindingBeforeNextFolderIsListed() {
+        var root = new FileEntry("root", "volume", null, "root", "/root", true,
+                null, null, NOW.toEpochMilli(), null, true, true);
+        var nested = new FileEntry("nested", "volume", "root", "nested", "/root/nested", true,
+                null, null, NOW.minusSeconds(10).toEpochMilli(), null, true, true);
+        var nestedCopy = new FileEntry("nestedCopy", "volume", "root", "nested(1)", "/root/nested(1)", true,
+                null, null, NOW.toEpochMilli(), null, true, true);
+        var large = new FileEntry("large", "volume", "root", "large.bin", "/root/large.bin", false,
+                "application/octet-stream", 200L, NOW.toEpochMilli(), null, true, true);
+        var nextFolderListed = new AtomicBoolean();
+        var fingerprintCalled = new AtomicBoolean();
+        var sawEarlyFinding = new AtomicBoolean();
+        var sawDirectoryGroup = new AtomicBoolean();
+        var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
+                new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "get" -> root;
+                    case "fingerprint" -> {
+                        fingerprintCalled.set(true);
+                        yield "rev-" + args[0];
+                    }
+                    case "list" -> {
+                        if (!"root".equals(args[0])) nextFolderListed.set(true);
+                        yield new FilePage("root".equals(args[0]) ? List.of(nested, nestedCopy, large) : List.of(),
+                                null, "root".equals(args[0]) ? 3 : 0, true);
+                    }
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        var options = new CleanerEngine.Options("root", true, Set.of(), Set.of(), 100, 30, NOW);
+        var snapshot = new CleanerRepositoryAdapter(repository, null).snapshot("root", (Cancellation) () -> false,
+                Set.of(), options, progress -> {
+                    if (progress.suggestions().stream().anyMatch(s -> s.entryId().equals("large"))) {
+                        assertFalse(nextFolderListed.get());
+                        assertFalse(fingerprintCalled.get());
+                        assertEquals("revision-pending", progress.entries().get("large").revision());
+                        assertTrue(progress.partial());
+                        sawEarlyFinding.set(true);
+                    }
+                    if (progress.groups().stream().anyMatch(g -> g.category() == CleanerEngine.Category.NUMBERED_COPY
+                            && Set.copyOf(g.memberIds()).equals(Set.of("nested", "nestedCopy")))) {
+                        assertFalse(nextFolderListed.get());
+                        sawDirectoryGroup.set(true);
+                    }
+                    return Unit.INSTANCE;
+                });
+        assertTrue(sawEarlyFinding.get());
+        assertTrue(sawDirectoryGroup.get());
+        assertTrue(nextFolderListed.get());
+        assertEquals(4, snapshot.getEntries().size());
     }
 
     @Test public void numberedConflictRequiresKeeperAndRenamesOnlyAfterReviewedRemovals() {

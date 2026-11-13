@@ -745,7 +745,7 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
         }
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = .36f))
             .clickable(enabled = back != null) { back?.let { send(it, null) } })
-        Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.82f).clickable { },
+        Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.82f),
             shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
             color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 14.dp)) {

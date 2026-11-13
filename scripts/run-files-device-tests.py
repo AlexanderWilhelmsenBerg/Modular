@@ -20,7 +20,7 @@ BROAD_TESTS = (
     "FilesHandoffNonceTest",
     "ArchiveRealStorageTest",
 )
-EXPECTED_COUNTS = {"FilesReviewPaginationTest": 10, "DirectStorageSafetyTest": 2}
+EXPECTED_COUNTS = {"FilesReviewPaginationTest": 11, "DirectStorageSafetyTest": 2}
 
 
 def adb(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:

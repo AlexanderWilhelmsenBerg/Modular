@@ -47,21 +47,21 @@ requirement is not evidence that its implementation has passed validation.
   that folder. Cleanup results are an internal view with a return action to the
   same folder; separate Files/Clean tabs are not required. Horizontal swipes
   belong to workspace navigation, not an inner tab pager.
-- Primary browser actions use large, labeled tiles. Less frequent actions open
-  from an animated circular three-dot menu. A folder has its own three-dot menu
-  for its actions and appearance. Put longer explanations in **Info** so the
-  browser opens with concise guidance.
-- Selecting a folder gives visual feedback as its tile moves into the folder
+- The browser uses a persistent search bar, a plus menu for new folders or text
+  files, and a top circular three-dot menu for Clean, Storage map, and other
+  actions. Folder rows use long press for their actions and appearance.
+  Put longer explanations in **Info** so the browser opens with concise guidance.
+- Selecting a folder gives visual feedback as its icon moves into the folder
   header. The header identifies the selected folder while browsing its contents.
   Folder icons offer folder, game, audio, and music choices; a user can select
   a color or leave it on **Auto**. Auto uses a light yellow folder in Light mode
   and a dark blue folder in Dark/AMOLED mode. Persist icon and color choices
   across page changes and process recreation.
-- **Clean** starts a fresh scan of the current folder immediately and presents
-  progress and recommendations in a dismissible sheet over the browser. Closing
-  the sheet returns to the same folder; it does not start cleanup or change files.
+- **Clean** opens check choices for the current folder; **Start scan** starts
+  analysis. Reopening Clean during a scan returns to its current progress and
+  findings. Closing the sheet leaves the scan running and returns to browsing.
 - Files opens the last valid location, with breadcrumbs, local file search,
-  sort controls, and a list/grid switch. Persist the storage identity, folder
+  sort controls, and compact/details views. Persist the storage identity, folder
   URI/path, scroll anchor/offset, view/sort preferences, and active search state
   across page changes and process recreation. Persistence does not require an
   offscreen view or storage connection to remain active.
@@ -252,19 +252,39 @@ requirement is not evidence that its implementation has passed validation.
 
 ### Live manual scans
 
-- A folder's **Clean** action opens analysis scoped to that folder, with an
-  explicit Include subfolders control. Opening Clean starts a manual scan, or
-  reopens the existing scan and its captured scope. Findings appear progressively
+- A folder's **Clean** action opens scan options scoped to that folder, with an
+  explicit Include subfolders control. Choose checks before pressing **Start scan**;
+  merely opening Clean performs no scan. If a scan is already running, Clean
+  reopens it and its captured scope. Findings appear progressively
   while enumeration and verification continue. Closing the sheet leaves the scan
   running; Cancel explicitly stops it. Background completion must not navigate
   away from the user's chosen screen. Completed results expose the existing
   full deletion review; provisional findings cannot execute a cleanup plan.
   Cleanup does not run merely on page entry, and Scan again explicitly starts
   a fresh scan after completion.
-- Standard recommendations include exact duplicate files, large files, old
-  downloads, and downloaded installers/archives; thresholds are configurable.
-  Add separate **Numbered copies** and **Older versions** groups as below.
-  Age/size/type alone does not mean a file is junk.
+- Save the user's selected checks. Default to **Numbered copies** only.
+  **Exact duplicates**, **Older builds and versions**, **Large files**, **Old
+  downloads**, and **Downloaded installers and archives** are separate opt-in
+  checks. Age/size/type alone never makes a file a default cleanup candidate.
+  Large-file and download-age thresholds remain configurable. Label content
+  comparisons and APK build inspection as slower checks.
+- Rank live and completed findings by evidence priority, then known reclaimable
+  bytes descending within the same priority: verified identical copies first,
+  numbered-copy/older-version groups next, then optional large-file, archive,
+  and age-only findings. Unknown sizes stay unknown, and estimates exclude the
+  retained copy. Priority helps order review; it does not authorize deletion.
+- Use metadata for the initial filename scan. Do not hash every file merely to
+  list recommendations. Only selected checks may read contents while scanning.
+  With subfolders off, enumerate only the chosen folder. If a directory-copy
+  group is selected for review, enumerate just that group's folders at review
+  time, including the retained folder. Unknown folder sizes remain unavailable
+  until those contents are enumerated.
+  Explicit **Review selected** verifies fingerprints of the selected manifest,
+  including keepers and selected directory descendants, before presenting the
+  deletion review. Deletion still revalidates that manifest and directory child
+  sets, including every kept directory's descendants. A changed or missing
+  kept file blocks deletion of its other copy. Unrelated file contents do not
+  need to be hashed for that review.
 - Exact duplicates must be confirmed by content, not just names or sizes. Use staged
   comparison to avoid reading unrelated files; confirm equality before offering
   removal, retain at least one copy, and revalidate changed files before acting.

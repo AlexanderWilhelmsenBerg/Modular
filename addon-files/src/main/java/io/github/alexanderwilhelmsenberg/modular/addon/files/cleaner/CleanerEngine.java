@@ -25,6 +25,8 @@ public final class CleanerEngine {
 
     public enum Kind { FILE, DIRECTORY }
     public enum Category { EXACT_DUPLICATE, NUMBERED_COPY, OLDER_VERSION, LARGE_FILE, OLD_DOWNLOAD, DOWNLOADED_INSTALLER_OR_ARCHIVE }
+    public static final Set<Category> DEFAULT_CATEGORIES = Set.of(Category.NUMBERED_COPY);
+    public static final String PENDING_REVISION = "revision-pending";
 
     /** ID and revision are opaque values supplied by the storage adapter; path is display-only. */
     public record Entry(String id, String volumeId, String parentId, String path, String name,
@@ -46,10 +48,17 @@ public final class CleanerEngine {
     /** Exclusion/protection sets accept opaque IDs or slash-prefixed path prefixes. */
     public record Options(String scopeId, boolean includeSubfolders, Set<String> excludedIds,
                           Set<String> protectedIds, long largeBytes, long oldDownloadDays,
-                          Instant scannedAt) {
+                          Instant scannedAt, Set<Category> selectedCategories) {
+        /** Existing callers get focused checks; costly and broad checks require explicit selection. */
+        public Options(String scopeId, boolean includeSubfolders, Set<String> excludedIds,
+                       Set<String> protectedIds, long largeBytes, long oldDownloadDays, Instant scannedAt) {
+            this(scopeId, includeSubfolders, excludedIds, protectedIds, largeBytes, oldDownloadDays,
+                    scannedAt, DEFAULT_CATEGORIES);
+        }
         public Options {
             Objects.requireNonNull(scopeId); Objects.requireNonNull(scannedAt);
             excludedIds = Set.copyOf(excludedIds); protectedIds = Set.copyOf(protectedIds);
+            selectedCategories = Set.copyOf(selectedCategories);
             if (largeBytes < 0 || oldDownloadDays < 0) throw new IllegalArgumentException("negative threshold");
         }
     }
@@ -65,6 +74,16 @@ public final class CleanerEngine {
         public Group { memberIds = List.copyOf(memberIds); }
     }
     public record Suggestion(String entryId, Category category, String reason, boolean selectedByDefault) {}
+    /** Display order only. Priority is a search ranking, never a deletion safety judgment. */
+    public record Finding(String id, Category category, Group group, Suggestion suggestion,
+                          int priorityTier, String priorityLabel, long knownReclaimableBytes,
+                          int unknownSizeFiles) {
+        public Finding {
+            if ((group == null) == (suggestion == null))
+                throw new IllegalArgumentException("Finding must contain one group or suggestion");
+        }
+        public boolean isGroup() { return group != null; }
+    }
     public record Analysis(Map<String, Entry> entries, List<Group> groups, List<Suggestion> suggestions,
                            List<String> coverageWarnings, Options options) {
         public Analysis {
@@ -153,22 +172,29 @@ public final class CleanerEngine {
             Entry entry = eligible.get(id);
             if (entry == null) continue;
             scoped.put(id, entry);
-            if (entry.kind() == Kind.DIRECTORY && !entry.childrenComplete())
+            if (entry.kind() == Kind.DIRECTORY && !entry.childrenComplete()
+                    && (options.includeSubfolders() || entry.id().equals(root.id())))
                 warnings.add("Incomplete folder enumeration: " + entry.path());
         }
         List<Group> groups = new ArrayList<>();
         List<Suggestion> suggestions = new ArrayList<>();
-        detectDuplicates(scoped.values(), verifier, groups, warnings);
-        detectNumbered(scoped.values(), groups);
-        detectVersions(scoped.values(), groups);
+        if (options.selectedCategories().contains(Category.EXACT_DUPLICATE))
+            detectDuplicates(scoped.values(), verifier, groups, warnings);
+        if (options.selectedCategories().contains(Category.NUMBERED_COPY)) detectNumbered(scoped.values(), groups);
+        if (options.selectedCategories().contains(Category.OLDER_VERSION)) detectVersions(scoped.values(), groups);
         for (Entry entry : scoped.values()) {
             if (entry.kind() != Kind.FILE || entry.id().equals(root.id())) continue;
-            if (entry.size() != null && entry.size() >= options.largeBytes())
+            if (options.selectedCategories().contains(Category.LARGE_FILE)
+                    && entry.size() != null && entry.size() >= options.largeBytes())
                 suggestions.add(new Suggestion(entry.id(), Category.LARGE_FILE, "Large file", false));
-            if (isDownload(entry, all)) {
-                if (entry.modified() != null && entry.modified().isBefore(options.scannedAt().minusSeconds(options.oldDownloadDays() * 86400)))
+            if ((options.selectedCategories().contains(Category.OLD_DOWNLOAD)
+                    || options.selectedCategories().contains(Category.DOWNLOADED_INSTALLER_OR_ARCHIVE))
+                    && isDownload(entry, all)) {
+                if (options.selectedCategories().contains(Category.OLD_DOWNLOAD)
+                        && entry.modified() != null && entry.modified().isBefore(options.scannedAt().minusSeconds(options.oldDownloadDays() * 86400)))
                     suggestions.add(new Suggestion(entry.id(), Category.OLD_DOWNLOAD, "Old download", false));
-                if (DOWNLOAD_TYPES.contains(extension(entry.name())))
+                if (options.selectedCategories().contains(Category.DOWNLOADED_INSTALLER_OR_ARCHIVE)
+                        && DOWNLOAD_TYPES.contains(extension(entry.name())))
                     suggestions.add(new Suggestion(entry.id(), Category.DOWNLOADED_INSTALLER_OR_ARCHIVE, "Downloaded installer or archive", false));
             }
         }
@@ -180,15 +206,21 @@ public final class CleanerEngine {
                                                           Options options) {
         Objects.requireNonNull(page); Objects.requireNonNull(options);
         List<Suggestion> result = new ArrayList<>();
-        Instant oldBefore = options.scannedAt().minusSeconds(Math.multiplyExact(options.oldDownloadDays(), 86400));
+        boolean largeEnabled = options.selectedCategories().contains(Category.LARGE_FILE);
+        boolean ageEnabled = options.selectedCategories().contains(Category.OLD_DOWNLOAD);
+        boolean archiveEnabled = options.selectedCategories().contains(Category.DOWNLOADED_INSTALLER_OR_ARCHIVE);
+        if (!largeEnabled && !ageEnabled && !archiveEnabled) return List.of();
+        Instant oldBefore = ageEnabled
+                ? options.scannedAt().minusSeconds(Math.multiplyExact(options.oldDownloadDays(), 86400)) : null;
         for (Entry entry : page) {
             if (entry.kind() != Kind.FILE || excludedDirectly(entry, options)) continue;
-            if (entry.size() != null && entry.size() >= options.largeBytes())
+            if (largeEnabled && entry.size() != null && entry.size() >= options.largeBytes())
                 result.add(new Suggestion(entry.id(), Category.LARGE_FILE, "Large file", false));
-            if (inDownloads || entry.name().equalsIgnoreCase("download") || entry.name().equalsIgnoreCase("downloads")) {
-                if (entry.modified() != null && entry.modified().isBefore(oldBefore))
+            if ((ageEnabled || archiveEnabled) && (inDownloads || entry.name().equalsIgnoreCase("download")
+                    || entry.name().equalsIgnoreCase("downloads"))) {
+                if (ageEnabled && entry.modified() != null && entry.modified().isBefore(oldBefore))
                     result.add(new Suggestion(entry.id(), Category.OLD_DOWNLOAD, "Old download", false));
-                if (DOWNLOAD_TYPES.contains(extension(entry.name())))
+                if (archiveEnabled && DOWNLOAD_TYPES.contains(extension(entry.name())))
                     result.add(new Suggestion(entry.id(), Category.DOWNLOADED_INSTALLER_OR_ARCHIVE,
                             "Downloaded installer or archive", false));
             }
@@ -201,12 +233,95 @@ public final class CleanerEngine {
                                                 Options options) {
         Objects.requireNonNull(folderChildren); Objects.requireNonNull(options);
         if (!listingComplete) return List.of();
+        if (!options.selectedCategories().contains(Category.NUMBERED_COPY)
+                && !options.selectedCategories().contains(Category.OLDER_VERSION)) return List.of();
         List<Entry> eligible = new ArrayList<>();
         for (Entry entry : folderChildren) if (!excludedDirectly(entry, options)) eligible.add(entry);
         List<Group> groups = new ArrayList<>();
-        detectNumbered(eligible, groups);
-        detectVersions(eligible, groups);
+        if (options.selectedCategories().contains(Category.NUMBERED_COPY)) detectNumbered(eligible, groups);
+        if (options.selectedCategories().contains(Category.OLDER_VERSION)) detectVersions(eligible, groups);
         return groups;
+    }
+
+    /** Stable presentation order. The byte estimate excludes one keeper and is never a deletion approval. */
+    public static List<Finding> rankedFindings(Map<String, Entry> entries, List<Group> groups,
+                                               List<Suggestion> suggestions) {
+        Objects.requireNonNull(entries); Objects.requireNonNull(groups); Objects.requireNonNull(suggestions);
+        Map<String, List<Entry>> byParent = new HashMap<>();
+        for (Entry entry : entries.values())
+            byParent.computeIfAbsent(entry.parentId(), ignored -> new ArrayList<>()).add(entry);
+        Map<String, Space> spaceCache = new HashMap<>();
+        List<Finding> ranked = new ArrayList<>(groups.size() + suggestions.size());
+        for (Group group : groups) {
+            Space total = new Space(0, 0);
+            Space keeper = null;
+            Space largestCandidate = null;
+            for (String id : group.memberIds()) {
+                Entry member = entries.get(id);
+                if (member == null) continue;
+                Space part = subtreeSpace(member, byParent, spaceCache, new HashSet<>());
+                total = total.plus(part);
+                if (largestCandidate == null || part.known() > largestCandidate.known()
+                        || (part.known() == largestCandidate.known() && part.unknown() > largestCandidate.unknown()))
+                    largestCandidate = part;
+                if (id.equals(group.suggestedKeeperId())) keeper = part;
+            }
+            if (keeper == null) keeper = largestCandidate == null ? new Space(0, 0) : largestCandidate;
+            ranked.add(new Finding(group.id(), group.category(), group, null,
+                    priorityTier(group.category()), priorityLabel(group.category()),
+                    Math.max(0, total.known() - keeper.known()), Math.max(0, total.unknown() - keeper.unknown())));
+        }
+        for (Suggestion suggestion : suggestions) {
+            Entry entry = entries.get(suggestion.entryId());
+            Space space = entry == null ? new Space(0, 0) : subtreeSpace(entry, byParent, spaceCache, new HashSet<>());
+            ranked.add(new Finding(suggestion.entryId() + ":" + suggestion.category().name(),
+                    suggestion.category(), null, suggestion, priorityTier(suggestion.category()),
+                    priorityLabel(suggestion.category()), space.known(), space.unknown()));
+        }
+        ranked.sort(Comparator.comparingInt(Finding::priorityTier)
+                .thenComparing(Comparator.comparingLong(Finding::knownReclaimableBytes).reversed())
+                .thenComparing(Finding::id));
+        return List.copyOf(ranked);
+    }
+
+    private record Space(long known, int unknown) {
+        Space plus(Space other) {
+            long bytes = known > Long.MAX_VALUE - other.known ? Long.MAX_VALUE : known + other.known;
+            int count = unknown > Integer.MAX_VALUE - other.unknown ? Integer.MAX_VALUE : unknown + other.unknown;
+            return new Space(bytes, count);
+        }
+    }
+    private static Space subtreeSpace(Entry entry, Map<String, List<Entry>> byParent,
+                                      Map<String, Space> cache, Set<String> visiting) {
+        Space cached = cache.get(entry.id());
+        if (cached != null) return cached;
+        if (!visiting.add(entry.id())) return new Space(0, 0);
+        Space space = entry.kind() == Kind.FILE
+                ? new Space(entry.size() == null ? 0 : entry.size(), entry.size() == null ? 1 : 0)
+                : new Space(0, 0);
+        if (entry.kind() == Kind.DIRECTORY) for (Entry child : byParent.getOrDefault(entry.id(), List.of()))
+            space = space.plus(subtreeSpace(child, byParent, cache, visiting));
+        visiting.remove(entry.id());
+        cache.put(entry.id(), space);
+        return space;
+    }
+    private static int priorityTier(Category category) {
+        return switch (category) {
+            case EXACT_DUPLICATE -> 1;
+            case OLDER_VERSION, NUMBERED_COPY -> 2;
+            case LARGE_FILE -> 3;
+            case DOWNLOADED_INSTALLER_OR_ARCHIVE -> 4;
+            case OLD_DOWNLOAD -> 5;
+        };
+    }
+    private static String priorityLabel(Category category) {
+        return switch (category) {
+            case EXACT_DUPLICATE -> "Verified content match";
+            case OLDER_VERSION, NUMBERED_COPY -> "Version or copy pattern";
+            case LARGE_FILE -> "Large file";
+            case DOWNLOADED_INSTALLER_OR_ARCHIVE -> "Downloaded package or archive";
+            case OLD_DOWNLOAD -> "Old download";
+        };
     }
 
     private static boolean excludedDirectly(Entry entry, Options options) {
@@ -452,6 +567,14 @@ public final class CleanerEngine {
         }
         for (String id : keepers) if (removalReasons.containsKey(id))
             blockers.add("Selected removal overlaps a keeper: " + id);
+        Set<String> keeperTree = new LinkedHashSet<>(keepers);
+        for (String keeperId : keepers) {
+            Entry keeper = entries.get(keeperId);
+            if (keeper != null && keeper.kind() == Kind.DIRECTORY)
+                keeperTree.addAll(descendants(entries, keeperId, true));
+        }
+        for (String id : removalReasons.keySet()) if (keeperTree.contains(id) && !keepers.contains(id))
+            blockers.add("Selected removal overlaps a kept folder: " + id);
         Map<String, ReviewedFile> manifest = new LinkedHashMap<>();
         Map<String, Set<String>> children = new LinkedHashMap<>();
         List<TrashStep> trash = new ArrayList<>();
@@ -468,7 +591,7 @@ public final class CleanerEngine {
                     blockers.add("Folder requires complete descendant review: " + id);
                 if (child != null && excluded(child, entries, analysis.options()))
                     blockers.add("Selected folder contains an excluded or protected entry: " + childId);
-                if (keepers.contains(childId)) blockers.add("Selected folder contains a keeper: " + childId);
+                if (keeperTree.contains(childId)) blockers.add("Selected folder contains a keeper: " + childId);
                 if (child != null) {
                     manifest.put(childId, reviewed(child));
                     if (child.kind() == Kind.DIRECTORY)
@@ -478,10 +601,17 @@ public final class CleanerEngine {
             trash.add(new TrashStep(id, List.copyOf(descendants), removalReasons.get(id).iterator().next()));
             alreadyCovered.addAll(included);
         }
-        for (String keeperId : keepers) {
+        for (String keeperId : keeperTree) {
             Entry keeper = entries.get(keeperId);
-            if (keeper != null) manifest.put(keeperId, reviewed(keeper));
+            if (keeper == null) continue;
+            if (keeper.kind() == Kind.DIRECTORY && !keeper.childrenComplete())
+                blockers.add("Kept folder requires complete descendant review: " + keeperId);
+            manifest.put(keeperId, reviewed(keeper));
+            if (keeper.kind() == Kind.DIRECTORY)
+                children.put(keeperId, descendants(entries, keeperId, false));
         }
+        for (ReviewedFile file : manifest.values()) if (PENDING_REVISION.equals(file.revision()))
+            blockers.add("File fingerprint requires review preparation: " + file.id());
         for (RenameStep rename : renames) {
             Entry keeper = entries.get(rename.keeperId());
             for (Entry other : entries.values()) {
@@ -502,7 +632,7 @@ public final class CleanerEngine {
         Set<String> rules = new HashSet<>(analysis.options().excludedIds());
         rules.addAll(analysis.options().protectedIds());
         return new Plan(analysis.options().scopeId(), rules, manifest, children, removalReasons,
-                trash, renames, keepers, blockers, bytes, unknown);
+                trash, renames, keeperTree, blockers, bytes, unknown);
     }
     private static ReviewedFile reviewed(Entry entry) {
         return new ReviewedFile(entry.id(), entry.volumeId(), entry.path(), entry.name(),

@@ -117,6 +117,10 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private var cleanScanKey: String? = null
     private var cleanScanFolderId: String? = null
     private var cleanScanFolderName: String? = null
+    private var cleanScanCategories: Set<CleanerEngine.Category> = emptySet()
+    private var cleanScanIncludesSubfolders = true
+    private var cleanSetup = true
+    private var cleanSettingsFolderId: String? = null
     private var cleanScanId = 0L
     private val cleanProgressEntries = linkedMapOf<String, CleanerEngine.Entry>()
     private val cleanProgressGroups = linkedMapOf<String, CleanerEngine.Group>()
@@ -142,10 +146,14 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private var cleanerLargeMiB = preferences.getInt("cleanLargeMiB", 512)
     private var cleanerOldDays = preferences.getInt("cleanOldDays", 90)
     private var cleanerIncludeSubfolders = preferences.getBoolean("cleanSubfolders", true)
+    private val cleanerCategories = (preferences.getStringSet("cleanChecks", null)?.mapNotNull { name ->
+        runCatching { CleanerEngine.Category.valueOf(name) }.getOrNull()
+    }?.toMutableSet() ?: mutableSetOf(CleanerEngine.Category.NUMBERED_COPY))
     private val cleanerExcludedIds = (preferences.getStringSet("cleanExcludedIds", emptySet()) ?: emptySet()).toMutableSet()
 
     private fun cleanKey(folder: String): String = listOf(folder, cleanerIncludeSubfolders,
-        cleanerLargeMiB, cleanerOldDays, cleanerExcludedIds.sorted().joinToString("|")).joinToString("::")
+        cleanerLargeMiB, cleanerOldDays, cleanerExcludedIds.sorted().joinToString("|"),
+        cleanerCategories.map { it.name }.sorted().joinToString("|")).joinToString("::")
 
     data class HostHandoff(val kind: String, val documentId: String?)
     private data class TimedHandoff(val value: HostHandoff, val expiresAt: Long)
@@ -339,7 +347,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         persist()
     }
 
-    fun openSettings() = synchronized(lock) { view = "settings"; persist() }
+    fun openSettings() = synchronized(lock) { cleanSettingsFolderId = null; view = "settings"; persist() }
 
     private fun render(offset: Int, limit: Int): String {
         if (commands.size > 2048) commands.clear()
@@ -528,7 +536,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         action(actions, "Sort ${sort.name.lowercase()}", "sort") { sort = FileSort.entries[(sort.ordinal + 1) % FileSort.entries.size] }
         action(actions, if (grid) "List view" else "Details view", "layout") { grid = !grid }
         action(actions, if (showHidden) "Show hidden" else "Hide hidden", "toggle") { showHidden = !showHidden }
-        action(actions, "Clean", "clean") { startCleanScan(folder) }
+        action(actions, "Clean", "clean") { openClean(folder) }
         action(actions, "Info", "info") { infoReturnView = view; view = "info" }
         action(actions, "Customize folder", "folderAppearance") {
             appearanceFolderId = folder; appearanceReturnView = view; view = "folderAppearance"
@@ -935,60 +943,158 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val folder = cleanPresentedFolderId ?: folderId ?: run { view = "overview"; return }
         val analysis = cleanerAnalysis?.takeIf { cleanerScopeKey == cleanPresentedKey }
         val include = analysis?.options()?.includeSubfolders() ?: cleanerIncludeSubfolders
-        val scopeLabel = if (folder != folderId) {
-            val name = runCatching { repository.get(folder).name }.getOrDefault("Selected folder")
-            "$name · "
-        } else ""
         page.put("cleanScopeId", folder).put("cleanScopeName", analysis?.entries()?.get(folder)?.name()
             ?: runCatching { repository.get(folder).name }.getOrDefault("Selected folder"))
-        val lastScan = preferences.getLong("lastCleanScanAt:$folder", 0)
-        if (lastScan > 0) page.put("summary", "${scopeLabel}Last scan ${java.util.Date(lastScan)} · ${if (include) "Subfolders included" else "Current folder only"}")
-        else page.put("summary", "${scopeLabel}No scan yet · ${if (include) "Subfolders included" else "Current folder only"}")
         action(actions, "Back to folder", "back") { view = "browser" }
-        action(actions, "Scan again", "scan") { startCleanScan(folder, force = true) }
-        action(actions, if (cleanerIncludeSubfolders) "Subfolders on" else "Subfolders off", "toggle") {
-            cleanerIncludeSubfolders = !cleanerIncludeSubfolders
-            cleanPresentedKey = cleanKey(folder)
-        }
-        action(actions, "Clean settings", "settings") { view = "settings" }
-        if (analysis == null) {
-            page.put("message", "Scan this folder to see cleanup recommendations and coverage.")
+        action(actions, "Clean settings", "settings") { cleanSettingsFolderId = folder; view = "settings" }
+        if (cleanSetup || analysis == null) {
+            page.put("cleanSetup", true).put("includeSubfolders", cleanerIncludeSubfolders)
+                .put("cleanCanScan", cleanerCategories.isNotEmpty())
+                .put("summary", "Choose the checks to run in this folder.")
+            val checks = JSONArray()
+            val categories = listOf(CleanerEngine.Category.NUMBERED_COPY, CleanerEngine.Category.OLDER_VERSION,
+                CleanerEngine.Category.EXACT_DUPLICATE, CleanerEngine.Category.LARGE_FILE,
+                CleanerEngine.Category.DOWNLOADED_INSTALLER_OR_ARCHIVE, CleanerEngine.Category.OLD_DOWNLOAD)
+            for (category in categories) {
+                val toggle = registered(cleanCategoryLabel(category), "toggleCleanCheck") {
+                    if (!cleanerCategories.add(category)) cleanerCategories.remove(category)
+                    cleanPresentedKey = cleanKey(folder)
+                    message = null
+                }
+                checks.put(JSONObject().put("id", category.name).put("label", cleanCategoryLabel(category))
+                    .put("description", cleanCategoryDescription(category))
+                    .put("enabled", category in cleanerCategories)
+                    .put("slow", category == CleanerEngine.Category.EXACT_DUPLICATE || category == CleanerEngine.Category.OLDER_VERSION)
+                    .put("action", toggle))
+            }
+            page.put("cleanChecks", checks)
+            action(actions, "Include subfolders", "toggleSubfolders") {
+                cleanerIncludeSubfolders = !cleanerIncludeSubfolders
+                cleanPresentedKey = cleanKey(folder)
+            }
+            action(actions, "Start scan", "scan") { startCleanScan(folder, force = true) }
             return
         }
-        val groups = analysis.groups()
-        val suggestions = analysis.suggestions()
-        page.put("summary", "$scopeLabel${groups.size} duplicate/copy/version groups · ${suggestions.size} other suggestions · Last scan ${java.util.Date(lastScan)}")
+        page.put("cleanSetup", false).put("includeSubfolders", include)
+            .put("cleanChecksSummary", analysis.options().selectedCategories().sortedBy { it.ordinal }.joinToString { cleanCategoryLabel(it) })
+            .put("summary", "${analysis.groups().size} copy/version groups · ${analysis.suggestions().size} optional findings · Highest priority and known space first")
+        action(actions, "Scan again", "scan") { startCleanScan(folder, force = true) }
+        action(actions, "Scan options", "configureClean") { cleanSetup = true; cleanPresentedKey = cleanKey(folder) }
         if (analysis.coverageWarnings().isNotEmpty()) page.put("message", analysis.coverageWarnings().take(2).joinToString("; "))
         action(actions, "Review selected", "review") {
-            cleanerPlan = CleanerEngine.plan(analysis, cleanerKeepers,
-                cleanerSelectedGroups, cleanerSelectedSuggestions)
-            view = "cleanReview"
+            prepareCleanReview(analysis)
         }
-        val combinedCount = groups.size + suggestions.size
-        groups.drop(offset).take(limit).forEach { group ->
-            val chosen = cleanerKeepers[group.id()] ?: group.suggestedKeeperId()
-            val members = group.memberIds().mapNotNull { analysis.entries()[it] }
+        val displayGroups = analysis.groups().map { group ->
+            val chosen = cleanerKeepers[group.id()] ?: return@map group
+            CleanerEngine.Group(group.id(), group.category(), group.memberIds(), chosen,
+                group.requiresKeeperChoice(), group.baseName(), group.evidence())
+        }
+        val findings = CleanerEngine.rankedFindings(analysis.entries(), displayGroups, analysis.suggestions())
+        page.put("findingCount", findings.size)
+        findings.drop(offset).take(limit).forEach { finding ->
+            val item = cleanFindingItem(finding, analysis.entries(), preliminary = false)
             val row = JSONArray()
-            action(row, if (group.id() in cleanerSelectedGroups) "Included" else "Include", "select") {
-                if (!cleanerSelectedGroups.add(group.id())) cleanerSelectedGroups.remove(group.id())
+            val group = finding.group()
+            if (group != null) {
+                action(row, if (group.id() in cleanerSelectedGroups) "Included" else "Include", "select") {
+                    if (!cleanerSelectedGroups.add(group.id())) cleanerSelectedGroups.remove(group.id())
+                }
+                action(row, "Choose keeper", "keeper") { keeperGroupId = group.id(); view = "keeper" }
+            } else {
+                val entryId = requireNotNull(finding.suggestion()).entryId()
+                action(row, if (entryId in cleanerSelectedSuggestions) "Included" else "Include", "select") {
+                    if (!cleanerSelectedSuggestions.add(entryId)) cleanerSelectedSuggestions.remove(entryId)
+                }
             }
-            action(row, "Choose keeper", "keeper") { keeperGroupId = group.id(); view = "keeper" }
-            items.put(JSONObject().put("id", group.id()).put("name", group.baseName() ?: group.category().name)
-                .put("kind", "group").put("subtitle", "${group.category().name.lowercase()} · ${group.evidence()} · ${members.size} items")
-                .put("actions", row))
+            items.put(item.put("actions", row))
         }
-        suggestions.drop((offset - groups.size).coerceAtLeast(0)).take((limit - (groups.size - offset).coerceIn(0, limit)).coerceAtLeast(0)).forEach { suggestion ->
-            val entry = analysis.entries()[suggestion.entryId()] ?: return@forEach
-            val row = JSONArray()
-            action(row, if (entry.id() in cleanerSelectedSuggestions) "Included" else "Include", "select") {
-                if (!cleanerSelectedSuggestions.add(entry.id())) cleanerSelectedSuggestions.remove(entry.id())
+        next(page, actions, offset, limit, findings.size)
+    }
+
+    private fun cleanFindingItem(finding: CleanerEngine.Finding, entries: Map<String, CleanerEngine.Entry>,
+        preliminary: Boolean): JSONObject {
+        val group = finding.group()
+        val suggestion = finding.suggestion()
+        val entry = suggestion?.let { entries[it.entryId()] }
+        val details = if (group != null) "${cleanCategoryLabel(group.category())} · ${group.evidence()} · ${group.memberIds().size} items"
+            else suggestion?.reason().orEmpty()
+        return JSONObject().put("id", finding.id()).put("name", group?.baseName() ?: entry?.name() ?: cleanCategoryLabel(finding.category()))
+            .put("kind", if (group != null) "group" else "suggestion")
+            .put("subtitle", (if (preliminary) "Preliminary · " else "") + details)
+            .put("priorityTier", finding.priorityTier()).put("priorityLabel", finding.priorityLabel())
+            .put("reclaimableKnownBytes", if (group?.memberIds()?.any {
+                val member = entries[it]
+                member?.kind() == CleanerEngine.Kind.DIRECTORY && (preliminary || !member.childrenComplete())
+            } == true) JSONObject.NULL else finding.knownReclaimableBytes())
+            .put("unknownSizeFiles", finding.unknownSizeFiles()).put("sizeBytes", entry?.size())
+    }
+
+    private fun cleanCategoryLabel(category: CleanerEngine.Category): String = when (category) {
+        CleanerEngine.Category.NUMBERED_COPY -> "Numbered copies"
+        CleanerEngine.Category.EXACT_DUPLICATE -> "Exact duplicates"
+        CleanerEngine.Category.OLDER_VERSION -> "Older builds and versions"
+        CleanerEngine.Category.LARGE_FILE -> "Large files"
+        CleanerEngine.Category.OLD_DOWNLOAD -> "Old downloads"
+        CleanerEngine.Category.DOWNLOADED_INSTALLER_OR_ARCHIVE -> "Downloaded installers and archives"
+    }
+
+    private fun cleanCategoryDescription(category: CleanerEngine.Category): String = when (category) {
+        CleanerEngine.Category.NUMBERED_COPY -> "Find names such as file, file (1), and file (2)."
+        CleanerEngine.Category.EXACT_DUPLICATE -> "Compare contents of matching-size files."
+        CleanerEngine.Category.OLDER_VERSION -> "Compare revision names and verified APK builds."
+        CleanerEngine.Category.LARGE_FILE -> "Files of at least $cleanerLargeMiB MiB, for manual review."
+        CleanerEngine.Category.OLD_DOWNLOAD -> "Older than $cleanerOldDays days. Age alone does not mean unwanted."
+        CleanerEngine.Category.DOWNLOADED_INSTALLER_OR_ARCHIVE -> "Downloaded installers and archives, for manual review."
+    }
+
+    private fun openClean(folder: String) {
+        if (view == "browser" || view == "search") {
+            cleanBrowserPosition = Triple(currentOffset, scrollAnchor, scrollOffset)
+        }
+        if (cleanScanCancel != null) {
+            cleanPresentedKey = cleanScanKey
+            cleanPresentedFolderId = cleanScanFolderId
+            cleanSetup = false
+            view = "progress"
+            return
+        }
+        if (activeJobCancel != null && jobReturnView == "cleanReview") {
+            view = "progress"
+            return
+        }
+        cleanPresentedFolderId = folder
+        cleanPresentedKey = cleanKey(folder)
+        cleanSetup = cleanerAnalysis == null || cleanerScopeKey != cleanPresentedKey
+        view = "clean"
+    }
+
+    private fun prepareCleanReview(analysis: CleanerEngine.Analysis) {
+        require(activeJobCancel == null && cleanScanCancel == null) { "Another file operation is running" }
+        val keepers = cleanerKeepers.toMap()
+        val groups = cleanerSelectedGroups.toSet()
+        val suggestions = cleanerSelectedSuggestions.toSet()
+        require(groups.isNotEmpty() || suggestions.isNotEmpty()) { "Select findings to review" }
+        val cancel = AtomicBoolean(false)
+        activeJobCancel = cancel
+        cleanerPlan = null
+        jobReturnView = "cleanReview"
+        jobStatus = "Preparing review of selected files"
+        cleanSetup = false
+        view = "progress"
+        worker.execute {
+            val outcome = runCatching {
+                cleaner.prepareReview(analysis, keepers, groups, suggestions, Cancellation { cancel.get() })
             }
-            items.put(JSONObject().put("id", entry.id() + ":" + suggestion.category().name)
-                .put("name", entry.name()).put("kind", "suggestion")
-                .put("subtitle", "${suggestion.category().name.lowercase()} · ${suggestion.reason()}")
-                .put("sizeBytes", entry.size()).put("actions", row))
+            synchronized(lock) {
+                if (activeJobCancel !== cancel) return@synchronized
+                activeJobCancel = null
+                if (!cancel.get() && outcome.isSuccess) cleanerPlan = outcome.getOrThrow()
+                else message = outcome.exceptionOrNull()?.message ?: "Review preparation canceled"
+                if (view == "progress" && jobReturnView == "cleanReview")
+                    view = if (cleanerPlan != null) "cleanReview" else "clean"
+                persist()
+            }
         }
-        next(page, actions, offset, limit, combinedCount)
     }
 
     private fun startCleanScan(folder: String, force: Boolean = false) {
@@ -996,6 +1102,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val include = cleanerIncludeSubfolders
         val largeMiB = cleanerLargeMiB
         val oldDays = cleanerOldDays
+        val categories = cleanerCategories.toSet()
         val scopeKey = cleanKey(folder)
         if (view == "browser" || view == "search") {
             cleanBrowserPosition = Triple(currentOffset, scrollAnchor, scrollOffset)
@@ -1013,8 +1120,9 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             return
         }
         require(activeJobCancel == null) { "Another file operation is running" }
+        require(categories.isNotEmpty()) { "Choose at least one check before scanning" }
         val options = CleanerEngine.Options(folder, include, excluded, emptySet(),
-            largeMiB.toLong() * 1024 * 1024, oldDays.toLong(), Instant.now())
+            largeMiB.toLong() * 1024 * 1024, oldDays.toLong(), Instant.now(), categories)
         canceledTotals.add(folder)
         totalCancelFlags[folder]?.set(true)
         val cancel = AtomicBoolean(false)
@@ -1023,6 +1131,10 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         cleanScanKey = scopeKey
         cleanScanFolderId = folder
         cleanScanFolderName = runCatching { repository.get(folder).name }.getOrDefault("Selected folder")
+        cleanScanCategories = categories
+        cleanScanIncludesSubfolders = include
+        cleanSetup = false
+        message = null
         cleanPresentedKey = scopeKey
         cleanPresentedFolderId = folder
         cleanProgressEntries.clear()
@@ -1154,39 +1266,38 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private fun renderProgress(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
         page.put("state", "loading").put("summary", jobStatus).put("jobStatus", jobStatus)
         if (jobReturnView == "clean") {
+            val findings = CleanerEngine.rankedFindings(cleanProgressEntries,
+                cleanProgressGroups.values.toList(), cleanProgressSuggestions.values.toList())
             page.put("progressFor", "clean").put("complete", false)
                 .put("cleanScopeId", cleanScanFolderId)
                 .put("cleanScopeName", cleanScanFolderName)
-                .put("findingCount", cleanProgressGroups.size + cleanProgressSuggestions.size)
+                .put("cleanChecksSummary", cleanScanCategories.sortedBy { it.ordinal }.joinToString { cleanCategoryLabel(it) })
+                .put("includeSubfolders", cleanScanIncludesSubfolders)
+                .put("findingCount", findings.size)
                 .put("foldersScanned", cleanProgressFolders).put("filesScanned", cleanProgressFiles)
             if (cleanProgressWarnings.isNotEmpty())
                 page.put("message", cleanProgressWarnings.take(2).joinToString("; "))
             if (cleanProgressFiles > 0 || cleanProgressFolders > 0 || cleanProgressGroups.isNotEmpty()) {
                 page.put("summary", "$jobStatus · Recommendations are preliminary")
-                cleanProgressGroups.values.drop(offset).take(limit).forEach { group ->
-                    items.put(JSONObject().put("id", group.id()).put("name", group.baseName() ?: group.category().name)
-                        .put("kind", "group").put("subtitle", "Preliminary · ${group.category().name.lowercase()} · ${group.memberIds().size} items"))
+                findings.drop(offset).take(limit).forEach { finding ->
+                    items.put(cleanFindingItem(finding, cleanProgressEntries, preliminary = true))
                 }
-                cleanProgressSuggestions.values.drop((offset - cleanProgressGroups.size).coerceAtLeast(0))
-                    .take((limit - (cleanProgressGroups.size - offset).coerceIn(0, limit)).coerceAtLeast(0)).forEach { suggestion ->
-                        val entry = cleanProgressEntries[suggestion.entryId()] ?: return@forEach
-                        items.put(JSONObject().put("id", entry.id() + ":" + suggestion.category().name)
-                            .put("name", entry.name()).put("kind", "suggestion")
-                            .put("subtitle", "Preliminary · ${suggestion.reason()}").put("sizeBytes", entry.size()))
-                    }
-                next(page, actions, offset, limit, cleanProgressGroups.size + cleanProgressSuggestions.size)
+                next(page, actions, offset, limit, findings.size)
             }
+        } else if (jobReturnView == "cleanReview") {
+            page.put("title", "Preparing cleanup review").put("progressFor", "cleanReview")
         }
         action(actions, "Refresh progress", "refresh") { }
         action(actions, "Back to files", "back") {
             if (jobReturnView == "clean") {
                 view = "browser"
-            } else view = jobReturnView
+            } else view = if (jobReturnView == "cleanReview") "clean" else jobReturnView
         }
         if (activeJobCancel != null || cleanScanCancel != null) action(actions, "Cancel operation", "cancel") {
             if (jobReturnView == "clean") cleanScanCancel?.set(true) else activeJobCancel?.set(true)
             jobStatus = "Cancel requested; finishing the current safe step"
             if (jobReturnView == "clean") view = "browser"
+            else if (jobReturnView == "cleanReview") view = "clean"
         }
     }
 
@@ -1438,7 +1549,16 @@ class FilesPageController(context: Context, private val repository: FilesReposit
 
     private fun renderSettings(page: JSONObject, actions: JSONArray) {
         page.put("summary", "Manage storage access, cleanup thresholds, and appearance.")
-        action(actions, "Back", "back") { view = if (folderId == null) "overview" else "browser" }
+        action(actions, "Back", "back") {
+            val cleanFolder = cleanSettingsFolderId
+            cleanSettingsFolderId = null
+            if (cleanFolder != null) {
+                cleanPresentedFolderId = cleanFolder
+                cleanPresentedKey = cleanKey(cleanFolder)
+                cleanSetup = true
+                view = "clean"
+            } else view = if (folderId == null) "overview" else "browser"
+        }
         action(actions, "Info", "info") { infoReturnView = view; view = "info" }
         action(actions, "Add folder", "setup", hostAction = "pickFolder") { }
         action(actions, if (android.os.Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) "Full access enabled" else "Enable full storage access", "setup",
@@ -1707,6 +1827,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .putLong("minSizeBytes", minSizeBytes ?: -1).putLong("maxSizeBytes", maxSizeBytes ?: -1)
             .putBoolean("cleanSubfolders", cleanerIncludeSubfolders)
             .putInt("cleanLargeMiB", cleanerLargeMiB).putInt("cleanOldDays", cleanerOldDays)
+            .putStringSet("cleanChecks", cleanerCategories.map { it.name }.toSet())
             .putStringSet("cleanExcludedIds", cleanerExcludedIds.toSet())
             .putStringSet("favorites", favorites.toSet()).putString("recent", recent.joinToString(","))
             .putString("documentId", documentId)

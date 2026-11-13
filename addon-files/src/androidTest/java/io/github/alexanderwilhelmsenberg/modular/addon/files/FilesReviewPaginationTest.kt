@@ -36,6 +36,59 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun scrollUpdatesCannotExpireCleanOrReplaceItsSheetWithAnError() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val browser = page(controller)
+            val oldScroll = (0 until browser.getJSONArray("actions").length())
+                .map { browser.getJSONArray("actions").getJSONObject(it) }
+                .single { it.getString("kind") == "scroll" }
+            val oldScrollRequest = JSONObject().put("version", 1)
+                .put("actionId", oldScroll.getString("id"))
+                .put("operationToken", UUID.randomUUID().toString())
+                .put("args", JSONObject().put("anchor", 2).put("offset", 17)).toString()
+
+            // A delayed scroll write before the tap must leave the original Clean ID usable.
+            val afterScroll = JSONObject(controller.performAction(oldScrollRequest))
+            assertEquals("browser", afterScroll.getString("view"))
+            assertEquals(2, afterScroll.getInt("scrollAnchor"))
+            controller.recordScrollPosition("wrong-folder", 99, 999)
+            assertEquals(2, page(controller).getInt("scrollAnchor"))
+            controller.recordScrollPosition(browser.getString("scrollKey"), 3, 19)
+            val cleanId = (0 until browser.getJSONArray("actions").length())
+                .map { browser.getJSONArray("actions").getJSONObject(it) }
+                .single { it.getString("kind") == "clean" }.getString("id")
+            val scanning = JSONObject(controller.performAction(JSONObject().put("version", 1)
+                .put("actionId", cleanId).put("operationToken", UUID.randomUUID().toString())
+                .put("restoreScroll", JSONObject().put("key", browser.getString("scrollKey"))
+                    .put("anchor", 7).put("offset", 41)).toString()))
+            assertTrue(scanning.getString("view") in setOf("progress", "clean"))
+
+            // A browser disposal write and a poll may arrive after Clean has changed routes.
+            val polled = page(controller)
+            assertTrue(polled.getString("view") in setOf("progress", "clean"))
+            val afterLateScroll = JSONObject(controller.performAction(oldScrollRequest))
+            assertTrue(afterLateScroll.getString("view") in setOf("progress", "clean"))
+            assertFalse(afterLateScroll.optString("state") == "error")
+            val recommendations = awaitView(controller, "clean")
+            assertEquals("sheet", recommendations.getString("presentation"))
+            val afterAnotherLateScroll = JSONObject(controller.performAction(oldScrollRequest))
+            assertEquals("clean", afterAnotherLateScroll.getString("view"))
+            assertFalse(afterAnotherLateScroll.optString("message").contains("Action expired"))
+            val returned = action(controller, afterAnotherLateScroll, "Back to folder")
+            assertEquals("browser", returned.getString("view"))
+            assertEquals(7, returned.getInt("scrollAnchor"))
+            assertEquals(41, returned.getInt("scrollOffset"))
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
     @Test fun cleanStartsImmediatelyAndClosingSheetKeepsCurrentFolder() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
@@ -94,11 +147,20 @@ class FilesReviewPaginationTest {
             assertEquals("item-104", rest.getJSONArray("items").getJSONObject(4).getString("name"))
             assertEquals(0, repository.moveCalls)
 
+            val staleDeleteId = (0 until rest.getJSONArray("actions").length())
+                .map { rest.getJSONArray("actions").getJSONObject(it) }
+                .single { it.getString("label") == "Delete" }.getString("id")
+
             val canceled = action(controller, rest, "Cancel")
             assertEquals("search", canceled.getString("view"))
             assertEquals(0, repository.moveCalls)
 
-            val secondPreparing = action(controller, canceled, "Delete all results")
+            val staleDelete = JSONObject(controller.performAction(JSONObject().put("version", 1)
+                .put("actionId", staleDeleteId).put("operationToken", UUID.randomUUID().toString()).toString()))
+            assertEquals("search", staleDelete.getString("view"))
+            assertEquals("An expired destructive ID must not move files", 0, repository.moveCalls)
+
+            val secondPreparing = action(controller, staleDelete, "Delete all results")
             assertEquals("progress", secondPreparing.getString("view"))
             val secondReview = awaitView(controller, "review")
             val confirm = (0 until secondReview.getJSONArray("actions").length())

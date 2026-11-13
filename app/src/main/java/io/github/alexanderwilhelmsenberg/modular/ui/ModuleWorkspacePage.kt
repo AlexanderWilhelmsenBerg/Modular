@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -298,9 +299,15 @@ fun ModuleWorkspacePage(
         scope.launch {
             busy = true
             try {
-                WorkspacePageContract.validateActionRequest(request)
+                val actionRequest = JSONObject(request).apply {
+                    moduleComponent?.let(scrollStore::restore)?.let { saved ->
+                        put("restoreScroll", JSONObject().put("key", saved.key)
+                            .put("anchor", saved.anchor).put("offset", saved.offset))
+                    }
+                }.toString()
+                WorkspacePageContract.validateActionRequest(actionRequest)
                 val remote = capability()
-                val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(request) }
+                val raw = WorkspaceBinderCalls.run(20_000) { remote.performAction(actionRequest) }
                 check(currentSessionId == submittedSession && currentRoute == submittedRoute &&
                     currentComponent == moduleComponent) { "Files session changed. Refreshing the page." }
                 val validated = validatedPage(raw)
@@ -405,8 +412,9 @@ fun ModuleWorkspacePage(
         } finally { busy = false }
     }
 
+    val pageInsetModifier = modifier.statusBarsPadding()
     if (livePage != null) {
-        FilesPage(pageJson = livePage, modifier = modifier,
+        FilesPage(pageJson = livePage, modifier = pageInsetModifier,
             onScrollState = { key, anchor, offset ->
                 moduleComponent?.let { scrollStore.record(it, key, anchor, offset) }
             },
@@ -512,7 +520,7 @@ fun ModuleWorkspacePage(
     } else if (safeSnapshot != null && module != null &&
         module.status in setOf(ModuleConnectionStatus.CONNECTING, ModuleConnectionStatus.DISCOVERED,
             ModuleConnectionStatus.CONNECTED, ModuleConnectionStatus.FAILED)) {
-        Box(modifier.fillMaxSize()) {
+        Box(pageInsetModifier.fillMaxSize()) {
             FilesPage(pageJson = requireNotNull(safeSnapshot), onAction = {}, onOpenDocument = { _, _ -> },
                 documentLoader = { _, _ -> null }, modifier = Modifier.fillMaxSize())
             androidx.compose.material3.Surface(
@@ -532,7 +540,7 @@ fun ModuleWorkspacePage(
             }
         }
     } else {
-        Column(modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Column(pageInsetModifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
             Text(module?.label ?: "Module page unavailable", style = MaterialTheme.typography.titleLarge)
             Text(message ?: unavailableReason ?: when (module?.status) {
                 null -> "The module is no longer installed. Its Home placement is saved."

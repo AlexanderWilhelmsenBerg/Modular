@@ -28,8 +28,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
@@ -80,7 +80,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -128,7 +131,6 @@ fun FilesPage(
         runCatching { Settings.Global.getFloat(context.contentResolver,
             Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f }.getOrDefault(true)
     }
-    var lastBrowserPage by remember { mutableStateOf<JSONObject?>(null) }
     var pageBounds by remember { mutableStateOf(Rect.Zero) }
     var flyingFolder by remember { mutableStateOf<FolderFlight?>(null) }
     val flightProgress = remember { Animatable(0f) }
@@ -156,9 +158,6 @@ fun FilesPage(
         send(flight.action, null)
         delay(500)
         if (flyingFolder == flight) flyingFolder = null
-    }
-    LaunchedEffect(pageJson) {
-        if (view == "browser" || view == "search") lastBrowserPage = page
     }
     val scrollKey = page.optString("scrollKey")
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -252,10 +251,33 @@ fun FilesPage(
         }
         return
     }
-    if ((view == "clean" || view == "progress") && page.optString("presentation") == "sheet" &&
-        (view == "clean" || page.optString("progressFor") == "clean")) {
-        FilesCleanSheet(page, lastBrowserPage, items, actions, send, onOpenDocument,
-            documentLoader, modifier)
+    if (view == "progress" && page.optString("progressFor") == "cleanReview") {
+        val back = actions.firstOrNull { it.kind == "back" }
+        BackHandler(enabled = back != null) { back?.let { send(it, null) } }
+        Surface(modifier.fillMaxSize().testTag("files.clean.preparing"),
+            color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+                    back?.let { action -> FilesCleanIcon("back", "Back to findings", "files.clean.close") { send(action, null) } }
+                    Text("Preparing review", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    actions.firstOrNull { it.kind == "cancel" }?.let { action ->
+                        FilesCleanIcon("close", "Cancel preparation", "files.clean.cancel") { send(action, null) }
+                    }
+                }
+                HorizontalDivider()
+                Row(Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(24.dp))
+                    Text("Verifying selected files before review…", Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+        return
+    }
+    if (view == "clean" || (view == "progress" && page.optString("progressFor") == "clean")) {
+        FilesCleanPage(page, items, actions, send, modifier)
         return
     }
     if (view == "folderAppearance") {
@@ -320,7 +342,7 @@ fun FilesPage(
                     val headerActions = actions.filterNot { it.kind in setOf("back", "loadMore", "confirm", "cancel", "scroll", "sizeProgress", "documentCommit", "documentCancel", "create", "createFile", "search", "trash") }
                     Box {
                         FilesMoreButton(pageMenuExpanded, "files.action.more") { pageMenuExpanded = true }
-                        DropdownMenu(expanded = pageMenuExpanded, onDismissRequest = { pageMenuExpanded = false }) {
+                        DropdownMenu(shape = RectangleShape, expanded = pageMenuExpanded, onDismissRequest = { pageMenuExpanded = false }) {
                             headerActions.forEach { action ->
                                 DropdownMenuItem(text = { Text(action.label) },
                                     modifier = Modifier.testTag("files.action.${action.kind}"), onClick = {
@@ -341,7 +363,7 @@ fun FilesPage(
                     horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it.take(512) },
                         modifier = Modifier.weight(1f).testTag("files.search.input"),
-                        singleLine = true, placeholder = { Text("Search files") },
+                        singleLine = true, shape = RectangleShape, placeholder = { Text("Search files") },
                         leadingIcon = {
                             val color = MaterialTheme.colorScheme.onSurfaceVariant
                             Canvas(Modifier.size(22.dp)) {
@@ -360,11 +382,11 @@ fun FilesPage(
                         }))
                     if (createFolder != null || createFile != null) Box {
                         Surface(onClick = { createMenuExpanded = true },
-                            modifier = Modifier.size(48.dp).testTag("files.create.menu"), shape = CircleShape,
+                            modifier = Modifier.size(48.dp).testTag("files.create.menu"), shape = RectangleShape,
                             color = MaterialTheme.colorScheme.primaryContainer) {
                             Box(contentAlignment = Alignment.Center) { Text("+", style = MaterialTheme.typography.headlineMedium) }
                         }
-                        DropdownMenu(expanded = createMenuExpanded, onDismissRequest = { createMenuExpanded = false }) {
+                        DropdownMenu(shape = RectangleShape, expanded = createMenuExpanded, onDismissRequest = { createMenuExpanded = false }) {
                             createFolder?.let { action -> DropdownMenuItem(text = { Text("Folder") },
                                 modifier = Modifier.testTag("files.create.folder"), onClick = {
                                     createMenuExpanded = false; formAction = action; formValue = action.initial
@@ -405,7 +427,7 @@ fun FilesPage(
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 6.dp))
             }
             page.optString("message").takeIf { it.isNotBlank() }?.let {
-                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(12.dp)) {
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RectangleShape) {
                     Text(it, Modifier.fillMaxWidth().padding(12.dp), style = MaterialTheme.typography.bodyMedium)
                 }
                 Spacer(Modifier.height(6.dp))
@@ -441,7 +463,7 @@ fun FilesPage(
                     if (overflowActions.isNotEmpty()) {
                         Box {
                             FilesMoreButton(pageMenuExpanded, "files.action.more") { pageMenuExpanded = true }
-                            DropdownMenu(expanded = pageMenuExpanded, onDismissRequest = { pageMenuExpanded = false },
+                            DropdownMenu(shape = RectangleShape, expanded = pageMenuExpanded, onDismissRequest = { pageMenuExpanded = false },
                                 modifier = Modifier.animateContentSize()) {
                                 overflowActions.forEach { action ->
                                     DropdownMenuItem(text = { Text(if (action.kind == "info") "ⓘ  Info" else action.label) },
@@ -501,11 +523,13 @@ fun FilesPage(
             if (view == "review" || view == "emptyTrashReview" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview" || view == "restoreReview") {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     actions.firstOrNull { it.kind == "cancel" }?.let { action ->
-                        OutlinedButton(onClick = { send(action, null) }, Modifier.weight(1f).testTag("files.review.cancel")) { Text("Cancel") }
+                        OutlinedButton(onClick = { send(action, null) }, Modifier.weight(1f).testTag("files.review.cancel"),
+                            shape = RectangleShape) { Text("Cancel") }
                     }
                     actions.firstOrNull { it.kind == "confirm" }?.let { action ->
                         Button(onClick = { send(action, null) }, enabled = page.optBoolean("complete", true),
-                            modifier = Modifier.weight(1f).testTag("files.review.confirm")) { Text(action.label) }
+                            modifier = Modifier.weight(1f).testTag("files.review.confirm"),
+                            shape = RectangleShape) { Text(action.label) }
                     }
                 }
             }
@@ -526,8 +550,10 @@ fun FilesPage(
     }
     if (formAction != null) {
         val action = formAction!!
-        AlertDialog(onDismissRequest = { formValue = ""; formAction = null }, title = { Text(action.label) },
+        AlertDialog(onDismissRequest = { formValue = ""; formAction = null }, shape = RectangleShape,
+            title = { Text(action.label) },
             text = { OutlinedTextField(formValue, { formValue = it.take(512) }, label = { Text(action.input ?: "Value") },
+                shape = RectangleShape,
                 visualTransformation = if (action.kind == "password") PasswordVisualTransformation() else VisualTransformation.None) },
             confirmButton = { TextButton(onClick = {
                 send(action, JSONObject().put(action.input ?: "value", formValue)); formValue = ""; formAction = null
@@ -536,13 +562,16 @@ fun FilesPage(
     }
     if (newFileAction != null) {
         val action = newFileAction!!
-        AlertDialog(onDismissRequest = { newFileAction = null }, title = { Text("New file") },
+        AlertDialog(onDismissRequest = { newFileAction = null }, shape = RectangleShape,
+            title = { Text("New file") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(newFileName, { newFileName = it.take(255) },
-                        label = { Text("Name") }, singleLine = true, modifier = Modifier.testTag("files.create.name"))
+                        label = { Text("Name") }, singleLine = true, shape = RectangleShape,
+                        modifier = Modifier.testTag("files.create.name"))
                     OutlinedTextField(newFileExtension, { newFileExtension = it.take(32) },
-                        label = { Text("Extension") }, singleLine = true, modifier = Modifier.testTag("files.create.extension"))
+                        label = { Text("Extension") }, singleLine = true, shape = RectangleShape,
+                        modifier = Modifier.testTag("files.create.extension"))
                 }
             }, confirmButton = { TextButton(onClick = {
                 send(action, JSONObject().put("name", newFileName.trim())
@@ -554,10 +583,11 @@ fun FilesPage(
     if (dialog != null) {
         val choices = dialog.optJSONArray("actions").objects().map(::PageAction)
         AlertDialog(onDismissRequest = { choices.firstOrNull { it.kind == "cancel" }?.let { send(it, null) } },
+            shape = RectangleShape,
             title = { Text(dialog.optString("title", "Confirm")) },
             text = { Text(dialog.optString("message")) },
             confirmButton = { choices.firstOrNull { it.kind == "confirm" }?.let { action ->
-                Button(onClick = { send(action, null) }) { Text(action.label) }
+                Button(onClick = { send(action, null) }, shape = RectangleShape) { Text(action.label) }
             } },
             dismissButton = { choices.firstOrNull { it.kind == "cancel" }?.let { action ->
                 TextButton(onClick = { send(action, null) }) { Text(action.label) }
@@ -570,7 +600,7 @@ private fun FilesActionTile(action: PageAction, modifier: Modifier = Modifier,
     enabled: Boolean = action.enabled, onClick: () -> Unit) {
     Surface(onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 68.dp)
         .testTag("files.action.${action.kind}")
-        .semantics { contentDescription = action.label }, shape = RoundedCornerShape(16.dp),
+        .semantics { contentDescription = action.label }, shape = RectangleShape,
         color = MaterialTheme.colorScheme.surfaceVariant,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -595,7 +625,7 @@ private fun FilesMoreButton(expanded: Boolean, tag: String, onClick: () -> Unit)
     val rotation by androidx.compose.animation.core.animateFloatAsState(
         if (expanded) 90f else 0f, animationSpec = tween(if (motionEnabled) 160 else 0), label = "More menu")
     Surface(onClick = onClick, modifier = Modifier.size(48.dp).testTag(tag)
-        .semantics { contentDescription = "More options" }, shape = CircleShape,
+        .semantics { contentDescription = "More options" }, shape = RectangleShape,
         color = MaterialTheme.colorScheme.surfaceVariant,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
         Box(contentAlignment = Alignment.Center) {
@@ -651,7 +681,7 @@ private fun FilesEntryRow(item: JSONObject, details: Boolean, sourceHidden: Bool
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
         Box {
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenu(shape = RectangleShape, expanded = expanded, onDismissRequest = { expanded = false }) {
                 secondary.forEach { action ->
                     DropdownMenuItem(text = { Text(action.label) },
                         modifier = Modifier.testTag("files.item.action.${action.kind}"), onClick = {
@@ -724,10 +754,59 @@ private fun FilesFolderAppearanceEditor(page: JSONObject, actions: List<PageActi
 }
 
 @Composable
-private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<JSONObject>,
-    actions: List<PageAction>, send: (PageAction, JSONObject?) -> Unit,
-    onOpenDocument: (String, String) -> Unit,
-    documentLoader: suspend (String, String) -> ParcelFileDescriptor?, modifier: Modifier) {
+private fun FilesCleanIcon(icon: String, label: String, tag: String,
+    enabled: Boolean = true, onClick: () -> Unit) {
+    Box(Modifier.size(48.dp).testTag(tag)
+        .semantics { contentDescription = label }
+        .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        val color = if (enabled) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f)
+        Canvas(Modifier.size(24.dp)) {
+            val w = size.width
+            val h = size.height
+            val stroke = w * .085f
+            fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+                drawLine(color, Offset(w * x1, h * y1), Offset(w * x2, h * y2), stroke)
+            }
+            when (icon) {
+                "back" -> { line(.8f, .5f, .2f, .5f); line(.2f, .5f, .45f, .25f); line(.2f, .5f, .45f, .75f) }
+                "close" -> { line(.24f, .24f, .76f, .76f); line(.76f, .24f, .24f, .76f) }
+                "more" -> listOf(.22f, .5f, .78f).forEach {
+                    drawCircle(color, w * .065f, Offset(w * .5f, h * it))
+                }
+                "selectAll", "clear" -> {
+                    drawRect(color, Offset(w * .17f, h * .17f), Size(w * .66f, h * .66f),
+                        style = Stroke(stroke))
+                    if (icon == "selectAll") {
+                        line(.3f, .51f, .45f, .66f); line(.45f, .66f, .72f, .35f)
+                    }
+                }
+                "sort" -> { line(.2f, .28f, .8f, .28f); line(.2f, .5f, .65f, .5f); line(.2f, .72f, .5f, .72f) }
+                "asc", "desc" -> {
+                    if (icon == "asc") {
+                        line(.5f, .78f, .5f, .2f); line(.5f, .2f, .28f, .42f); line(.5f, .2f, .72f, .42f)
+                    } else {
+                        line(.5f, .2f, .5f, .78f); line(.5f, .78f, .28f, .56f); line(.5f, .78f, .72f, .56f)
+                    }
+                }
+                "review", "eye" -> {
+                    drawOval(color, Offset(w * .12f, h * .31f), Size(w * .76f, h * .38f),
+                        style = Stroke(stroke))
+                    drawCircle(color, w * .1f, Offset(w * .5f, h * .5f))
+                }
+                "keeper" -> {
+                    line(.26f, .16f, .74f, .16f); line(.74f, .16f, .74f, .84f)
+                    line(.74f, .84f, .5f, .67f); line(.5f, .67f, .26f, .84f)
+                    line(.26f, .84f, .26f, .16f)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
+    actions: List<PageAction>, send: (PageAction, JSONObject?) -> Unit, modifier: Modifier) {
     val scanning = page.optBoolean("cleanScanRunning") || page.optString("view") == "progress"
     val complete = page.optBoolean("complete", !scanning)
     val setup = page.optBoolean("cleanSetup") && !scanning
@@ -736,127 +815,142 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
     val cleanIssues = page.optJSONArray("cleanIssues").objects()
         .map { it.optString("message") }.filter { it.isNotBlank() }
     val cleanIssueCount = page.optInt("cleanIssueCount", cleanIssues.size)
+    val sort = page.optString("cleanSort", "priority")
+    val descending = page.optBoolean("cleanSortDescending", false)
+    val sortLabels = listOf("priority" to "Priority", "size" to "Size",
+        "items" to "Item count", "name" to "Name")
     var issuesOpen by remember(page.optString("folderId"), page.optString("view")) { mutableStateOf(false) }
     var cleanMenuExpanded by remember(page.optString("folderId"), page.optString("view")) { mutableStateOf(false) }
+    var sortMenuExpanded by remember(page.optString("folderId"), page.optString("view")) { mutableStateOf(false) }
     val back = actions.firstOrNull { it.kind == "back" }
     BackHandler(enabled = back != null) { back?.let { send(it, null) } }
-    Box(modifier.fillMaxSize().testTag("files.clean.sheet")) {
-        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-            .padding(16.dp).alpha(.55f)) {
-            Text(browser?.optString("title") ?: "Files", style = MaterialTheme.typography.titleLarge)
-            browser?.optJSONArray("items").objects()?.take(8)?.forEach { item ->
-                Row(Modifier.fillMaxWidth().heightIn(min = 54.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (item.optString("kind") == "folder") FilesFolderGlyph(
-                        FilesFolderAppearance.fromJson(item.optJSONObject("folderAppearance")), Modifier.size(32.dp))
-                    Text(item.optString("name"), modifier = Modifier.padding(start = 8.dp),
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Surface(modifier.fillMaxSize().testTag("files.clean.page"), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                back?.let { action ->
+                    FilesCleanIcon("back", "Back to files", "files.clean.close") { send(action, null) }
+                }
+                Text(when { scanning -> "Scanning folder"; setup -> "Clean folder"; else -> "Clean folder" },
+                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (scanning) actions.firstOrNull { it.kind == "cancel" }?.let { action ->
+                    FilesCleanIcon("close", "Cancel scan", "files.clean.cancel") { send(action, null) }
+                }
+                if (!scanning && !setup) {
+                    val menuActions = actions.filter {
+                        it.kind in setOf("scan", "configureClean", "settings")
+                    }
+                    if (menuActions.isNotEmpty()) Box {
+                        FilesCleanIcon("more", "More clean options", "files.clean.more") {
+                            cleanMenuExpanded = true
+                        }
+                        DropdownMenu(shape = RectangleShape, expanded = cleanMenuExpanded,
+                            onDismissRequest = { cleanMenuExpanded = false }) {
+                            menuActions.forEach { action ->
+                                DropdownMenuItem(text = { Text(action.label) }, enabled = action.enabled,
+                                    modifier = Modifier.testTag("files.action.${action.kind}"), onClick = {
+                                        cleanMenuExpanded = false; send(action, null)
+                                    })
+                            }
+                        }
+                    }
                 }
             }
-        }
-        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = .36f))
-            .clickable(enabled = back != null) { back?.let { send(it, null) } })
-        Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.82f),
-            shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
-            color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
-            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 14.dp)) {
-                Box(Modifier.align(Alignment.CenterHorizontally).width(36.dp).height(4.dp)
-                    .clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant))
-                Spacer(Modifier.height(14.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(when { scanning -> "Scanning folder"; setup -> "Choose what to scan"; else -> "Clean folder" },
-                        style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    if (scanning) actions.firstOrNull { it.kind == "cancel" }?.let { action ->
-                        TextButton(onClick = { send(action, null) }, modifier = Modifier.testTag("files.clean.cancel")) {
-                            Text("Cancel")
+            HorizontalDivider()
+            page.optString("cleanScopeName").takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 6.dp))
+            }
+            if (setup) {
+                Text("Select the checks that matter to you.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 6.dp))
+                LazyColumn(Modifier.weight(1f).testTag("files.clean.options")) {
+                    items(checks, key = { it.optString("id") }) { check ->
+                        val action = PageAction(check.optJSONObject("action"))
+                        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                            .testTag("files.clean.check:${check.optString("id")}")
+                            .clickable(enabled = action.id.isNotBlank()) { send(action, null) }
+                            .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = check.optBoolean("enabled"), onCheckedChange = null)
+                            Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                Text(check.optString("label"), style = MaterialTheme.typography.bodyMedium)
+                                Text(check.optString("description"), style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (check.optBoolean("slow")) Text("Slower",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 8.dp))
                         }
+                        HorizontalDivider()
                     }
-                    back?.let { action -> TextButton(onClick = { send(action, null) },
-                        modifier = Modifier.testTag("files.clean.close")) { Text("Close") } }
-                }
-                page.optString("cleanScopeName").takeIf { it.isNotBlank() }?.let {
-                    Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                val summary = page.optString("jobStatus").ifBlank { page.optString("summary") }
-                if (!setup && summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (setup) {
-                    Text("Select the checks that matter to you.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    LazyColumn(Modifier.weight(1f).testTag("files.clean.options")) {
-                        items(checks, key = { it.optString("id") }) { check ->
-                            val action = PageAction(check.optJSONObject("action"))
+                    actions.firstOrNull { it.kind == "toggleSubfolders" }?.let { action ->
+                        item {
                             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                                .testTag("files.clean.check:${check.optString("id")}")
-                                .clickable(enabled = action.id.isNotBlank()) { send(action, null) }
-                                .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(checked = check.optBoolean("enabled"), onCheckedChange = null)
-                                Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                                    Text(check.optString("label"), style = MaterialTheme.typography.bodyMedium)
-                                    Text(check.optString("description"), style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                if (check.optBoolean("slow")) Text("Slower",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 8.dp))
-                            }
-                            HorizontalDivider()
-                        }
-                        actions.firstOrNull { it.kind == "toggleSubfolders" }?.let { action ->
-                            item {
-                                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                                    .testTag("files.clean.subfolders").clickable { send(action, null) },
-                                    verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(checked = page.optBoolean("includeSubfolders"), onCheckedChange = null)
-                                    Text("Include subfolders", Modifier.padding(start = 8.dp),
-                                        style = MaterialTheme.typography.bodyMedium)
-                                }
+                                .testTag("files.clean.subfolders").clickable { send(action, null) },
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = page.optBoolean("includeSubfolders"), onCheckedChange = null)
+                                Text("Include subfolders", Modifier.padding(start = 8.dp),
+                                    style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
-                    actions.firstOrNull { it.kind == "settings" }?.let { action ->
-                        TextButton(onClick = { send(action, null) },
-                            modifier = Modifier.align(Alignment.End)) { Text(action.label) }
-                    }
-                    page.optString("message").takeIf { it.isNotBlank() }?.let { message ->
-                        Text(message, style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.testTag("files.clean.message"))
-                    }
-                    actions.firstOrNull { it.kind == "scan" }?.let { action ->
-                        Button(onClick = { send(action, null) }, enabled = page.optBoolean("cleanCanScan", enabledChecks.isNotEmpty()),
-                            modifier = Modifier.fillMaxWidth().testTag("files.clean.start")) { Text(action.label) }
-                    }
-                } else {
-                    val checksSummary = page.optString("cleanChecksSummary").ifBlank {
-                        enabledChecks.joinToString { it.optString("label") }
-                    }
-                    if (checksSummary.isNotBlank()) {
-                        Text("Checks: $checksSummary" +
-                            if (page.optBoolean("includeSubfolders")) " · Including subfolders" else "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.testTag("files.clean.scope"))
-                    }
-                if (scanning) {
-                    Spacer(Modifier.height(18.dp))
-                    CircularProgressIndicator(Modifier.size(32.dp).testTag("files.clean.progress"))
-                    Spacer(Modifier.height(6.dp))
-                    Text("${page.optLong("foldersScanned")} folders · ${page.optLong("filesScanned")} files scanned",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.testTag("files.clean.counters"))
-                    val findingCount = page.optInt("findingCount", items.size)
-                    Text("$findingCount ${if (findingCount == 1) "finding" else "findings"} so far",
-                        style = MaterialTheme.typography.bodySmall)
                 }
-                if (!scanning) {
+                actions.firstOrNull { it.kind == "settings" }?.let { action ->
+                    TextButton(onClick = { send(action, null) },
+                        modifier = Modifier.align(Alignment.End)) { Text(action.label) }
+                }
+                page.optString("message").takeIf { it.isNotBlank() }?.let { message ->
+                    Text(message, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.testTag("files.clean.message"))
+                }
+                actions.firstOrNull { it.kind == "scan" }?.let { action ->
+                    Button(onClick = { send(action, null) },
+                        enabled = page.optBoolean("cleanCanScan", enabledChecks.isNotEmpty()),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                            .testTag("files.clean.start"), shape = RectangleShape) { Text(action.label) }
+                }
+            } else {
+                val summary = page.optString("jobStatus").ifBlank { page.optString("summary") }
+                if (summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                val checksSummary = page.optString("cleanChecksSummary").ifBlank {
+                    enabledChecks.joinToString { it.optString("label") }
+                }
+                if (checksSummary.isNotBlank()) Text("Checks: $checksSummary" +
+                    if (page.optBoolean("includeSubfolders")) " · Including subfolders" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("files.clean.scope"))
+                if (scanning) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 58.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(24.dp).testTag("files.clean.progress"),
+                            strokeWidth = 2.dp)
+                        Column(Modifier.padding(start = 12.dp)) {
+                            Text("Scanning · recommendations are being prepared",
+                                style = MaterialTheme.typography.bodyMedium)
+                            Text("${page.optLong("foldersScanned")} folders · ${page.optLong("filesScanned")} files scanned",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("files.clean.counters"))
+                        }
+                    }
+                    Text("${page.optInt("findingCount", items.size)} findings so far · preview only",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
                     val selectionCount = page.optInt("cleanSelectionCount")
-                    val canReview = selectionCount > 0 && page.optBoolean("cleanCanReview", false)
-                    val menuActions = actions.filter { it.kind in setOf("scan", "configureClean", "settings", "clearCleanSelection") }
+                    val canReview = complete && page.optBoolean("cleanCanReview", false)
+                    val sortAction = actions.firstOrNull { it.kind == "cleanSort" }
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Text("$selectionCount selected", Modifier.weight(1f)
@@ -864,75 +958,131 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        actions.firstOrNull { it.kind == "review" }?.let { action ->
-                            TextButton(onClick = { send(action, null) },
-                                enabled = complete && action.enabled && canReview,
-                                modifier = Modifier.testTag("files.action.review")) {
-                                Text(action.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+                        actions.firstOrNull { it.kind == "selectAllClean" }?.let { action ->
+                            FilesCleanIcon("selectAll", "Select all", "files.action.selectAllClean",
+                                enabled = action.enabled) { send(action, null) }
                         }
-                        if (menuActions.isNotEmpty()) Box {
-                            FilesMoreButton(cleanMenuExpanded, "files.clean.more") { cleanMenuExpanded = true }
-                            DropdownMenu(expanded = cleanMenuExpanded,
-                                onDismissRequest = { cleanMenuExpanded = false }) {
-                                menuActions.forEach { action ->
-                                    DropdownMenuItem(text = { Text(action.label) }, enabled = action.enabled,
-                                        modifier = Modifier.testTag("files.action.${action.kind}"), onClick = {
-                                            cleanMenuExpanded = false; send(action, null)
-                                        })
+                        actions.firstOrNull { it.kind == "clearCleanSelection" }?.let { action ->
+                            FilesCleanIcon("clear", "Deselect all", "files.action.clearCleanSelection",
+                                enabled = action.enabled) { send(action, null) }
+                        }
+                        actions.firstOrNull { it.kind == "review" }?.let { action ->
+                            FilesCleanIcon("review", action.label, "files.action.review",
+                                enabled = action.enabled && canReview) { send(action, null) }
+                        }
+                        if (sortAction != null) {
+                            Box {
+                                FilesCleanIcon("sort", "Sort by ${sortLabels.firstOrNull { it.first == sort }?.second ?: "Priority"}",
+                                    "files.clean.sort") { sortMenuExpanded = true }
+                                DropdownMenu(shape = RectangleShape, expanded = sortMenuExpanded,
+                                    onDismissRequest = { sortMenuExpanded = false }) {
+                                    sortLabels.forEach { (key, label) ->
+                                        DropdownMenuItem(text = { Text(label) },
+                                            modifier = Modifier.testTag("files.clean.sort.$key"),
+                                            onClick = {
+                                                sortMenuExpanded = false
+                                                send(sortAction, JSONObject().put("sort", key)
+                                                    .put("direction", if (descending) "desc" else "asc"))
+                                            })
+                                    }
                                 }
+                            }
+                            FilesCleanIcon(if (descending) "desc" else "asc",
+                                if (descending) "Descending order" else "Ascending order",
+                                "files.clean.sort.direction") {
+                                send(sortAction, JSONObject().put("sort", sort)
+                                    .put("direction", if (descending) "asc" else "desc"))
                             }
                         }
                     }
+                    HorizontalDivider()
                     page.optString("message").takeIf { it.isNotBlank() }?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.testTag("files.clean.message"))
                     }
                     if (cleanIssues.isNotEmpty()) {
-                        TextButton(onClick = { issuesOpen = true },
-                            modifier = Modifier.testTag("files.clean.showIssues")) { Text("Show issues") }
+                        Text("Show $cleanIssueCount issues", Modifier.testTag("files.clean.showIssues")
+                            .clickable { issuesOpen = true }.padding(vertical = 6.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary)
                     }
                 }
-                LazyColumn(Modifier.weight(1f).testTag("files.clean.findings"),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                LazyColumn(Modifier.weight(1f).testTag("files.clean.findings")) {
                     items(items, key = { it.optString("id") }) { item ->
-                            Surface(Modifier.fillMaxWidth().testTag("files.clean.recommendation"),
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant) {
-                                Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                                    Text(item.optString("name"), style = MaterialTheme.typography.titleSmall,
-                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text(item.optString("subtitle"), style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    val priority = item.optString("priorityLabel")
-                                    if (priority.isNotBlank()) Text(priority,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary)
-                                    if (item.has("reclaimableKnownBytes")) {
-                                        Text(if (item.isNull("reclaimableKnownBytes")) "Known space unavailable"
-                                            else "${formatBytes(item.optLong("reclaimableKnownBytes"))} known space",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    val unknownSizeFiles = item.optInt("unknownSizeFiles")
-                                    if (unknownSizeFiles > 0) Text("$unknownSizeFiles files with unknown size",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    if (!scanning && complete) {
-                                        FlowRow(Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                            verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            item.optJSONArray("actions").objects().map(::PageAction).forEach { action ->
-                                                TextButton(onClick = { send(action, null) }, enabled = action.enabled,
-                                                    modifier = Modifier.heightIn(min = 48.dp)
-                                                        .testTag("files.clean.item.${action.kind}")) { Text(action.label) }
+                        val included = item.optBoolean("included")
+                        val itemActions = item.optJSONArray("actions").objects().map(::PageAction)
+                        val select = itemActions.firstOrNull { it.kind == "select" }
+                        Column(Modifier.fillMaxWidth()
+                            .testTag("files.clean.recommendation:${item.optString("id")}")
+                            .background(if (!scanning && included) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.background)
+                            .then(if (!scanning && select != null) Modifier.semantics {
+                                role = Role.Checkbox
+                                stateDescription = if (included) "Selected" else "Not selected"
+                            } else Modifier)
+                            .then(if (!scanning && complete && select != null)
+                                Modifier.clickable(enabled = select.enabled) { send(select, null) }
+                                else Modifier)
+                            .padding(horizontal = 8.dp, vertical = 10.dp)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(item.optString("name"), Modifier.weight(1f),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                if (!scanning && select != null) {
+                                    val markColor = MaterialTheme.colorScheme.primary
+                                    Box(Modifier.size(24.dp).semantics {
+                                        contentDescription = if (included) "Selected" else "Not selected"
+                                    }, contentAlignment = Alignment.Center) {
+                                        Canvas(Modifier.size(18.dp)) {
+                                            drawRect(markColor,
+                                                style = Stroke(size.width * .1f))
+                                            if (included) {
+                                                drawLine(markColor,
+                                                    Offset(size.width * .2f, size.height * .5f),
+                                                    Offset(size.width * .42f, size.height * .72f),
+                                                    size.width * .12f)
+                                                drawLine(markColor,
+                                                    Offset(size.width * .42f, size.height * .72f),
+                                                    Offset(size.width * .82f, size.height * .25f),
+                                                    size.width * .12f)
                                             }
                                         }
                                     }
                                 }
                             }
+                            item.optString("subtitle").takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                item.optString("priorityLabel").takeIf { it.isNotBlank() }?.let {
+                                    Text(it, style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary)
+                                }
+                                if (item.has("reclaimableKnownBytes")) Text(
+                                    if (item.isNull("reclaimableKnownBytes")) "Size unknown"
+                                    else "${formatBytes(item.optLong("reclaimableKnownBytes"))} known space",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            val unknownSizeFiles = item.optInt("unknownSizeFiles")
+                            if (unknownSizeFiles > 0) Text("$unknownSizeFiles files with unknown size",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (!scanning && complete) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    itemActions.filter { it.kind != "select" }.forEach { action ->
+                                        FilesCleanIcon(if (action.kind == "keeper" || action.kind == "chooseKeeper")
+                                            "keeper" else "eye", action.label,
+                                            "files.clean.item.${action.kind}",
+                                            enabled = action.enabled) { send(action, null) }
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalDivider()
                     }
                     actions.filter { it.kind == "loadMore" || it.kind == "previous" }.forEach { action ->
                         item(key = "page:${action.kind}") {
@@ -942,12 +1092,11 @@ private fun FilesCleanSheet(page: JSONObject, browser: JSONObject?, items: List<
                         }
                     }
                 }
-                }
             }
         }
     }
     if (issuesOpen && cleanIssues.isNotEmpty()) {
-        AlertDialog(onDismissRequest = { issuesOpen = false },
+        AlertDialog(onDismissRequest = { issuesOpen = false }, shape = RectangleShape,
             modifier = Modifier.testTag("files.clean.issues.dialog"),
             title = { Text("Review issues") },
             text = {
@@ -993,7 +1142,7 @@ private fun FileRow(item: JSONObject, view: String, send: (PageAction, JSONObjec
                 modifier = Modifier.size(if (compact) 40.dp else 48.dp), contentDescription = item.optString("name"))
             Spacer(Modifier.size(8.dp))
         } else if (view == "map") {
-            Box(Modifier.size(30.dp).background(mapColor(item.optString("mimeType")), RoundedCornerShape(4.dp)))
+            Box(Modifier.size(30.dp).background(mapColor(item.optString("mimeType")), RectangleShape))
             Spacer(Modifier.size(8.dp))
         }
         Column(Modifier.weight(1f)) {
@@ -1014,7 +1163,7 @@ private fun FileRow(item: JSONObject, view: String, send: (PageAction, JSONObjec
             if (secondary.isNotEmpty()) {
                 Box {
                     FilesMoreButton(expanded, "files.item.more") { expanded = true }
-                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    DropdownMenu(shape = RectangleShape, expanded = expanded, onDismissRequest = { expanded = false }) {
                         secondary.forEach { action ->
                             DropdownMenuItem(text = { Text(action.label) }, onClick = {
                                 expanded = false; onCommand(action)

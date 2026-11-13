@@ -180,6 +180,34 @@ class FilesReviewPaginationTest {
         }
     }
 
+    @Test fun cleanItemSortUsesGroupMemberCount() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        fun file(id: String, name: String) = FileEntry(id, "test-volume", "root",
+            name, "root/$name", false, "text/plain", 12L, 1, null, true, true)
+        repository.files.addAll(listOf(
+            file("two-base", "alpha.txt"), file("two-copy", "alpha (1).txt"),
+            file("three-base", "zeta.txt"), file("three-copy-1", "zeta (1).txt"),
+            file("three-copy-2", "zeta (2).txt")))
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            action(controller, setup, "Start scan")
+            val results = awaitView(controller, "clean")
+            assertEquals(2, results.getInt("findingCount"))
+            val byItems = action(controller, results, "Sort findings", JSONObject()
+                .put("sort", "items").put("direction", "desc"))
+            assertEquals("zeta.txt", byItems.getJSONArray("items").getJSONObject(0).getString("name"))
+            assertEquals(3, byItems.getJSONArray("items").getJSONObject(0).getInt("itemCount"))
+            assertEquals(2, byItems.getJSONArray("items").getJSONObject(1).getInt("itemCount"))
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
     @Test fun largeFileFindingsRankByKnownBytesAndFingerprintOnlyAfterReview() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().putInt("cleanLargeMiB", 1).commit()
@@ -207,6 +235,103 @@ class FilesReviewPaginationTest {
             assertEquals("progress", preparing.getString("view"))
             awaitView(controller, "cleanReview")
             assertTrue(repository.fingerprintCalls > 0)
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun cleanSortAndSelectAllCoverFindingsBeyondFirstPage() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().putInt("cleanLargeMiB", 1).commit()
+        val repository = ReviewFixtureRepository(itemCount = 105, largeFiles = true)
+        repository.files.indices.forEach { index ->
+            repository.files[index] = repository.files[index].copy(sizeBytes = (index + 2L) * 1024 * 1024)
+        }
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            val checks = toggleCleanCheck(controller, setup, "LARGE_FILE")
+            action(controller, checks, "Start scan")
+            val results = awaitView(controller, "clean")
+            assertEquals("priority", results.getString("cleanSort"))
+            assertEquals(105, results.getInt("findingCount"))
+
+            val sorted = action(controller, results, "Sort findings", JSONObject()
+                .put("sort", "size").put("direction", "asc"))
+            assertEquals("item-0", sorted.getJSONArray("items").getJSONObject(0).getString("name"))
+            assertEquals("size", sorted.getString("cleanSort"))
+            assertFalse(sorted.getBoolean("cleanSortDescending"))
+            val rest = action(controller, sorted, "Load more")
+            assertEquals(5, rest.getJSONArray("items").length())
+            assertEquals("item-100", rest.getJSONArray("items").getJSONObject(0).getString("name"))
+            val all = action(controller, rest, "Select all")
+            assertEquals(105, all.getInt("cleanSelectionCount"))
+            assertTrue(all.getBoolean("cleanCanReview"))
+            assertTrue((0 until all.getJSONArray("items").length()).all {
+                all.getJSONArray("items").getJSONObject(it).getBoolean("included")
+            })
+            assertEquals(0, repository.fingerprintCalls)
+            assertEquals(0, repository.moveCalls)
+
+            val descending = action(controller, all, "Sort findings", JSONObject()
+                .put("sort", "size").put("direction", "desc"))
+            assertEquals("item-104", descending.getJSONArray("items").getJSONObject(0).getString("name"))
+            assertTrue(descending.getBoolean("cleanSortDescending"))
+            assertEquals(105, descending.getInt("cleanSelectionCount"))
+            val byName = action(controller, descending, "Sort findings", JSONObject()
+                .put("sort", "name").put("direction", "asc"))
+            assertEquals("item-0", byName.getJSONArray("items").getJSONObject(0).getString("name"))
+            val byItems = action(controller, byName, "Sort findings", JSONObject()
+                .put("sort", "items").put("direction", "desc"))
+            assertEquals("items", byItems.getString("cleanSort"))
+            assertTrue(context.getSharedPreferences("files-page", 0).getBoolean("cleanSortDescending", false))
+
+            val cleared = action(controller, byItems, "Clear selection")
+            assertEquals(0, cleared.getInt("cleanSelectionCount"))
+            assertFalse(cleared.getJSONArray("items").getJSONObject(0).getBoolean("included"))
+            val included = rowAction(controller, cleared.getJSONArray("items").getJSONObject(0), "Include",
+                JSONObject().put("included", true))
+            assertEquals(1, included.getInt("cleanSelectionCount"))
+            val stillIncluded = rowAction(controller, included.getJSONArray("items").getJSONObject(0), "Included",
+                JSONObject().put("included", true))
+            assertEquals(1, stillIncluded.getInt("cleanSelectionCount"))
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun completedCleanReviewRemainsReadyThroughPageRefreshAndPagination() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().putInt("cleanLargeMiB", 1).commit()
+        val repository = ReviewFixtureRepository(itemCount = 105, largeFiles = true)
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            val checks = toggleCleanCheck(controller, setup, "LARGE_FILE")
+            action(controller, checks, "Start scan")
+            val results = awaitView(controller, "clean")
+            val all = action(controller, results, "Select all")
+            val preparing = action(controller, all, "Review selected")
+            assertEquals("progress", preparing.getString("view"))
+            val review = awaitView(controller, "cleanReview")
+            assertTrue(review.getBoolean("complete"))
+            assertEquals(100, review.getJSONArray("items").length())
+            assertEquals("100", review.getString("nextCursor"))
+            repeat(3) {
+                val refreshed = page(controller)
+                assertEquals("cleanReview", refreshed.getString("view"))
+                assertTrue(refreshed.getBoolean("complete"))
+                assertEquals(0, repository.moveCalls)
+            }
+            val remaining = action(controller, page(controller), "Load more")
+            assertEquals("cleanReview", remaining.getString("view"))
+            assertTrue(remaining.getBoolean("complete"))
+            assertEquals(5, remaining.getJSONArray("items").length())
+            assertTrue(remaining.isNull("nextCursor"))
+            assertEquals("cleanReview", page(controller).getString("view"))
             assertEquals(0, repository.moveCalls)
         } finally {
             context.getSharedPreferences("files-page", 0).edit().clear().commit()
@@ -428,7 +553,7 @@ class FilesReviewPaginationTest {
         }
     }
 
-    @Test fun scrollUpdatesCannotExpireCleanOrReplaceItsSheetWithAnError() {
+    @Test fun scrollUpdatesCannotExpireCleanOrReplaceItsScreenWithAnError() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
         val repository = ReviewFixtureRepository(itemCount = 0)
@@ -469,7 +594,7 @@ class FilesReviewPaginationTest {
             assertFalse(afterLateScroll.optString("state") == "error")
             action(controller, afterLateScroll, "Start scan")
             val recommendations = awaitView(controller, "clean")
-            assertEquals("sheet", recommendations.getString("presentation"))
+            assertEquals("screen", recommendations.getString("presentation"))
             val afterAnotherLateScroll = JSONObject(controller.performAction(oldScrollRequest))
             assertEquals("clean", afterAnotherLateScroll.getString("view"))
             assertFalse(afterAnotherLateScroll.optString("message").contains("Action expired"))
@@ -483,7 +608,7 @@ class FilesReviewPaginationTest {
         }
     }
 
-    @Test fun cleanWaitsForExplicitStartAndClosingSheetKeepsCurrentFolder() {
+    @Test fun cleanWaitsForExplicitStartAndClosingScreenKeepsCurrentFolder() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
         val repository = ReviewFixtureRepository(itemCount = 0)
@@ -501,13 +626,11 @@ class FilesReviewPaginationTest {
             assertEquals(0, repository.fingerprintCalls)
             val scanning = action(controller, setup, "Start scan")
             assertEquals("progress", scanning.getString("view"))
-            assertEquals("sheet", scanning.getString("presentation"))
-            assertEquals("browser", scanning.getString("underlyingView"))
+            assertEquals("screen", scanning.getString("presentation"))
             assertEquals("clean", scanning.getString("progressFor"))
 
             val recommendations = awaitView(controller, "clean")
-            assertEquals("sheet", recommendations.getString("presentation"))
-            assertEquals("browser", recommendations.getString("underlyingView"))
+            assertEquals("screen", recommendations.getString("presentation"))
             assertTrue(context.getSharedPreferences("files-page", 0)
                 .getLong("lastCleanScanAt:root", 0) > 0)
             assertEquals(0, repository.moveCalls)
@@ -614,13 +737,16 @@ class FilesReviewPaginationTest {
         return JSONObject(controller.performAction(request.toString()))
     }
 
-    private fun rowAction(controller: FilesPageController, row: JSONObject, label: String): JSONObject {
+    private fun rowAction(controller: FilesPageController, row: JSONObject, label: String,
+        args: JSONObject? = null): JSONObject {
         val actions = row.getJSONArray("actions")
         val command = (0 until actions.length()).map { actions.getJSONObject(it) }
             .single { it.getString("label") == label }
-        return JSONObject(controller.performAction(JSONObject().put("version", 1)
+        val request = JSONObject().put("version", 1)
             .put("actionId", command.getString("id"))
-            .put("operationToken", UUID.randomUUID().toString()).toString()))
+            .put("operationToken", UUID.randomUUID().toString())
+        if (args != null) request.put("args", args)
+        return JSONObject(controller.performAction(request.toString()))
     }
 
     private fun cleanCheck(page: JSONObject, id: String): JSONObject =

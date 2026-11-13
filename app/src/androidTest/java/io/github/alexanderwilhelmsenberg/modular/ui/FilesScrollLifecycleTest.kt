@@ -42,7 +42,7 @@ class FilesScrollLifecycleTest {
         val clean = JSONObject().put("version", 1).put("kind", "files")
             .put("view", "clean").put("state", "ready").put("title", "Clean folder")
             .put("folderId", "downloads").put("locationId", "phone")
-            .put("presentation", "sheet").put("underlyingView", "browser")
+            .put("presentation", "screen")
             .put("cleanSetup", true).put("cleanCanScan", true)
             .put("cleanChecks", JSONArray().put(JSONObject().put("id", "NUMBERED_COPY")
                 .put("label", "Numbered copies").put("enabled", true)
@@ -52,7 +52,7 @@ class FilesScrollLifecycleTest {
         val progress = JSONObject().put("version", 1).put("kind", "files")
             .put("view", "progress").put("state", "ready").put("title", "Scanning")
             .put("folderId", "downloads").put("locationId", "phone")
-            .put("presentation", "sheet").put("progressFor", "clean")
+            .put("presentation", "screen").put("progressFor", "clean")
             .put("cleanScanRunning", true).put("items", JSONArray())
             .put("actions", JSONArray()).toString()
         var page by mutableStateOf(browser)
@@ -75,7 +75,7 @@ class FilesScrollLifecycleTest {
         }
         rule.onNodeWithTag("files.action.more").performClick()
         rule.onNodeWithText("Clean").performClick()
-        rule.onNodeWithTag("files.clean.sheet").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.page").assertIsDisplayed()
         rule.onNodeWithTag("files.clean.start").performClick()
         rule.onNodeWithTag("files.clean.progress").assertIsDisplayed()
         rule.runOnIdle {

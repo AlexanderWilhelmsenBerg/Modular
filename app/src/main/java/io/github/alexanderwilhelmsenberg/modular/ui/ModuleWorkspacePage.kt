@@ -109,6 +109,10 @@ private object WorkspaceBinderCalls {
     }
 }
 
+/** Active cleanup work keeps list gestures inside Files until Back is chosen. */
+internal fun filesPageOwnsGestures(view: String?, hasSelection: Boolean, hasDialog: Boolean): Boolean =
+    hasSelection || hasDialog || view in setOf("review", "markdown", "pdf", "clean", "cleanReview", "progress", "keeper")
+
 /** Core-owned page surface. Only a registered native renderer sees module data. */
 @Composable
 fun ModuleWorkspacePage(
@@ -186,11 +190,9 @@ fun ModuleWorkspacePage(
     LaunchedEffect(pageJson, active, connected, loadedSessionId, module?.sessionId) {
         val content = pageJson?.let { runCatching { JSONObject(it) }.getOrNull() }
         val view = content?.optString("view")
-        val interactive = active && connected && loadedSessionId == module?.sessionId && content != null && (
-            (content.optJSONArray("selectedIds")?.length() ?: 0) > 0 ||
-                content.optJSONObject("dialog") != null ||
-                view in setOf("review", "markdown", "pdf", "clean", "cleanReview")
-            )
+        val interactive = active && connected && loadedSessionId == module?.sessionId && content != null &&
+            filesPageOwnsGestures(view, (content.optJSONArray("selectedIds")?.length() ?: 0) > 0,
+                content.optJSONObject("dialog") != null)
         onInteractionActiveChange(interactive)
     }
 

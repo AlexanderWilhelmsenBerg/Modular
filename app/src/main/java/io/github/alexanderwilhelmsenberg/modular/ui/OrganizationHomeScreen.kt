@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
@@ -17,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clipToBounds
@@ -94,6 +96,12 @@ fun OrganizationHomeScreen(
     onActiveModuleChanged: (String?) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val neutralFocusRequester = remember { FocusRequester() }
+    val workspaceFocusManager = LocalFocusManager.current
+    fun focusWorkspaceChrome() {
+        workspaceFocusManager.clearFocus(force = true)
+        neutralFocusRequester.requestFocus()
+    }
     val density = androidx.compose.ui.platform.LocalDensity.current
     var sorterHeaderHeight by remember { mutableIntStateOf(0) }
     val statuses by runtime.signals.statuses.collectAsState()
@@ -324,7 +332,7 @@ fun OrganizationHomeScreen(
             "verticalProgress=${vertical.progress} pagerScrolling=$pagerScrolling " +
             "drawerPagerScrolling=$drawerPagerScrolling pageScrolling=$pageScrolling pointerActive=$pointerActive")
     }
-    Box(Modifier.fillMaxSize().clipToBounds()
+    Box(Modifier.fillMaxSize().focusRequester(neutralFocusRequester).focusable().clipToBounds()
         .background(if (wallpaperMode) Color.Transparent else MaterialTheme.colorScheme.background)
         .onSizeChanged { viewportHeight = it.height }
         .then(if (workspaceMode) Modifier.nestedScroll(connection).pointerInput(workspaceGesturesEnabled) {
@@ -360,7 +368,10 @@ fun OrganizationHomeScreen(
             homeResetToken = homeResetToken, initialPageId = initialPage,
             requestedPage = requestedPage, pageRequestSerial = pageRequestSerial,
             modifier = Modifier.offset { IntOffset(0, if (workspaceMode && workspacePage) (-vertical.progress * viewportHeight).roundToInt() else 0) },
-            onScrollingChange = { pagerScrolling = it },
+            onScrollingChange = { scrolling ->
+                pagerScrolling = scrolling
+                if (scrolling && pageName.startsWith("module:")) focusWorkspaceChrome()
+            },
             onPageChanged = {
                 val nextPageName = when (it) {
                 HomePageId.Home -> "home"
@@ -368,7 +379,10 @@ fun OrganizationHomeScreen(
                 is HomePageId.Widget -> "widget:${it.id}"
                 is HomePageId.Module -> "module:${it.component}"
                 }
-                if (pageName != nextPageName) moduleInteractionActive = false
+                if (pageName != nextPageName) {
+                    if (pageName.startsWith("module:")) focusWorkspaceChrome()
+                    moduleInteractionActive = false
+                }
                 pageName = nextPageName
             },
             renderPage = { page ->

@@ -27,7 +27,9 @@ share asynchronous controller actions, document operations, scroll persistence,
 and error handling. Input policy is computed in Files and sent as generic state.
 An upward drag beyond the browser's scrolling boundary can request Apps.
 
-Android 11+ supports embedded screens. Android 10 keeps an explicit standalone
+Basic embedded Views start at Android 11. Per-provider `workspaceSurfaceMinSdk`
+defaults to 30; Files and the native-window example require 33 for nested popup
+and dialog support. Below that minimum, Core offers an explicit standalone
 fallback declared by `workspaceActivity`; settings uses `managementActivity`.
 Neither declaration grants storage access or invokes an Activity on page entry.
 
@@ -37,8 +39,9 @@ Neither declaration grants storage access or invokes an Activity on page entry.
   tests, and Files storage/deletion tests.
 - Build standalone sort and native page add-ons using published SDK 0.4.0 AARs.
 - Reject Files UI/controller dependencies and classes in Core source and APK.
-- API 30 and API 35 device tests for real cross-process input, module popups,
-  Back, detach/reattach, and navigation.
+- API 35 device tests for real cross-process input, module popups and dialogs,
+  Back, detach/reattach, and navigation. API 30 verifies explicit standalone
+  fallback and provider-only updates without changing Core.
 - Install standalone v1 then v2 while Core's installed APK fingerprint remains
   unchanged. Save both native screenshots and the fingerprint comparison.
 - Re-run the Files Light/Dark/AMOLED and font-size capture matrix against its

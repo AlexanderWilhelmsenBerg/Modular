@@ -3,6 +3,7 @@ package io.github.alexanderwilhelmsenberg.modular.capabilities
 import android.content.res.Configuration
 import android.os.ParcelFileDescriptor
 import android.os.Bundle
+import android.os.Build
 import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
@@ -87,6 +88,10 @@ class FilesCrossApkHomeTest {
                 rule.onAllNodesWithTag("launcher-pages").fetchSemanticsNodes().isNotEmpty()
             }
             swipePage(left = true)
+            if (Build.VERSION.SDK_INT < 33) {
+                assertStandaloneFilesFallback()
+                return
+            }
             assertNativeOverview()
             assertNativePopupOpensAndDismisses()
             if (InstrumentationRegistry.getArguments().getString("files_capture") == "true") captureOverview()
@@ -135,6 +140,30 @@ class FilesCrossApkHomeTest {
             }
             if (previousTheme != null) runBlocking { appearance.setTheme(previousTheme).getOrThrow() }
         }
+    }
+
+    private fun assertStandaloneFilesFallback() {
+        rule.waitUntil(20_000) { device.hasObject(By.text("Open add-on screen")) }
+        requireNotNull(device.findObject(By.text("Open add-on screen"))).click()
+        assertTrue("Core did not open the Files add-on Activity",
+            device.wait(Until.hasObject(By.text("Files")), 20_000))
+        assertTrue("Files fallback opened the wrong package",
+            device.currentPackageName.orEmpty().startsWith(
+                "io.github.alexanderwilhelmsenberg.modular.addon.files"))
+        assertTrue("Files Activity toolbar menu is missing",
+            device.wait(Until.hasObject(By.desc("More options")), 10_000))
+        val toolbarMore = device.findObjects(By.desc("More options"))
+            .minByOrNull { it.visibleBounds.top } ?: error("Files toolbar menu disappeared")
+        toolbarMore.click()
+        assertTrue("Files Activity popup did not show its overview action",
+            device.wait(Until.hasObject(By.text("Full storage access")), 10_000))
+        device.pressBack()
+        assertTrue("Files Activity popup did not dismiss",
+            device.wait(Until.gone(By.text("Full storage access")), 10_000))
+        assertTrue(device.hasObject(By.text("Files")))
+        device.pressBack()
+        rule.waitUntil(15_000) { device.hasObject(By.text("Open add-on screen")) }
+        rule.onNodeWithTag("home-search-field").assertIsDisplayed()
     }
 
     private fun assertNativeOverview() {

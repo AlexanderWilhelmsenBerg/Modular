@@ -171,7 +171,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     fun consumeHostHandoff(nonce: String): HostHandoff? = synchronized(lock) {
         if (nonce.length !in 32..64) return@synchronized null
         val item = handoffs.remove(nonce) ?: return@synchronized null
-        item.value.takeIf { item.expiresAt >= System.currentTimeMillis() }
+        item.value.takeIf { item.expiresAt >= System.currentTimeMillis() &&
+            (item.value.kind != "editDocument" || (view == "markdown" && documentId == item.value.documentId)) }
     }
 
     /** Used by the embedded renderer for an ordinary file row tap. The target Activity still
@@ -180,6 +181,17 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         require(documentId.length in 1..512) { "Invalid document ID" }
         require(!repository.get(documentId).isDirectory) { "A folder cannot be opened as a document" }
         issueHostHandoff("openDocument", documentId)
+    }
+
+    /** Opens this exact active Markdown document in our Activity for Activity-only picker work. */
+    fun createEditorHandoff(documentId: String): String = synchronized(lock) {
+        require(documentId.length in 1..512 && view == "markdown" && this.documentId == documentId) {
+            "The Markdown editor is no longer active"
+        }
+        val entry = repository.get(documentId)
+        require(!entry.isDirectory && entry.name.substringAfterLast('.', "").lowercase() in
+            setOf("md", "markdown", "mdown")) { "The active document is not Markdown" }
+        issueHostHandoff("editDocument", documentId)
     }
 
     private fun issueHostHandoff(kind: String, documentId: String?): String {

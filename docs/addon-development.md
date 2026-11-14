@@ -108,8 +108,15 @@ or replay a destructive action.
 The SDK forwards horizontal navigation when exclusive gestures are false;
 selection and local editing should keep their own gestures. Use
 `scope.requestNavigation("apps")`, `"home"`, `"previous"`, `"next"`, or `"settings"`
-for host navigation. Back first visits enabled view-tree Back callbacks, then
-`scope.onBackRequested`; return false when the host should leave the page.
+for host navigation. Back first visits child windows belonging to the session,
+then enabled view-tree Back callbacks and `scope.onBackRequested`; return false
+when the host should leave the page.
+
+On Android 13+, collect `scope.windowToken` when composing dialogs. Use
+`DialogProperties(windowType = WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+windowToken = token)` for Compose dialogs. For an Android `Dialog`, call
+`scope.configureDialog(dialog)` on Main before `dialog.show()`. These bind the
+child window to this surface; an embedded context is not an Activity token.
 
 An embedded View is not an Activity. Put Android permission, picker, and other
 Activity-based operations in your add-on's own declared `managementActivity`.
@@ -118,10 +125,14 @@ one-use opaque nonce; validate and consume the nonce in the add-on. The provider
 cannot choose another component through this API. Own network/storage
 permissions stay in the add-on APK.
 
-Native embedding requires Android 11/API 30. Optional `workspaceActivity` names
-an Activity in the same APK for an explicit standalone fallback on Android 10.
-Core validates Activity declarations at discovery and launch. No Activity opens
-automatically just because the user swipes to a page.
+Basic embedded Views require Android 11/API 30. Declare `workspaceSurfaceMinSdk`
+to set your screen's minimum (default 30). Screens using nested popup or dialog
+windows must declare at least 33: Android 13 first routes these child windows
+through the embedded surface. Files and the native-window example declare 33.
+Optional `workspaceActivity` names an Activity in the same APK for an explicit
+standalone fallback below that minimum. Core retains its Android 10 minimum and
+validates declarations at discovery and launch. Swiping to a page never launches
+an Activity automatically.
 
 The [standalone page example](../examples/standalone-page-addon/README.md) builds
 from published API/SDK artifacts without Core source. It includes compatible v1

@@ -13,6 +13,7 @@ import android.net.Uri
 import android.util.Base64
 import androidx.annotation.RequiresApi
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -21,6 +22,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -62,6 +64,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import io.github.alexanderwilhelmsenberg.modular.filesui.filesDialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -80,7 +83,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** The same native component is embedded by Core and by the Files app. Content flows over scoped PFDs. */
+/** Provider-owned viewer shared by the Files Activity and its embedded surface. */
 @Composable
 fun FilesDocumentViewer(
     documentId: String,
@@ -91,9 +94,11 @@ fun FilesDocumentViewer(
     onCancel: suspend () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenInActivity: ((String) -> Unit)? = null,
 ) {
     when (kind) {
-        "markdown" -> MarkdownViewer(documentId, baseFingerprint, documentLoader, onCommit, onCancel, onClose, modifier)
+        "markdown" -> MarkdownViewer(documentId, baseFingerprint, documentLoader, onCommit, onCancel,
+            onClose, modifier, onOpenInActivity)
         "pdf" -> PdfViewer(documentId, baseFingerprint, documentLoader, onClose, modifier)
         else -> Text("Unsupported document")
     }
@@ -102,7 +107,7 @@ fun FilesDocumentViewer(
 private data class MarkdownContent(val text: String, val encoding: String, val lineEnding: String, val hash: String)
 
 @Composable
-private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (String, String) -> ParcelFileDescriptor?, onCommit: suspend () -> Boolean, onCancel: suspend () -> Unit, onClose: () -> Unit, modifier: Modifier) {
+private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (String, String) -> ParcelFileDescriptor?, onCommit: suspend () -> Boolean, onCancel: suspend () -> Unit, onClose: () -> Unit, modifier: Modifier, onOpenInActivity: ((String) -> Unit)?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var original by remember(id) { mutableStateOf<MarkdownContent?>(null) }
@@ -113,7 +118,8 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
     var conflict by remember(id) { mutableStateOf(false) }
     val draftResolved = remember(id) { AtomicBoolean(false) }
     val undo = remember(id) { TextUndoHistory() }
-    val saveAsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
+    val saveAsLauncher = if (LocalActivityResultRegistryOwner.current != null)
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
         if (uri != null) scope.launch {
             val source = original ?: return@launch
             try {
@@ -131,7 +137,7 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
                 onClose()
             } catch (error: Exception) { status = "Save as failed; draft retained: ${error.message ?: "unknown error"}" }
         }
-    }
+    } else null
     LaunchedEffect(id) {
         try {
             val loaded = withContext(Dispatchers.IO) { loadMarkdown(loader, id) }
@@ -188,6 +194,23 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
             status = "Save failed; draft retained: ${error.message ?: "unknown error"}"
         }
     }
+    fun openSaveAs() {
+        if (saveAsLauncher != null) {
+            saveAsLauncher.launch("Markdown-copy.md")
+        } else {
+            val open = onOpenInActivity ?: return
+            val source = original ?: return
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { saveDraft(context, id, source.hash, text) }
+                    draftResolved.set(false)
+                    open(id)
+                } catch (failure: Exception) {
+                    status = "Could not preserve the private draft: ${failure.message ?: "unknown error"}"
+                }
+            }
+        }
+    }
     Column(modifier.fillMaxSize().padding(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { if (dirty) closePrompt = true else onClose() }) { Text("Back") }
@@ -197,10 +220,15 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
         }
         if (status.isNotBlank()) Text(status, color = if (conflict) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         if (mode == "edit") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { scope.launch { save() } }, enabled = dirty && !conflict && original != null,
                     modifier = Modifier.testTag("files.document.markdown.save")) { Text("Save") }
-                OutlinedButton(onClick = { saveAsLauncher.launch("Markdown-copy.md") }, enabled = original != null) { Text("Save as") }
+                OutlinedButton(onClick = ::openSaveAs,
+                    modifier = Modifier.testTag("files.document.markdown.saveAs"),
+                    enabled = original != null && (saveAsLauncher != null || onOpenInActivity != null)) {
+                    Text(if (saveAsLauncher == null) "Open in Files to save a copy" else "Save as")
+                }
                 TextButton(onClick = { val next = undo.undo(); if (next != null) { draftResolved.set(false); text = next } }, enabled = undo.canUndo) { Text("Undo") }
                 TextButton(onClick = { val next = undo.redo(); if (next != null) { draftResolved.set(false); text = next } }, enabled = undo.canRedo) { Text("Redo") }
             }
@@ -215,6 +243,7 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
         }
     }
     if (closePrompt) AlertDialog(onDismissRequest = { closePrompt = false }, title = { Text("Unsaved changes") },
+        properties = filesDialogProperties(),
         text = { Text("Save your changes, discard them, or keep editing. A private draft remains available if you leave Home.") },
         confirmButton = { TextButton(onClick = { scope.launch { save() } }) { Text("Save") } },
         dismissButton = { Row {
@@ -222,11 +251,15 @@ private fun MarkdownViewer(id: String, fingerprint: String, loader: suspend (Str
             TextButton(onClick = { closePrompt = false }) { Text("Cancel") }
         } })
     if (conflict) AlertDialog(onDismissRequest = {}, title = { Text("Original changed") },
+        properties = filesDialogProperties(),
         text = { Text("The original was edited elsewhere. Your private draft is retained. Reload the original or save a copy.") },
         confirmButton = { TextButton(onClick = { scope.launch {
             val reloaded = runCatching { withContext(Dispatchers.IO) { loadMarkdown(loader, id) } }.getOrNull()
             if (reloaded != null) { withContext(Dispatchers.IO) { draftFile(context, id).delete() }; original = reloaded; text = reloaded.text; undo.reset(text); conflict = false; status = "Reloaded" }
-        } }) { Text("Reload") } }, dismissButton = { TextButton(onClick = { saveAsLauncher.launch("Markdown-copy.md") }) { Text("Save as a copy") } })
+        } }) { Text("Reload") } }, dismissButton = { TextButton(onClick = ::openSaveAs,
+            enabled = saveAsLauncher != null || onOpenInActivity != null) {
+            Text(if (saveAsLauncher == null) "Open in Files to save a copy" else "Save as a copy")
+        } })
 }
 
 @Composable
@@ -366,12 +399,15 @@ private class TextUndoHistory {
     val canRedo get() = future.isNotEmpty()
 }
 
+private val draftWriteLock = Any()
 private fun draftFile(context: Context, id: String): File = File(File(context.filesDir, "files-native-drafts").apply { mkdirs() }, sha256(id.toByteArray()) + ".draft")
 private fun saveDraft(context: Context, id: String, hash: String, text: String) {
-    val target = draftFile(context, id)
-    val temp = File(target.parentFile, target.name + ".tmp")
-    DataOutputStream(FileOutputStream(temp)).use { output -> output.writeUTF(hash); val bytes = text.toByteArray(); output.writeInt(bytes.size); output.write(bytes) }
-    check(temp.renameTo(target))
+    synchronized(draftWriteLock) {
+        val target = draftFile(context, id)
+        val temp = File(target.parentFile, target.name + ".tmp")
+        DataOutputStream(FileOutputStream(temp)).use { output -> output.writeUTF(hash); val bytes = text.toByteArray(); output.writeInt(bytes.size); output.write(bytes) }
+        check(temp.renameTo(target))
+    }
 }
 private fun readDraft(context: Context, id: String): Pair<String, String>? = runCatching {
     val file = draftFile(context, id)
@@ -472,6 +508,7 @@ private fun PdfViewer(id: String, fingerprint: String, loader: suspend (String, 
         if (!pageText.isNullOrBlank()) SelectionContainer { Text(pageText!!, modifier = Modifier.fillMaxWidth().heightIn(max = 120.dp).verticalScroll(rememberScrollState())) }
     }
     if (passwordPrompt) AlertDialog(onDismissRequest = { passwordPrompt = false }, title = { Text("PDF password") },
+        properties = filesDialogProperties(),
         text = { OutlinedTextField(password, { password = it.take(256) }, label = { Text("Password") }, visualTransformation = PasswordVisualTransformation()) },
         confirmButton = { TextButton(onClick = { passwordPrompt = false; passwordAttempt++ }) { Text("Open") } },
         dismissButton = { TextButton(onClick = { passwordPrompt = false }) { Text("Cancel") } })

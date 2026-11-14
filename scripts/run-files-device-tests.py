@@ -15,6 +15,7 @@ BROAD_TESTS = (
     "MarkdownRealDocumentTest",
     "PdfRealDocumentTest",
     "FilesNativeDocumentUiTest",
+    "FilesMarkdownSurfaceHandoffTest",
     "FilesReviewPaginationTest",
     "FilesActivityInsetsTest",
     "FilesScrollLifecycleTest",
@@ -83,7 +84,7 @@ def main() -> None:
         report = REPORT_DIR / "addon-files-summary.log"
         report.write_text("\n".join(failures) + "\n")
         raise RuntimeError(f"Files device tests failed; see {report}:\n" + "\n".join(failures))
-    print("All eleven Files device test classes passed", flush=True)
+    print(f"All {len(BROAD_TESTS) + 1} Files device test classes passed", flush=True)
 
 
 if __name__ == "__main__":

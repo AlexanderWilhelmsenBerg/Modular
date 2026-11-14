@@ -7,9 +7,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
+import io.github.alexanderwilhelmsenberg.modular.filesui.LocalFilesWindowToken
 import io.github.alexanderwilhelmsenberg.modular.modulesdk.ModuleInstanceContext
 import io.github.alexanderwilhelmsenberg.modular.modulesdk.WorkspaceSurfaceEndpoint
 import io.github.alexanderwilhelmsenberg.modular.modulesdk.WorkspaceSurfaceScope
@@ -25,6 +27,7 @@ class FilesSurfaceEndpoint(context: Context, instance: ModuleInstanceContext) :
         return ComposeView(scope.context).apply {
             setContent {
                 val host by scope.hostState.collectAsState()
+                val windowToken by scope.windowToken.collectAsState()
                 val preferred = scope.context.getSharedPreferences("files-page", Context.MODE_PRIVATE)
                     .getString("theme", "system") ?: "system"
                 val hostDark = host.theme == "dark" || host.theme == "amoled" ||
@@ -48,19 +51,21 @@ class FilesSurfaceEndpoint(context: Context, instance: ModuleInstanceContext) :
                     onPrimaryContainer = host.colors["onPrimaryContainer"]?.let { Color(it) } ?: base.onPrimaryContainer,
                 ) else base
                 MaterialTheme(colorScheme = scheme) {
-                    FilesNativeContent(controller, refreshToken = 0,
-                        onHostLaunch = scope::requestActivity,
-                        onExternalDocument = { id ->
-                            val nonce = withContext(Dispatchers.IO) {
-                                controller.createExternalOpenHandoff(id)
-                            }
-                            scope.requestActivity(nonce)
-                        },
-                        onBackState = { canGoBack, exclusiveGestures, handler ->
-                            scope.onBackRequested = handler
-                            scope.updateState(canGoBack = canGoBack, exclusiveGestures = exclusiveGestures)
-                        },
-                        onRequestApps = { scope.requestNavigation("apps") })
+                    if (windowToken != null) CompositionLocalProvider(LocalFilesWindowToken provides windowToken) {
+                        FilesNativeContent(controller, refreshToken = 0,
+                            onHostLaunch = scope::requestActivity,
+                            onExternalDocument = { id ->
+                                val nonce = withContext(Dispatchers.IO) {
+                                    controller.createExternalOpenHandoff(id)
+                                }
+                                scope.requestActivity(nonce)
+                            },
+                            onBackState = { canGoBack, exclusiveGestures, handler ->
+                                scope.onBackRequested = handler
+                                scope.updateState(canGoBack = canGoBack, exclusiveGestures = exclusiveGestures)
+                            },
+                            onRequestApps = { scope.requestNavigation("apps") })
+                    }
                 }
             }
         }

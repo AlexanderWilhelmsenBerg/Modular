@@ -50,10 +50,15 @@ message bounds are validated on both sides. Android-specific APIs needing an
 Activity should use the add-on's own Activity rather than assume that an
 embedded View is an Activity.
 
-Native embedding requires Android 11/API 30. Core retains its Android 10/API 29
-minimum with an explicit standalone Activity fallback when one is declared.
-No page launches an Activity automatically on entry. Native surfaces never paint
-behind Core's controls or add another system-bar padding inside their viewport.
+Basic embedded Views require Android 11/API 30. Providers declare
+`workspaceSurfaceMinSdk` (default 30). Android 13/API 33 first registers
+windowless roots for ordinary nested popup windows; Files and the native-window
+example therefore declare 33. The SDK exposes the session window token and a
+dialog configuration helper to bind child windows to that root. Core retains its
+Android 10/API 29 minimum and offers the declared standalone Activity below the
+provider's minimum. No page launches an Activity automatically on entry. Native
+surfaces never paint behind Core's controls or add another system-bar padding
+inside their viewport.
 
 ## Migration and compatibility evidence
 

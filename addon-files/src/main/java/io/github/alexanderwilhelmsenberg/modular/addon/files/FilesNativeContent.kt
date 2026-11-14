@@ -192,9 +192,14 @@ internal fun FilesNativeContent(
                         .onFailure { error = it.message ?: "Document cancel failed" }
                 },
                 onAction = ::performAction,
-                onOpenDocument = { id, _ ->
+                onOpenDocument = { id, mode ->
                     scope.launch {
-                        runCatching { onExternalDocument(id) }
+                        runCatching {
+                            if (mode == "internalEditor") {
+                                val nonce = withContext(Dispatchers.IO) { controller.createEditorHandoff(id) }
+                                onHostLaunch(nonce)
+                            } else onExternalDocument(id)
+                        }
                             .onFailure { error = it.message ?: "Document could not be opened" }
                     }
                 })

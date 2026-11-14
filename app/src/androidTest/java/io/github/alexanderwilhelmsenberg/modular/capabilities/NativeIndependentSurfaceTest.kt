@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.ParcelFileDescriptor
 import android.os.Bundle
+import android.os.Build
 import android.view.KeyEvent
 import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.assertIsDisplayed
@@ -21,6 +22,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
 import io.github.alexanderwilhelmsenberg.modular.MainActivity
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleManagementStore
 import io.github.alexanderwilhelmsenberg.modular.organization.HomePageId
@@ -80,6 +82,10 @@ class NativeIndependentSurfaceTest {
             closeHomeSettings()
 
             swipePage(left = true)
+            if (Build.VERSION.SDK_INT < 33) {
+                exerciseStandaloneFallback(context, coreBefore)
+                return
+            }
             nativeVisible("Independent surface v1")
             captureProof("v1.png")
             assertTrue("v2 control must not be shipped in v1",
@@ -129,6 +135,16 @@ class NativeIndependentSurfaceTest {
             rule.activityRule.scenario.recreate()
             nativeVisible("Independent surface v2")
             requireNotNull(device.findObject(By.desc("New v2 native control"))).click()
+            rule.waitUntil(10_000) { device.hasObject(By.text("New v2 native dialog")) }
+            assertTrue("Native v2 dialog did not open", device.hasObject(By.text("New v2 native dialog")))
+            device.pressBack()
+            rule.waitUntil(10_000) { !device.hasObject(By.text("New v2 native dialog")) }
+            assertTrue("Native v2 dialog did not dismiss on Back",
+                !device.hasObject(By.text("New v2 native dialog")))
+            nativeVisible("Independent surface v2")
+            requireNotNull(device.findObject(By.desc("New v2 native control"))).click()
+            rule.waitUntil(10_000) { device.hasObject(By.text("New v2 native dialog")) }
+            requireNotNull(device.findObject(By.text("Confirm"))).click()
             nativeVisible("New v2 control pressed")
             captureProof("v2.png")
             assertEquals("Core APK changed while rendering v2", coreBefore,
@@ -138,6 +154,7 @@ class NativeIndependentSurfaceTest {
                 .put("coreAfterSha256", after.sha256).put("coreBeforeUpdatedAt", coreBefore.lastUpdateTime)
                 .put("coreAfterUpdatedAt", after.lastUpdateTime).put("moduleBeforeVersion", 1)
                 .put("moduleAfterVersion", 2).put("coreUnchanged", coreBefore == after)
+                .put("mode", "embedded-native")
             val proofFile = File(requireNotNull(context.getExternalFilesDir("surface-proof")), "core-unchanged.json")
             proofFile.writeText(proof.toString(2))
             shell("cp ${proofFile.absolutePath} /sdcard/Pictures/ModularNativeSurfaces/core-unchanged.json")
@@ -161,6 +178,68 @@ class NativeIndependentSurfaceTest {
             }
             management.setEnabled(component, wasEnabled)
         }
+    }
+
+    private fun exerciseStandaloneFallback(context: Context, coreBefore: ApkFingerprint) {
+        fun openFallback() {
+            rule.waitUntil(20_000) { device.hasObject(By.text("Open add-on screen")) }
+            requireNotNull(device.findObject(By.text("Open add-on screen"))).click()
+            assertTrue("Core did not open the declared add-on Activity",
+                device.wait(Until.hasObject(By.desc("Independent surface v${context.packageManager.getPackageInfo(MODULE_PACKAGE, 0).longVersionCode}")), 15_000))
+            assertEquals(MODULE_PACKAGE, device.currentPackageName)
+        }
+        fun activityVisible(description: String) {
+            assertTrue("Standalone add-on control missing: $description",
+                device.wait(Until.hasObject(By.desc(description)), 10_000))
+        }
+
+        openFallback()
+        activityVisible("Independent surface v1")
+        captureProof("v1-fallback.png")
+        assertTrue("v2 control must not be shipped in v1",
+            device.findObject(By.desc("New v2 native control")) == null)
+        requireNotNull(device.findObject(By.desc("Tap native control"))).click()
+        activityVisible("Surface taps: 1")
+        requireNotNull(device.findObject(By.desc("Open native detail"))).click()
+        activityVisible("Independent detail v1")
+        device.pressBack()
+        activityVisible("Independent surface v1")
+        device.pressBack()
+        rule.waitUntil(15_000) { device.hasObject(By.text("Open add-on screen")) }
+
+        val installResult = shell("pm install -r $V2_APK_PATH")
+        assertTrue("Module-only update failed: $installResult", installResult.contains("Success"))
+        assertEquals(2L, context.packageManager.getPackageInfo(MODULE_PACKAGE, 0).longVersionCode)
+        assertEquals("Core APK changed during module-only fallback update", coreBefore,
+            installedApk(context, context.packageName))
+        rule.activityRule.scenario.recreate()
+        openFallback()
+        activityVisible("Independent surface v2")
+        requireNotNull(device.findObject(By.desc("New v2 native control"))).click()
+        assertTrue("Standalone v2 dialog did not open",
+            device.wait(Until.hasObject(By.text("New v2 native dialog")), 10_000))
+        device.pressBack()
+        assertTrue("Standalone v2 dialog did not dismiss on Back",
+            device.wait(Until.gone(By.text("New v2 native dialog")), 10_000))
+        activityVisible("Independent surface v2")
+        requireNotNull(device.findObject(By.desc("New v2 native control"))).click()
+        assertTrue("Standalone v2 dialog did not reopen",
+            device.wait(Until.hasObject(By.text("New v2 native dialog")), 10_000))
+        requireNotNull(device.findObject(By.text("Confirm"))).click()
+        activityVisible("New v2 control pressed")
+        captureProof("v2-fallback.png")
+        device.pressBack()
+        val after = installedApk(context, context.packageName)
+        assertEquals("Core APK changed while showing standalone v2", coreBefore, after)
+        val proof = org.json.JSONObject().put("coreBeforeSha256", coreBefore.sha256)
+            .put("coreAfterSha256", after.sha256).put("coreBeforeUpdatedAt", coreBefore.lastUpdateTime)
+            .put("coreAfterUpdatedAt", after.lastUpdateTime).put("moduleBeforeVersion", 1)
+            .put("moduleAfterVersion", 2).put("coreUnchanged", coreBefore == after)
+            .put("mode", "standalone-fallback")
+        val proofFile = File(requireNotNull(context.getExternalFilesDir("surface-proof")),
+            "core-unchanged.json")
+        proofFile.writeText(proof.toString(2))
+        shell("cp ${proofFile.absolutePath} /sdcard/Pictures/ModularNativeSurfaces/${proofFile.name}")
     }
 
     private fun openHomeSettings() {

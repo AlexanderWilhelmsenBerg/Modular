@@ -13,4 +13,6 @@ The APKs are `app/build/outputs/apk/v1/debug/app-v1-debug.apk` and
 `app/build/outputs/apk/v2/debug/app-v2-debug.apk` relative to this project.
 Both variants have the same package and debug signing key. v1 has versionCode 1;
 v2 has versionCode 2 and adds a native control. The provider renders Android
-Views in its own process using `WorkspaceSurfaceEndpoint`.
+Views in its own process using `WorkspaceSurfaceEndpoint` on API 33+. On API
+29–32, Core offers an explicit button that opens this add-on's declared
+`StandaloneSurfaceActivity`; v2 adds an ordinary Activity dialog there too.

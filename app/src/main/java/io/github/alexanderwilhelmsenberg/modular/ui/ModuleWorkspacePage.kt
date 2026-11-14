@@ -247,7 +247,8 @@ fun ModuleWorkspacePage(
     var automaticRetries by remember { mutableIntStateOf(0) }
     val previousEffect = remember { AtomicReference<SurfaceEffectSnapshot?>(null) }
     val currentLease by rememberUpdatedState(lease)
-    val canShow = Build.VERSION.SDK_INT >= 30 && active && resumed &&
+    val surfaceMinSdk = module?.descriptor?.workspaceSurfaceMinSdk ?: 30
+    val canShow = Build.VERSION.SDK_INT >= surfaceMinSdk && active && resumed &&
         module?.status == ModuleConnectionStatus.CONNECTED && route != null &&
         module.component.flattenToString() == placementComponent && expectedSignerKey != null
 
@@ -522,7 +523,8 @@ fun ModuleWorkspacePage(
             Text(module?.label ?: "Add-on screen unavailable", style = MaterialTheme.typography.titleLarge)
             Text(message ?: unavailableReason ?: when {
                 module == null -> "The add-on is no longer installed. Its Home placement is saved."
-                Build.VERSION.SDK_INT < 30 -> "This Android version cannot embed add-on screens."
+                Build.VERSION.SDK_INT < surfaceMinSdk ->
+                    "This add-on needs Android API $surfaceMinSdk or newer for its embedded screen."
                 module.status == ModuleConnectionStatus.DISABLED -> "Enable this add-on to open its screen."
                 module.status == ModuleConnectionStatus.CONNECTING -> "Connecting to the add-on…"
                 module.status == ModuleConnectionStatus.CONNECTED && route == null ->
@@ -533,7 +535,7 @@ fun ModuleWorkspacePage(
             if (module != null) {
                 Button(onClick = { retryGeneration++; onRetry() }, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
                 OutlinedButton(onClick = onOpenModuleSettings, modifier = Modifier.fillMaxWidth()) { Text("Add-on settings") }
-                if (Build.VERSION.SDK_INT < 30) module.descriptor?.workspaceActivity?.let { declaration ->
+                if (Build.VERSION.SDK_INT < surfaceMinSdk) module.descriptor?.workspaceActivity?.let { declaration ->
                     OutlinedButton(onClick = {
                         try {
                             val signer = AndroidModuleIdentityResolver(context)

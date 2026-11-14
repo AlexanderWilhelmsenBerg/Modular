@@ -340,13 +340,15 @@ fun OrganizationHomeScreen(
             modifier = Modifier.offset { IntOffset(0, if (workspaceMode && workspacePage) (-vertical.progress * viewportHeight).roundToInt() else 0) },
             onScrollingChange = { pagerScrolling = it },
             onPageChanged = {
-                if (it !is HomePageId.Module) moduleInteractionActive = false
-                pageName = when (it) {
+                val nextPageName = when (it) {
                 HomePageId.Home -> "home"
                 is HomePageId.Category -> "category:${it.id}"
                 is HomePageId.Widget -> "widget:${it.id}"
                 is HomePageId.Module -> "module:${it.component}"
-            } },
+                }
+                if (pageName != nextPageName) moduleInteractionActive = false
+                pageName = nextPageName
+            },
             renderPage = { page ->
                 val category = (page as? HomePageId.Category)?.let { id -> snapshot.categories.firstOrNull { it.id == id.id } }
                 val widgetPage = (page as? HomePageId.Widget)?.let { id -> snapshot.workspacePages.firstOrNull { it.id == id.id } }
@@ -369,7 +371,11 @@ fun OrganizationHomeScreen(
                     if (pageName == "module:${page.component}") SideEffect { activeWorkspaceList = null }
                     Box(Modifier.fillMaxSize().padding(bottom = 72.dp)) {
                         modulePageContent(page.component, pageName == "module:${page.component}" && vertical.progress == 0f,
-                            { moduleInteractionActive = it },
+                            { interacting ->
+                                if (pageName == "module:${page.component}") {
+                                    moduleInteractionActive = interacting && vertical.progress == 0f
+                                }
+                            },
                             { destination ->
                                 if (pageName == "module:${page.component}") when (destination) {
                                     "home" -> {

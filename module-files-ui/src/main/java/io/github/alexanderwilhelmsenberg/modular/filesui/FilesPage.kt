@@ -244,7 +244,8 @@ fun FilesPage(
                         val cancel = latestCancel
                         if (cancel != null) documentCancel(JSONObject().put("version", 1)
                             .put("actionId", cancel.id).put("operationToken", UUID.randomUUID().toString()).toString())
-                    }, onClose = { latestBack?.let { send(it, null) } })
+                    }, onClose = { latestBack?.let { send(it, null) } },
+                    onOpenInActivity = { id -> onOpenDocument(id, "internalEditor") })
             }
         } else Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Document unavailable") }
@@ -551,6 +552,7 @@ fun FilesPage(
     if (formAction != null) {
         val action = formAction!!
         AlertDialog(onDismissRequest = { formValue = ""; formAction = null }, shape = RectangleShape,
+            properties = filesDialogProperties(),
             title = { Text(action.label) },
             text = { OutlinedTextField(formValue, { formValue = it.take(512) }, label = { Text(action.input ?: "Value") },
                 shape = RectangleShape,
@@ -563,6 +565,7 @@ fun FilesPage(
     if (newFileAction != null) {
         val action = newFileAction!!
         AlertDialog(onDismissRequest = { newFileAction = null }, shape = RectangleShape,
+            properties = filesDialogProperties(),
             title = { Text("New file") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -584,6 +587,7 @@ fun FilesPage(
         val choices = dialog.optJSONArray("actions").objects().map(::PageAction)
         AlertDialog(onDismissRequest = { choices.firstOrNull { it.kind == "cancel" }?.let { send(it, null) } },
             shape = RectangleShape,
+            properties = filesDialogProperties(),
             title = { Text(dialog.optString("title", "Confirm")) },
             text = { Text(dialog.optString("message")) },
             confirmButton = { choices.firstOrNull { it.kind == "confirm" }?.let { action ->
@@ -1097,6 +1101,7 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
     }
     if (issuesOpen && cleanIssues.isNotEmpty()) {
         AlertDialog(onDismissRequest = { issuesOpen = false }, shape = RectangleShape,
+            properties = filesDialogProperties(),
             modifier = Modifier.testTag("files.clean.issues.dialog"),
             title = { Text("Review issues") },
             text = {

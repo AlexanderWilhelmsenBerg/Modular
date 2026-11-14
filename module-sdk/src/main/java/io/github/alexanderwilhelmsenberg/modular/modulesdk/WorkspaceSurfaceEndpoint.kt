@@ -1,6 +1,7 @@
 package io.github.alexanderwilhelmsenberg.modular.modulesdk
 
 import android.content.Context
+import android.app.Dialog
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -51,6 +52,9 @@ class WorkspaceSurfaceScope internal constructor(
     private val main = Handler(Looper.getMainLooper())
     private val hostFlow = MutableStateFlow(initialHost)
     val hostState: StateFlow<WorkspaceSurfaceHostSpec> = hostFlow
+    private val windowTokenFlow = MutableStateFlow<IBinder?>(null)
+    /** Session root window token for provider-owned popup windows. Null until attached. */
+    val windowToken: StateFlow<IBinder?> = windowTokenFlow
     private val closed = AtomicBoolean(false)
     private val cleanup = mutableListOf<() -> Unit>()
     private val cleanupLock = Any()
@@ -80,7 +84,25 @@ class WorkspaceSurfaceScope internal constructor(
         if (now) runCleanupOnMain(listOf(action))
     }
 
+    /** Anchor a native Dialog inside this surface. Call on Main after attachment, before show(). */
+    fun configureDialog(dialog: Dialog): Dialog {
+        check(Looper.myLooper() == Looper.getMainLooper()) { "Dialog must be configured on Main" }
+        check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            "Embedded dialogs require Android 13"
+        }
+        check(!closed.get()) { "Surface session closed" }
+        check(!dialog.isShowing) { "Dialog is already showing" }
+        val token = windowTokenFlow.value ?: throw IllegalStateException("Surface root is not attached")
+        val window = dialog.window ?: throw IllegalArgumentException("Dialog has no window")
+        window.attributes = window.attributes.apply {
+            type = WindowManager.LayoutParams.TYPE_APPLICATION_PANEL
+            this.token = token
+        }
+        return dialog
+    }
+
     internal fun updateHost(spec: WorkspaceSurfaceHostSpec) { if (!closed.get()) hostFlow.value = spec }
+    internal fun updateWindowToken(token: IBinder?) { if (!closed.get()) windowTokenFlow.value = token }
     internal fun exclusiveGestures(): Boolean = state.exclusiveGestures
     internal fun close() {
         val actions = synchronized(cleanupLock) {
@@ -88,6 +110,7 @@ class WorkspaceSurfaceScope internal constructor(
             cleanup.toList().also { cleanup.clear() }
         }
         onBackRequested = null
+        windowTokenFlow.value = null
         runCleanupOnMain(actions)
     }
 
@@ -183,6 +206,14 @@ abstract class WorkspaceSurfaceEndpoint(
                 treeOwner.start(spec.visible)
                 val root = WorkspaceSurfaceGestureLayout(viewContext, surfaceScope)
                 rootView = root
+                root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(view: View) {
+                        surfaceScope.updateWindowToken(view.windowToken)
+                    }
+                    override fun onViewDetachedFromWindow(view: View) {
+                        surfaceScope.updateWindowToken(null)
+                    }
+                })
                 root.setViewTreeLifecycleOwner(treeOwner)
                 root.setViewTreeSavedStateRegistryOwner(treeOwner)
                 root.setViewTreeViewModelStoreOwner(treeOwner)
@@ -191,6 +222,7 @@ abstract class WorkspaceSurfaceEndpoint(
                 root.addView(onCreateView(surfaceScope))
                 if (closed.get()) { surfaceScope.close(); return }
                 host.setView(root, spec.widthPx, spec.heightPx)
+                if (root.isAttachedToWindow) surfaceScope.updateWindowToken(root.windowToken)
             } catch (failure: Throwable) {
                 destroyOnMain()
                 throw failure

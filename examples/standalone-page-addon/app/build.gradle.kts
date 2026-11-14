@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "io.github.alexanderwilhelmsenberg.modular.testsurface"
-        minSdk = 30
+        minSdk = 29
         targetSdk = 36
     }
     buildFeatures { buildConfig = true }

@@ -1,5 +1,6 @@
 package io.github.alexanderwilhelmsenberg.modular.testsurface
 
+import android.app.AlertDialog
 import android.graphics.Color
 import android.os.IBinder
 import android.text.Editable
@@ -123,12 +124,18 @@ class SurfaceModuleService : BaseModuleService() {
             contentDescription = "Go to Apps from module"
             setOnClickListener { scope.requestNavigation("apps") }
         })
-        if (BuildConfig.SURFACE_REVISION >= 2) column.addView(Button(context).apply {
-            text = "New v2 native control"
-            contentDescription = "New v2 native control"
-            setOnClickListener {
-                text = "New v2 control pressed"
-                contentDescription = text
+        if (BuildConfig.SURFACE_REVISION >= 2) column.addView(Button(context).also { button ->
+            button.text = "New v2 native control"
+            button.contentDescription = button.text
+            button.setOnClickListener {
+                val dialog = AlertDialog.Builder(context)
+                    .setTitle("New v2 native dialog")
+                    .setPositiveButton("Confirm") { _, _ ->
+                        button.text = "New v2 control pressed"
+                        button.contentDescription = button.text
+                    }
+                    .create()
+                scope.configureDialog(dialog).show()
             }
         })
         repeat(8) { index ->

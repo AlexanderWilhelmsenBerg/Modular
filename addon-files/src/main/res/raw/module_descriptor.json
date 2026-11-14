@@ -9,5 +9,6 @@
   "requestedCoreCapabilities": [],
   "managementActivity": ".FilesSettingsActivity",
   "workspaceActivity": ".FilesActivity",
+  "workspaceSurfaceMinSdk": 33,
   "instanceConfiguration": {"schemaVersion": 1, "fields": []}
 }

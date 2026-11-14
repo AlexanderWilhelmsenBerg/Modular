@@ -4,6 +4,7 @@
         <package android:name="io.github.alexanderwilhelmsenberg.modular.debug" />
     </queries>
     <application android:allowBackup="false" android:label="Independent surface test module">
+        <activity android:name=".StandaloneSurfaceActivity" android:exported="true" />
         <service android:name=".SurfaceModuleService" android:exported="true">
             <intent-filter>
                 <action android:name="io.github.alexanderwilhelmsenberg.modular.action.MODULE" />

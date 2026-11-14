@@ -131,6 +131,11 @@ open class FilesActivity : ComponentActivity() {
     private fun handleHandoff(handoff: FilesPageController.HostHandoff, fromCore: Boolean) {
         when (handoff.kind) {
             "pickFolder" -> chooseFolder.launch(null)
+            "editDocument" -> {
+                // The controller remains on the active Markdown page. This Activity supplies
+                // the result registry for Save as; its shared content reloads the private draft.
+                refreshToken++
+            }
             "fullAccess" -> {
                 if (Build.VERSION.SDK_INT >= 30) {
                     startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,

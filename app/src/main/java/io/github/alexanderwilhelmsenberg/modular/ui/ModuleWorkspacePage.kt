@@ -5,6 +5,8 @@ import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import android.graphics.PixelFormat
 import android.util.Log
 import android.view.SurfaceControlViewHost
@@ -73,6 +75,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.android.asCoroutineDispatcher
 import org.json.JSONObject
 
 /** Binder calls may block past their deadline. Four workers cap retained threads and requests. */
@@ -122,6 +126,11 @@ private object SurfaceCleanup {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 }
 
+/** Compose tests may replace Dispatchers.Main with an unconfined dispatcher. */
+private object SurfaceUiThread {
+    val dispatcher = Handler(Looper.getMainLooper()).asCoroutineDispatcher("workspace-surface-ui")
+}
+
 private const val SURFACE_LOG = "ModuleWorkspaceSurface"
 
 private class SurfaceLease(
@@ -136,6 +145,10 @@ private class SurfaceLease(
     var state by mutableStateOf(SurfaceState())
     var closed = false
     fun detach() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            SurfaceCleanup.scope.launch(SurfaceUiThread.dispatcher) { detach() }
+            return
+        }
         if (closed) return
         closed = true
         view.visibility = android.view.View.INVISIBLE
@@ -261,45 +274,46 @@ fun ModuleWorkspacePage(
 
     LaunchedEffect(active, resumed, route, module?.sessionId, module?.status, surfaceView,
         surfaceGeneration, retryGeneration, expectedSignerKey, placementComponent) {
+        withContext(SurfaceUiThread.dispatcher) {
         Log.d(SURFACE_LOG, "session effect: active=$active resumed=$resumed generation=$surfaceGeneration size=${width}x$height")
         lease?.detach()
         lease = null
-        if (Build.VERSION.SDK_INT < 30) return@LaunchedEffect
-        if (!canShow) return@LaunchedEffect
-        val view = surfaceView ?: return@LaunchedEffect
+        if (Build.VERSION.SDK_INT < 30) return@withContext
+        if (!canShow) return@withContext
+        val view = surfaceView ?: return@withContext
         val token = view.hostToken ?: run {
             Log.d(SURFACE_LOG, "host token unavailable")
-            return@LaunchedEffect
+            return@withContext
         }
         val sessionWidth = width
         val sessionHeight = height
         if (sessionWidth !in 1..8192 || sessionHeight !in 1..8192 ||
-            sessionWidth.toLong() * sessionHeight > 16_777_216) return@LaunchedEffect
-        val selectedRoute = route ?: return@LaunchedEffect
-        val selectedModule = module ?: return@LaunchedEffect
+            sessionWidth.toLong() * sessionHeight > 16_777_216) return@withContext
+        val selectedRoute = route ?: return@withContext
+        val selectedModule = module ?: return@withContext
         val id = UUID.randomUUID().toString()
         val expectedUid = try { context.packageManager.getApplicationInfo(selectedModule.component.packageName, 0).uid }
-            catch (_: Exception) { message = "The add-on is unavailable"; return@LaunchedEffect }
+            catch (_: Exception) { message = "The add-on is unavailable"; return@withContext }
         val pendingState = AtomicReference<SurfaceState?>(null)
         val host = object : IWorkspaceSurfaceHost.Stub() {
             private fun accepted(sessionId: String): Boolean = Binder.getCallingUid() == expectedUid && sessionId == id
             override fun onStateChanged(sessionId: String, stateJson: String) {
                 if (!accepted(sessionId)) return
                 val parsed = runCatching { parseSurfaceState(stateJson) }.getOrNull() ?: return
-                scope.launch {
+                scope.launch(SurfaceUiThread.dispatcher) {
                     val live = currentLease?.takeIf { it.id == id && verifiedSession(it) }
                     if (live == null) pendingState.set(parsed) else live.state = parsed
                 }
             }
             override fun requestNavigation(sessionId: String, destination: String) {
                 if (!accepted(sessionId) || destination !in setOf("home", "apps", "previous", "next", "settings")) return
-                scope.launch { currentLease?.takeIf { it.id == id && verifiedSession(it) }?.let {
+                scope.launch(SurfaceUiThread.dispatcher) { currentLease?.takeIf { it.id == id && verifiedSession(it) }?.let {
                     currentNavigate(destination)
                 } }
             }
             override fun requestActivity(sessionId: String, nonce: String) {
                 if (!accepted(sessionId) || !validNonce(nonce)) return
-                scope.launch { currentLease?.takeIf { it.id == id }?.let { launchDeclaredActivity(it, nonce) } }
+                scope.launch(SurfaceUiThread.dispatcher) { currentLease?.takeIf { it.id == id }?.let { launchDeclaredActivity(it, nonce) } }
             }
         }
         val sessionHostJson = JSONObject().put("version", 1).put("sessionId", id)
@@ -344,10 +358,10 @@ fun ModuleWorkspacePage(
             if (!active || !resumed || currentRoute != selectedRoute || currentModule?.sessionId != selectedRoute.sessionId ||
                 surfaceView !== view || view.hostToken != token) {
                 Log.d(SURFACE_LOG, "session changed before attach")
-                return@LaunchedEffect
+                return@withContext
             }
             val death = IBinder.DeathRecipient {
-                scope.launch { currentLease?.takeIf { it.id == id }?.let {
+                scope.launch(SurfaceUiThread.dispatcher) { currentLease?.takeIf { it.id == id }?.let {
                     it.detach(); lease = null; message = "The add-on disconnected. Retry to reconnect."
                 } }
             }
@@ -378,10 +392,12 @@ fun ModuleWorkspacePage(
             }
             loading = false
         }
+        }
     }
     LaunchedEffect(width, height, colors, configuration, lease) {
-        val current = lease ?: return@LaunchedEffect
-        if (width !in 1..8192 || height !in 1..8192 || width.toLong() * height > 16_777_216) return@LaunchedEffect
+        withContext(SurfaceUiThread.dispatcher) {
+        val current = lease ?: return@withContext
+        if (width !in 1..8192 || height !in 1..8192 || width.toLong() * height > 16_777_216) return@withContext
         val update = JSONObject().put("version", 1).put("sessionId", current.id)
             .put("widthPx", width).put("heightPx", height)
             .put("displayId", (current.view.display?.displayId ?: 0).coerceAtLeast(0))
@@ -397,6 +413,7 @@ fun ModuleWorkspacePage(
             .put("localeTags", configuration.locales.toLanguageTags().take(256)).toString()
         try { SurfaceBinderCalls.run(5_000) { current.session.updateHost(update) } }
         catch (_: Exception) { if (lease === current) { current.detach(); lease = null; message = "The add-on surface stopped responding" } }
+        }
     }
     LaunchedEffect(active, module?.status, retryGeneration) {
         if (active && module?.status == ModuleConnectionStatus.FAILED && automaticRetries < 2) {
@@ -408,7 +425,7 @@ fun ModuleWorkspacePage(
     BackHandler(enabled = active) {
         val current = lease
         if (current == null) { onNavigate("home"); return@BackHandler }
-        scope.launch {
+        scope.launch(SurfaceUiThread.dispatcher) {
             val consumed = runCatching { SurfaceBinderCalls.run(3_000) { current.session.dispatchBack() } }.getOrDefault(false)
             if (verifiedSession(current) && !consumed) onNavigate("home")
         }

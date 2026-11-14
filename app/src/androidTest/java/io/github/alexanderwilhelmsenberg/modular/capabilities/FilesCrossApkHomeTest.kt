@@ -209,10 +209,8 @@ class FilesCrossApkHomeTest {
         }
         attempt("Core semantics") { rule.onNodeWithTag("launcher-pages").printToString() }
         attempt("logcat") {
-            shell("logcat -d -b main -v threadtime -t 1500").lines()
-                .filter { line -> listOf("AndroidRuntime", "FATAL EXCEPTION", "InputDispatcher",
-                    "ViewRootImpl", "modular", "SurfaceControlViewHost").any { line.contains(it) } }
-                .takeLast(120).joinToString("\n")
+            shell("logcat -d -b main -v threadtime -s ModuleWorkspaceSurface:D WorkspaceSurfaceEndpoint:D AndroidRuntime:E")
+                .lines().takeLast(120).joinToString("\n")
         }
         attempt("mkdir") { shell("mkdir -p $directory") }
         attempt("screen") {

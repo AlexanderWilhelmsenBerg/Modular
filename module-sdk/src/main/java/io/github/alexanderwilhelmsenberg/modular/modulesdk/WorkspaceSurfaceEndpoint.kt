@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import android.view.SurfaceControlViewHost
 import android.view.View
 import android.view.WindowManager
@@ -30,6 +31,7 @@ import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.IWorkspa
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.IWorkspaceSurfaceHost
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.capabilities.IWorkspaceSurfaceSession
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -118,14 +120,18 @@ abstract class WorkspaceSurfaceEndpoint(
         val spec = WorkspaceSurfaceContract.parseHostSpec(hostJson)
         val session = Session(hostToken, host, spec)
         sessions.add(session)
+        var stage = "linkHostDeath"
         try {
             host.asBinder().linkToDeath(session.deathRecipient, 0)
             if (!host.asBinder().isBinderAlive) throw SecurityException("Surface host died")
+            stage = "createOnMain"
             session.onMain { session.createOnMain() }
             return session
         } catch (failure: Throwable) {
-            session.dispose()
-            throw failure
+            Log.w(LOG_TAG, "stage=$stage failure=${failure.javaClass.simpleName}" +
+                " cause=${failure.cause?.javaClass?.simpleName ?: "none"}")
+            runCatching { session.dispose() }
+            throw binderSafeFailure(failure)
         }
     }
 
@@ -156,8 +162,11 @@ abstract class WorkspaceSurfaceEndpoint(
             if (closed.get()) return
             val display = context.getSystemService(android.hardware.display.DisplayManager::class.java)
                 ?.getDisplay(spec.displayId) ?: throw IllegalArgumentException("Unknown workspace display")
-            val viewContext = context.createDisplayContext(display)
-                .createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION, null)
+            val displayContext = context.createDisplayContext(display)
+            // Android 11 rejects an app-owned TYPE_APPLICATION WindowContext token.
+            // SCVH only needs a context associated with the target display there.
+            val viewContext = if (Build.VERSION.SDK_INT == Build.VERSION_CODES.R) displayContext
+                else displayContext.createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION, null)
             val host = SurfaceControlViewHost(viewContext, display, token)
             surfaceHost = host
             try {
@@ -261,6 +270,14 @@ abstract class WorkspaceSurfaceEndpoint(
                 } catch (failure: Throwable) { result.completeExceptionally(failure) }
             }
             return try { result.get(MAIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) }
+            catch (failure: ExecutionException) {
+                throw binderSafeFailure(failure.cause ?: failure)
+            }
+            catch (failure: InterruptedException) {
+                Thread.currentThread().interrupt()
+                dispose()
+                throw IllegalStateException("Surface main thread interrupted", failure)
+            }
             catch (failure: TimeoutException) {
                 result.whenComplete { value, _ ->
                     if (value is SurfaceControlViewHost.SurfacePackage) value.release()
@@ -296,7 +313,14 @@ abstract class WorkspaceSurfaceEndpoint(
     }
 
     companion object {
+        private const val LOG_TAG = "WorkspaceSurfaceEndpoint"
         const val MAX_ACTIVE_SURFACES = 2
         const val MAIN_TIMEOUT_MS = 2_000L
     }
+}
+
+private fun binderSafeFailure(failure: Throwable): RuntimeException = when (failure) {
+    is SecurityException, is IllegalArgumentException, is NullPointerException,
+    is IllegalStateException, is UnsupportedOperationException -> failure as RuntimeException
+    else -> IllegalStateException("Workspace surface failed", failure)
 }

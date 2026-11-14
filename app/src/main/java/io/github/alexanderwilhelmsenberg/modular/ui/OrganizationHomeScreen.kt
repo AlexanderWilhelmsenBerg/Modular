@@ -98,10 +98,7 @@ fun OrganizationHomeScreen(
     val scope = rememberCoroutineScope()
     val neutralFocusRequester = remember { FocusRequester() }
     val workspaceFocusManager = LocalFocusManager.current
-    fun focusWorkspaceChrome() {
-        workspaceFocusManager.clearFocus(force = true)
-        neutralFocusRequester.requestFocus()
-    }
+    var homeFocusRequest by remember { mutableIntStateOf(0) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     var sorterHeaderHeight by remember { mutableIntStateOf(0) }
     val statuses by runtime.signals.statuses.collectAsState()
@@ -116,6 +113,12 @@ fun OrganizationHomeScreen(
     var setupSorter by remember { mutableStateOf(false) }
     var categoryMembers by remember { mutableStateOf<String?>(null) }
     var pageName by rememberSaveable { mutableStateOf("home") }
+    LaunchedEffect(homeFocusRequest, pageName) {
+        if (homeFocusRequest > 0 && pageName == "home") {
+            workspaceFocusManager.clearFocus(force = true)
+            neutralFocusRequester.requestFocus()
+        }
+    }
     LaunchedEffect(pageName, workspaceMode) {
         onActiveModuleChanged(pageName.removePrefix("module:")
             .takeIf { workspaceMode && pageName.startsWith("module:") })
@@ -332,7 +335,8 @@ fun OrganizationHomeScreen(
             "verticalProgress=${vertical.progress} pagerScrolling=$pagerScrolling " +
             "drawerPagerScrolling=$drawerPagerScrolling pageScrolling=$pageScrolling pointerActive=$pointerActive")
     }
-    Box(Modifier.fillMaxSize().focusRequester(neutralFocusRequester).focusable().clipToBounds()
+    Box(Modifier.fillMaxSize().focusRequester(neutralFocusRequester)
+        .focusable(enabled = pageName == "home").clipToBounds()
         .background(if (wallpaperMode) Color.Transparent else MaterialTheme.colorScheme.background)
         .onSizeChanged { viewportHeight = it.height }
         .then(if (workspaceMode) Modifier.nestedScroll(connection).pointerInput(workspaceGesturesEnabled) {
@@ -368,10 +372,7 @@ fun OrganizationHomeScreen(
             homeResetToken = homeResetToken, initialPageId = initialPage,
             requestedPage = requestedPage, pageRequestSerial = pageRequestSerial,
             modifier = Modifier.offset { IntOffset(0, if (workspaceMode && workspacePage) (-vertical.progress * viewportHeight).roundToInt() else 0) },
-            onScrollingChange = { scrolling ->
-                pagerScrolling = scrolling
-                if (scrolling && pageName.startsWith("module:")) focusWorkspaceChrome()
-            },
+            onScrollingChange = { pagerScrolling = it },
             onPageChanged = {
                 val nextPageName = when (it) {
                 HomePageId.Home -> "home"
@@ -380,7 +381,7 @@ fun OrganizationHomeScreen(
                 is HomePageId.Module -> "module:${it.component}"
                 }
                 if (pageName != nextPageName) {
-                    if (pageName.startsWith("module:")) focusWorkspaceChrome()
+                    if (pageName.startsWith("module:") && nextPageName == "home") homeFocusRequest++
                     moduleInteractionActive = false
                 }
                 pageName = nextPageName

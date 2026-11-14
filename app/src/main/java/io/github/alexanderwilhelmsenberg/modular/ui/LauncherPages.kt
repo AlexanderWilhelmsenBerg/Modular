@@ -1,5 +1,6 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -104,6 +105,26 @@ fun LauncherPages(
     val currentPageCallback by rememberUpdatedState(onPageChanged)
     val currentScrollingCallback by rememberUpdatedState(onScrollingChange)
     val scope = rememberCoroutineScope()
+    LaunchedEffect(testTag, gesturesEnabled, pages.size, pagerState.currentPage,
+        pagerState.settledPage, pagerState.isScrollInProgress,
+        pagerState.currentPageOffsetFraction == 0f, selectedKey) {
+        fun kind(page: HomePageId?): String = when (page) {
+            HomePageId.Home -> "home"
+            is HomePageId.Module -> "module"
+            is HomePageId.Widget -> "widget"
+            is HomePageId.Category -> "category"
+            null -> "missing"
+        }
+        Log.d("WorkspacePagerState", "surface=$testTag enabled=$gesturesEnabled count=${pages.size} " +
+            "current=${kind(pages.getOrNull(pagerState.currentPage))} " +
+            "settled=${kind(pages.getOrNull(pagerState.settledPage))} " +
+            "selected=${when {
+                selectedKey == "home" -> "home"
+                selectedKey.startsWith("module:") -> "module"
+                selectedKey.startsWith("widget:") -> "widget"
+                else -> "category"
+            }} scrolling=${pagerState.isScrollInProgress} offset=${pagerState.currentPageOffsetFraction}")
+    }
 
     LaunchedEffect(pagerState.isScrollInProgress) {
         currentScrollingCallback(pagerState.isScrollInProgress)

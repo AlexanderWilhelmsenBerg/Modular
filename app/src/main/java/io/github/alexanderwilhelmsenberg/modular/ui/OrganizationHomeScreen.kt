@@ -1,5 +1,6 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -299,6 +300,30 @@ fun OrganizationHomeScreen(
         pageName.startsWith("category:") -> HomePageId.Category(pageName.removePrefix("category:"))
         else -> HomePageId.Category(pageName)
     }
+    val pagerGesturesEnabled = !editingSearch && searchQuery.isBlank() && sorter == null &&
+        openFolderId == null && organizeApp == null && folderAction == null &&
+        categoryMembers == null && editingFolderId == null && !setupSorter && !editingWidgetGrid &&
+        !moduleInteractionActive && vertical.progress == 0f
+    val pageKind = when {
+        pageName == "home" -> "home"
+        pageName.startsWith("module:") -> "module"
+        pageName.startsWith("widget:") -> "widget"
+        else -> "category"
+    }
+    LaunchedEffect(pageKind, pagerGesturesEnabled, editingSearch, searchQuery.isBlank(), sorter == null,
+        openFolderId == null, organizeApp == null, folderAction == null,
+        categoryMembers == null, editingFolderId == null, setupSorter, editingWidgetGrid,
+        moduleInteractionActive, vertical.progress == 0f, pagerScrolling, drawerPagerScrolling,
+        pageScrolling, pointerActive) {
+        Log.d("WorkspaceGestureGate", "page=$pageKind enabled=$pagerGesturesEnabled " +
+            "editingSearch=$editingSearch queryEmpty=${searchQuery.isBlank()} sorterAbsent=${sorter == null} " +
+            "folderAbsent=${openFolderId == null} organizeAbsent=${organizeApp == null} " +
+            "folderActionAbsent=${folderAction == null} categoryMembersAbsent=${categoryMembers == null} " +
+            "editingFolderAbsent=${editingFolderId == null} setupSorter=$setupSorter " +
+            "editingWidgetGrid=$editingWidgetGrid moduleInteraction=$moduleInteractionActive " +
+            "verticalProgress=${vertical.progress} pagerScrolling=$pagerScrolling " +
+            "drawerPagerScrolling=$drawerPagerScrolling pageScrolling=$pageScrolling pointerActive=$pointerActive")
+    }
     Box(Modifier.fillMaxSize().clipToBounds()
         .background(if (wallpaperMode) Color.Transparent else MaterialTheme.colorScheme.background)
         .onSizeChanged { viewportHeight = it.height }
@@ -331,10 +356,7 @@ fun OrganizationHomeScreen(
         LauncherPages(snapshot = if (sorter != null) snapshot.copy(categoriesEnabled = false) else snapshot,
             pageSequence = if (workspaceMode) snapshot.workspaceSurfacePages() else
                 (if (sorter != null) snapshot.copy(categoriesEnabled = false) else snapshot).visiblePageOrder(),
-            gesturesEnabled = !editingSearch && searchQuery.isBlank() && sorter == null &&
-                openFolderId == null && organizeApp == null && folderAction == null &&
-                categoryMembers == null && editingFolderId == null && !setupSorter && !editingWidgetGrid &&
-                !moduleInteractionActive && vertical.progress == 0f,
+            gesturesEnabled = pagerGesturesEnabled,
             homeResetToken = homeResetToken, initialPageId = initialPage,
             requestedPage = requestedPage, pageRequestSerial = pageRequestSerial,
             modifier = Modifier.offset { IntOffset(0, if (workspaceMode && workspacePage) (-vertical.progress * viewportHeight).roundToInt() else 0) },

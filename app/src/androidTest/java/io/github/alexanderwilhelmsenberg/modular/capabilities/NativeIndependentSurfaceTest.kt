@@ -31,6 +31,7 @@ import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationEdit
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationStore
 import java.io.File
 import java.security.MessageDigest
+import kotlin.math.abs
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -117,12 +118,7 @@ class NativeIndependentSurfaceTest {
             nativeVisible("Independent surface v1")
             // Detach and reattach the remote package without reinstalling either APK.
             swipePage(left = false)
-            rule.waitUntil(15_000) {
-                runCatching {
-                    rule.onNode(hasTestTag("launcher-page:home") and
-                        hasAnyAncestor(hasTestTag("launcher-pages"))).assertIsDisplayed()
-                }.isSuccess
-            }
+            waitForHomePageSettled()
             swipePage(left = true)
             nativeVisible("Independent surface v1")
 
@@ -269,6 +265,20 @@ class NativeIndependentSurfaceTest {
         rule.waitForIdle()
     }
 
+    private fun waitForHomePageSettled() {
+        rule.waitUntil(15_000) {
+            runCatching {
+                val pager = rule.onNodeWithTag("launcher-pages").fetchSemanticsNode().boundsInWindow
+                val home = rule.onNode(hasTestTag("launcher-page:home") and
+                    hasAnyAncestor(hasTestTag("launcher-pages")))
+                home.assertIsDisplayed()
+                val bounds = home.fetchSemanticsNode().boundsInWindow
+                abs(bounds.left - pager.left) <= 1f && abs(bounds.right - pager.right) <= 1f
+            }.getOrDefault(false)
+        }
+        rule.waitForIdle()
+    }
+
     private fun shell(command: String): String = ParcelFileDescriptor.AutoCloseInputStream(
         instrumentation.uiAutomation.executeShellCommand(command),
     ).bufferedReader().use { it.readText().trim() }
@@ -289,7 +299,7 @@ class NativeIndependentSurfaceTest {
         }
         attempt("Core semantics") { rule.onNodeWithTag("launcher-pages").printToString() }
         attempt("logcat") {
-            shell("logcat -d -b main -v threadtime -s ModuleWorkspaceSurface:D WorkspaceSurfaceEndpoint:D AndroidRuntime:E")
+            shell("logcat -d -b main -v threadtime -s ModuleWorkspaceSurface:D WorkspaceSurfaceEndpoint:D WorkspaceGestureGate:D WorkspacePagerState:D AndroidRuntime:E")
                 .lines().takeLast(120).joinToString("\n")
         }
         attempt("mkdir") { shell("mkdir -p $directory") }

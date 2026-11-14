@@ -7,8 +7,11 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import android.view.SurfaceControlViewHost
+import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.inspector.WindowInspector
 import androidx.annotation.RequiresApi
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.OnBackPressedDispatcherOwner
@@ -20,6 +23,7 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
@@ -153,6 +157,7 @@ abstract class WorkspaceSurfaceEndpoint(
         private val sessionId = initialSpec.sessionId
         private val displayId = initialSpec.displayId
         private var surfaceHost: SurfaceControlViewHost? = null // Main thread only
+        private var rootView: View? = null // Main thread only
         private var owner: SurfaceTreeOwner? = null // Main thread only
         private var spec: WorkspaceSurfaceHostSpec = initialSpec
         val deathRecipient = IBinder.DeathRecipient { dispose() }
@@ -177,6 +182,7 @@ abstract class WorkspaceSurfaceEndpoint(
                 owner = treeOwner
                 treeOwner.start(spec.visible)
                 val root = WorkspaceSurfaceGestureLayout(viewContext, surfaceScope)
+                rootView = root
                 root.setViewTreeLifecycleOwner(treeOwner)
                 root.setViewTreeSavedStateRegistryOwner(treeOwner)
                 root.setViewTreeViewModelStoreOwner(treeOwner)
@@ -225,6 +231,7 @@ abstract class WorkspaceSurfaceEndpoint(
             check(!closed.get()) { "Surface session closed" }
             return onMain {
                 check(!closed.get()) { "Surface session closed" }
+                if (dispatchOwnedPopupBack()) return@onMain true
                 val dispatcher = owner?.onBackPressedDispatcher
                 if (dispatcher?.hasEnabledCallbacks() == true) {
                     dispatcher.onBackPressed(); true
@@ -249,10 +256,32 @@ abstract class WorkspaceSurfaceEndpoint(
         private fun destroyOnMain() {
             scope?.close()
             scope = null
+            rootView = null
             owner?.destroy()
             owner = null
             surfaceHost?.release()
             surfaceHost = null
+        }
+
+        /** Give provider-owned child windows the same Back event pair Android sends normally. */
+        private fun dispatchOwnedPopupBack(): Boolean {
+            val treeOwner = owner ?: return false
+            val primary = rootView
+            val primaryToken = primary?.windowToken
+            val windows = WindowInspector.getGlobalWindowViews()
+            for (window in windows.asReversed()) {
+                if (window === primary || !window.isAttachedToWindow) continue
+                val childToken = (window.layoutParams as? WindowManager.LayoutParams)?.token
+                val linkedByToken = primaryToken != null && childToken == primaryToken
+                if (!linkedByToken && !window.hasSessionOwner(treeOwner)) continue
+                val now = android.os.SystemClock.uptimeMillis()
+                val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK, 0)
+                val up = KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK, 0)
+                val handledDown = window.dispatchKeyEvent(down)
+                val handledUp = window.dispatchKeyEvent(up)
+                if (handledDown || handledUp) return true
+            }
+            return false
         }
 
         /** A timed out caller closes the session; a late package is released on Main. */
@@ -323,4 +352,19 @@ private fun binderSafeFailure(failure: Throwable): RuntimeException = when (fail
     is SecurityException, is IllegalArgumentException, is NullPointerException,
     is IllegalStateException, is UnsupportedOperationException -> failure as RuntimeException
     else -> IllegalStateException("Workspace surface failed", failure)
+}
+
+/** Popups carry the provider lifecycle owner on their root or hosted content. */
+private fun View.hasSessionOwner(owner: LifecycleOwner): Boolean {
+    val pending = java.util.ArrayDeque<View>()
+    pending.add(this)
+    var examined = 0
+    while (pending.isNotEmpty() && examined++ < 4_096) {
+        val view = pending.removeLast()
+        if (view.findViewTreeLifecycleOwner() === owner) return true
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) pending.add(view.getChildAt(index))
+        }
+    }
+    return false
 }

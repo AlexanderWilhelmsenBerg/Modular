@@ -388,7 +388,8 @@ class MainActivity : ComponentActivity() {
                                         organizationSnapshot.modulePages.any { page ->
                                             page.enabled && page.component == activeWorkspaceModuleComponent &&
                                                 page.matchesInstalledProvider(
-                                                    module.component.flattenToString(), module.moduleId,
+                                                    module.component.flattenToString(),
+                                                    module.moduleId ?: moduleRegistry.managementStore.knownProviderId(module.component),
                                                     modulePageIdentityResolver.resolve(module.component.packageName)
                                                         .getOrNull()?.key,
                                                 )
@@ -425,7 +426,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                     val verifiedModule = module?.takeIf { record ->
                                         page?.matchesInstalledProvider(
-                                            record.component.flattenToString(), record.moduleId,
+                                            record.component.flattenToString(),
+                                            record.moduleId ?: moduleRegistry.managementStore.knownProviderId(record.component),
                                             installedSignerKey,
                                         ) == true
                                     }

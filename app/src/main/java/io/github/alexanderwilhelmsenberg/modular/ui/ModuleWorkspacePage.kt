@@ -133,6 +133,23 @@ private object SurfaceUiThread {
 
 private const val SURFACE_LOG = "ModuleWorkspaceSurface"
 
+private fun sameSurfaceRoute(left: CapabilityRoute?, right: CapabilityRoute?): Boolean =
+    left != null && right != null && left.component == right.component &&
+        left.sessionId == right.sessionId && left.capability == right.capability
+
+private data class SurfaceEffectSnapshot(
+    val eligible: Boolean,
+    val active: Boolean,
+    val resumed: Boolean,
+    val route: CapabilityRoute?,
+    val moduleStatus: ModuleConnectionStatus?,
+    val view: SurfaceView?,
+    val generation: Int,
+    val retry: Int,
+    val signer: String?,
+    val placement: String?,
+)
+
 private class SurfaceLease(
     val route: CapabilityRoute,
     val id: String,
@@ -228,6 +245,7 @@ fun ModuleWorkspacePage(
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var automaticRetries by remember { mutableIntStateOf(0) }
+    val previousEffect = remember { AtomicReference<SurfaceEffectSnapshot?>(null) }
     val currentLease by rememberUpdatedState(lease)
     val canShow = Build.VERSION.SDK_INT >= 30 && active && resumed &&
         module?.status == ModuleConnectionStatus.CONNECTED && route != null &&
@@ -253,7 +271,8 @@ fun ModuleWorkspacePage(
     fun verifiedSession(candidate: SurfaceLease): Boolean = !candidate.closed &&
         candidate === currentLease && currentActive && resumed &&
         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
-        currentRoute == candidate.route && currentModule?.sessionId == candidate.route.sessionId
+        sameSurfaceRoute(currentRoute, candidate.route) &&
+        currentModule?.sessionId == candidate.route.sessionId
 
     fun launchDeclaredActivity(candidate: SurfaceLease, nonce: String) {
         if (!verifiedSession(candidate) || !validNonce(nonce)) return
@@ -272,15 +291,36 @@ fun ModuleWorkspacePage(
         }
     }
 
-    LaunchedEffect(active, resumed, route, module?.sessionId, module?.status, surfaceView,
-        surfaceGeneration, retryGeneration, expectedSignerKey, placementComponent) {
+    val routeIdentity = route?.let { Triple(it.component, it.sessionId, it.capability) }
+    LaunchedEffect(canShow, routeIdentity, surfaceView, surfaceGeneration,
+        retryGeneration, expectedSignerKey, placementComponent) {
         withContext(SurfaceUiThread.dispatcher) {
-        Log.d(SURFACE_LOG, "session effect: active=$active resumed=$resumed generation=$surfaceGeneration size=${width}x$height")
+        val now = SurfaceEffectSnapshot(canShow, active, resumed, route, module?.status,
+            surfaceView, surfaceGeneration, retryGeneration, expectedSignerKey, placementComponent)
+        val prior = previousEffect.getAndSet(now)
+        val changes = if (prior == null) "initial" else buildList {
+            if (prior.eligible != now.eligible) add("eligible")
+            if (prior.active != now.active) add("active")
+            if (prior.resumed != now.resumed) add("resumed")
+            if (!sameSurfaceRoute(prior.route, now.route)) add("routeIdentity")
+            else if (prior.route != now.route) add("routeMetadata")
+            if (prior.moduleStatus != now.moduleStatus) add("status")
+            if (prior.view !== now.view) add("view")
+            if (prior.generation != now.generation) add("surfaceGeneration")
+            if (prior.retry != now.retry) add("retry")
+            if (prior.signer != now.signer) add("signer")
+            if (prior.placement != now.placement) add("placement")
+        }.joinToString(",").ifBlank { "no-key-change" }
+        Log.d(SURFACE_LOG, "session effect: changes=$changes active=$active resumed=$resumed generation=$surfaceGeneration size=${width}x$height")
         lease?.detach()
         lease = null
         if (Build.VERSION.SDK_INT < 30) return@withContext
         if (!canShow) return@withContext
         val view = surfaceView ?: return@withContext
+        // A retained pager view was hidden when its previous session detached.
+        // Restore it before waiting for a host token and size: SurfaceView only
+        // recreates its holder surface and reports dimensions while visible.
+        view.visibility = android.view.View.VISIBLE
         val token = view.hostToken ?: run {
             Log.d(SURFACE_LOG, "host token unavailable")
             return@withContext
@@ -289,7 +329,8 @@ fun ModuleWorkspacePage(
         val sessionHeight = height
         if (sessionWidth !in 1..8192 || sessionHeight !in 1..8192 ||
             sessionWidth.toLong() * sessionHeight > 16_777_216) return@withContext
-        val selectedRoute = route ?: return@withContext
+        val selectedRoute = router.routes.value.firstOrNull { sameSurfaceRoute(it, route) }
+            ?: return@withContext
         val selectedModule = module ?: return@withContext
         val id = UUID.randomUUID().toString()
         val expectedUid = try { context.packageManager.getApplicationInfo(selectedModule.component.packageName, 0).uid }
@@ -355,7 +396,8 @@ fun ModuleWorkspacePage(
             } ?: error("The add-on did not provide a surface")
             Log.d(SURFACE_LOG, "surface package received")
             pendingPackage = pkg
-            if (!active || !resumed || currentRoute != selectedRoute || currentModule?.sessionId != selectedRoute.sessionId ||
+            if (!active || !resumed || !sameSurfaceRoute(currentRoute, selectedRoute) ||
+                currentModule?.sessionId != selectedRoute.sessionId ||
                 surfaceView !== view || view.hostToken != token) {
                 Log.d(SURFACE_LOG, "session changed before attach")
                 return@withContext

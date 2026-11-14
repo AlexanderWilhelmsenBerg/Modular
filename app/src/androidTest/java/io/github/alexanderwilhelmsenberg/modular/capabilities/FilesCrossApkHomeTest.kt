@@ -118,6 +118,9 @@ class FilesCrossApkHomeTest {
                 device.wait(Until.hasObject(By.pkg(Pattern.compile(".*documentsui.*"))), 10_000))
             device.pressBack()
             assertNativeOverview()
+        } catch (failure: Throwable) {
+            runCatching { captureFailureEvidence("files") }
+            throw failure
         } finally {
             addedComponent?.let { component ->
                 runBlocking {
@@ -190,4 +193,27 @@ class FilesCrossApkHomeTest {
         shell("cp ${file.absolutePath} /sdcard/Pictures/ModularFiles/$filename")
         assertEquals(file.length(), shell("stat -c %s /sdcard/Pictures/ModularFiles/$filename").toLong())
     }
+
+    private fun captureFailureEvidence(prefix: String) {
+        val directory = "/sdcard/Pictures/ModularNativeSurfaces"
+        val local = requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext
+            .getExternalFilesDir("surface-proof"))
+        runCatching { shell("mkdir -p $directory") }
+        runCatching {
+            val png = File(local, "$prefix-before-cleanup.png")
+            if (device.takeScreenshot(png)) shell("cp ${png.absolutePath} $directory/${png.name}")
+        }
+        runCatching {
+            val xml = File(local, "$prefix-before-cleanup.xml")
+            device.dumpWindowHierarchy(xml)
+            shell("cp ${xml.absolutePath} $directory/${xml.name}")
+        }
+        runCatching {
+            shell("logcat -d -b main -v threadtime -t 3000 | grep -E 'AndroidRuntime|FATAL EXCEPTION|InputDispatcher|ViewRootImpl|modular|SurfaceControlViewHost' > $directory/$prefix-before-cleanup.log")
+        }
+    }
+
+    private fun shell(command: String): String = ParcelFileDescriptor.AutoCloseInputStream(
+        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command),
+    ).bufferedReader().use { it.readText().trim() }
 }

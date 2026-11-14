@@ -135,6 +135,9 @@ class NativeIndependentSurfaceTest {
             rule.waitUntil(15_000) {
                 rule.onAllNodesWithTag("workspace-home-action").fetchSemanticsNodes().isNotEmpty()
             }
+        } catch (failure: Throwable) {
+            runCatching { captureFailureEvidence("native") }
+            throw failure
         } finally {
             addedComponent?.let { savedComponent ->
                 runBlocking {
@@ -187,6 +190,24 @@ class NativeIndependentSurfaceTest {
         assertTrue(device.takeScreenshot(local))
         shell("mkdir -p $directory")
         shell("cp ${local.absolutePath} $directory/$name")
+    }
+
+    private fun captureFailureEvidence(prefix: String) {
+        val directory = "/sdcard/Pictures/ModularNativeSurfaces"
+        val local = requireNotNull(instrumentation.targetContext.getExternalFilesDir("surface-proof"))
+        runCatching { shell("mkdir -p $directory") }
+        runCatching {
+            val png = File(local, "$prefix-before-cleanup.png")
+            if (device.takeScreenshot(png)) shell("cp ${png.absolutePath} $directory/${png.name}")
+        }
+        runCatching {
+            val xml = File(local, "$prefix-before-cleanup.xml")
+            device.dumpWindowHierarchy(xml)
+            shell("cp ${xml.absolutePath} $directory/${xml.name}")
+        }
+        runCatching {
+            shell("logcat -d -b main -v threadtime -t 3000 | grep -E 'AndroidRuntime|FATAL EXCEPTION|InputDispatcher|ViewRootImpl|modular|SurfaceControlViewHost' > $directory/$prefix-before-cleanup.log")
+        }
     }
 
     private fun installedApk(context: Context, packageName: String): ApkFingerprint {

@@ -5,6 +5,7 @@ import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.graphics.PixelFormat
 import android.view.SurfaceControlViewHost
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -338,6 +339,7 @@ fun ModuleWorkspacePage(
             val created = SurfaceLease(selectedRoute, id, session, token, view, pkg, death)
             view.setChildSurfacePackage(pkg)
             view.visibility = android.view.View.VISIBLE
+            view.requestFocus()
             lease = created
             pendingState.getAndSet(null)?.let { created.state = it }
             pendingSession = null
@@ -394,6 +396,14 @@ fun ModuleWorkspacePage(
         Box(viewportModifier) {
         AndroidView(factory = { ctx ->
             SurfaceView(ctx).also { view ->
+                // The embedded hierarchy has its own input window. Keep its
+                // SurfaceControl above Core's Compose window so real touches
+                // reach the provider, while the view itself stays inside the
+                // reserved workspace viewport.
+                view.setZOrderOnTop(true)
+                view.holder.setFormat(PixelFormat.TRANSLUCENT)
+                view.isFocusable = true
+                view.isFocusableInTouchMode = true
                 view.holder.addCallback(object : SurfaceHolder.Callback {
                     override fun surfaceCreated(holder: SurfaceHolder) { surfaceGeneration++ }
                     override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {

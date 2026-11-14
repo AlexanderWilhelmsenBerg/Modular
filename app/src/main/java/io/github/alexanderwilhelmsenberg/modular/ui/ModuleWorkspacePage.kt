@@ -6,6 +6,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.graphics.PixelFormat
+import android.util.Log
 import android.view.SurfaceControlViewHost
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -67,6 +68,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -119,6 +121,8 @@ private object SurfaceBinderCalls {
 private object SurfaceCleanup {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 }
+
+private const val SURFACE_LOG = "ModuleWorkspaceSurface"
 
 private class SurfaceLease(
     val route: CapabilityRoute,
@@ -257,13 +261,20 @@ fun ModuleWorkspacePage(
 
     LaunchedEffect(active, resumed, route, module?.sessionId, module?.status, surfaceView,
         surfaceGeneration, retryGeneration, expectedSignerKey, placementComponent) {
+        Log.d(SURFACE_LOG, "session effect: active=$active resumed=$resumed generation=$surfaceGeneration size=${width}x$height")
         lease?.detach()
         lease = null
         if (Build.VERSION.SDK_INT < 30) return@LaunchedEffect
         if (!canShow) return@LaunchedEffect
         val view = surfaceView ?: return@LaunchedEffect
-        val token = view.hostToken ?: return@LaunchedEffect
-        if (width !in 1..8192 || height !in 1..8192 || width.toLong() * height > 16_777_216) return@LaunchedEffect
+        val token = view.hostToken ?: run {
+            Log.d(SURFACE_LOG, "host token unavailable")
+            return@LaunchedEffect
+        }
+        val sessionWidth = width
+        val sessionHeight = height
+        if (sessionWidth !in 1..8192 || sessionHeight !in 1..8192 ||
+            sessionWidth.toLong() * sessionHeight > 16_777_216) return@LaunchedEffect
         val selectedRoute = route ?: return@LaunchedEffect
         val selectedModule = module ?: return@LaunchedEffect
         val id = UUID.randomUUID().toString()
@@ -291,8 +302,8 @@ fun ModuleWorkspacePage(
                 scope.launch { currentLease?.takeIf { it.id == id }?.let { launchDeclaredActivity(it, nonce) } }
             }
         }
-        fun hostJson(): String = JSONObject().put("version", 1).put("sessionId", id)
-            .put("widthPx", width).put("heightPx", height)
+        val sessionHostJson = JSONObject().put("version", 1).put("sessionId", id)
+            .put("widthPx", sessionWidth).put("heightPx", sessionHeight)
             .put("displayId", (view.display?.displayId ?: 0).coerceAtLeast(0))
             .put("densityDpi", configuration.densityDpi.coerceIn(72, 960))
             .put("fontScale", configuration.fontScale.coerceIn(0.5f, 3f).toDouble())
@@ -307,27 +318,32 @@ fun ModuleWorkspacePage(
             .toString()
         loading = true
         message = null
+        Log.d(SURFACE_LOG, "opening surface session")
         var pendingSession: IWorkspaceSurfaceSession? = null
         var pendingPackage: SurfaceControlViewHost.SurfacePackage? = null
         try {
             val binder = SurfaceBinderCalls.run(10_000) {
                 runBlocking { router.acquireModuleBinder(selectedRoute, "workspace-surface", "{}").getOrThrow() }
             }
+            Log.d(SURFACE_LOG, "capability acquired")
             val remote = IWorkspaceSurfaceCapability.Stub.asInterface(binder)
                 ?: error("The add-on surface is unavailable")
             val session = SurfaceBinderCalls.run(10_000, onDiscard = { it?.let { abandoned ->
                 SurfaceCleanup.scope.launch { runCatching { SurfaceBinderCalls.run(3_000) { abandoned.close() } } }
-            } }) { remote.createSession(token, hostJson(), host) }
+            } }) { remote.createSession(token, sessionHostJson, host) }
                 ?: error("The add-on did not create a surface")
+            Log.d(SURFACE_LOG, "session created")
             pendingSession = session
             val pkg = SurfaceBinderCalls.run(10_000, onDiscard = {
                 if (Build.VERSION.SDK_INT >= 30) it?.release()
             }) {
                 session.surfacePackage
             } ?: error("The add-on did not provide a surface")
+            Log.d(SURFACE_LOG, "surface package received")
             pendingPackage = pkg
             if (!active || !resumed || currentRoute != selectedRoute || currentModule?.sessionId != selectedRoute.sessionId ||
-                surfaceView !== view || view.hostToken !== token) {
+                surfaceView !== view || view.hostToken != token) {
+                Log.d(SURFACE_LOG, "session changed before attach")
                 return@LaunchedEffect
             }
             val death = IBinder.DeathRecipient {
@@ -341,13 +357,19 @@ fun ModuleWorkspacePage(
             view.visibility = android.view.View.VISIBLE
             view.requestFocus()
             lease = created
+            Log.d(SURFACE_LOG, "surface package attached")
             pendingState.getAndSet(null)?.let { created.state = it }
             pendingSession = null
             pendingPackage = null
             automaticRetries = 0
+        } catch (_: TimeoutCancellationException) {
+            Log.w(SURFACE_LOG, "surface session timed out")
+            message = "The add-on did not respond in time. Retry to reconnect."
         } catch (cancelled: CancellationException) {
+            Log.d(SURFACE_LOG, "surface session cancelled")
             throw cancelled
         } catch (failure: Exception) {
+            Log.w(SURFACE_LOG, "surface session failed: ${failure.javaClass.simpleName}")
             message = failure.message ?: "Could not open the add-on surface"
         } finally {
             if (Build.VERSION.SDK_INT >= 30) pendingPackage?.release()
@@ -405,12 +427,17 @@ fun ModuleWorkspacePage(
                 view.isFocusable = true
                 view.isFocusableInTouchMode = true
                 view.holder.addCallback(object : SurfaceHolder.Callback {
-                    override fun surfaceCreated(holder: SurfaceHolder) { surfaceGeneration++ }
+                    override fun surfaceCreated(holder: SurfaceHolder) {
+                        Log.d(SURFACE_LOG, "surface created")
+                        surfaceGeneration++
+                    }
                     override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {
+                        Log.d(SURFACE_LOG, "surface changed: ${w}x$h")
                         if (width == 0 || height == 0) surfaceGeneration++
                         width = w; height = h
                     }
                     override fun surfaceDestroyed(holder: SurfaceHolder) {
+                        Log.d(SURFACE_LOG, "surface destroyed")
                         width = 0; height = 0; surfaceGeneration++
                     }
                 })

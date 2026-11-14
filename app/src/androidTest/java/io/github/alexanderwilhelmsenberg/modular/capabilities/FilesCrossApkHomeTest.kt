@@ -2,6 +2,8 @@ package io.github.alexanderwilhelmsenberg.modular.capabilities
 
 import android.content.res.Configuration
 import android.os.ParcelFileDescriptor
+import android.os.Bundle
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -140,28 +142,33 @@ class FilesCrossApkHomeTest {
             ViewCompat.getRootWindowInsets(rule.activity.window.decorView)
                 ?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0
         }
-        val title = device.wait(Until.findObject(By.text("Files")), 20_000)
+        rule.waitUntil(20_000) { device.hasObject(By.text("Files")) }
+        val title = device.findObject(By.text("Files"))
         assertTrue("Remote header overlaps the system status bar",
             title != null && title.visibleBounds.top >= statusTop)
         assertTrue("Files title is missing from the remote native surface",
-            device.wait(Until.hasObject(By.text("Files")), 20_000))
+            device.hasObject(By.text("Files")))
+        rule.waitUntil(10_000) { device.hasObject(By.text("Add folder")) }
         assertTrue("Files setup control is missing from the remote native surface",
-            device.wait(Until.hasObject(By.text("Add folder")), 10_000))
+            device.hasObject(By.text("Add folder")))
     }
 
     private fun assertNativePopupOpensAndDismisses() {
+        rule.waitUntil(10_000) { device.hasObject(By.desc("More options")) }
         assertTrue("Files toolbar menu is missing from the remote surface",
-            device.wait(Until.hasObject(By.desc("More options")), 10_000))
+            device.hasObject(By.desc("More options")))
         // Item rows can also have More buttons; the toolbar button is highest.
         val toolbarMore = device.findObjects(By.desc("More options"))
             .minByOrNull { it.visibleBounds.top }
             ?: error("Files toolbar menu disappeared")
         toolbarMore.click()
+        rule.waitUntil(10_000) { device.hasObject(By.text("Full storage access")) }
         assertTrue("Files popup did not expose its overview action",
-            device.wait(Until.hasObject(By.text("Full storage access")), 10_000))
+            device.hasObject(By.text("Full storage access")))
         device.pressBack()
+        rule.waitUntil(10_000) { !device.hasObject(By.text("Full storage access")) }
         assertTrue("Files popup did not dismiss on Back",
-            device.wait(Until.gone(By.text("Full storage access")), 10_000))
+            !device.hasObject(By.text("Full storage access")))
         assertNativeOverview()
     }
 
@@ -196,20 +203,34 @@ class FilesCrossApkHomeTest {
 
     private fun captureFailureEvidence(prefix: String) {
         val directory = "/sdcard/Pictures/ModularNativeSurfaces"
-        val local = requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext
-            .getExternalFilesDir("surface-proof"))
-        runCatching { shell("mkdir -p $directory") }
-        runCatching {
-            val png = File(local, "$prefix-before-cleanup.png")
-            if (device.takeScreenshot(png)) shell("cp ${png.absolutePath} $directory/${png.name}")
+        fun attempt(label: String, action: () -> String) {
+            runCatching(action).onSuccess { emitEvidence("$prefix $label", it) }
+                .onFailure { emitEvidence("$prefix $label failed", it.toString()) }
         }
-        runCatching {
-            val xml = File(local, "$prefix-before-cleanup.xml")
+        attempt("Core semantics") { rule.onNodeWithTag("launcher-pages").printToString() }
+        attempt("logcat") {
+            shell("logcat -d -b main -v threadtime -t 1500").lines()
+                .filter { line -> listOf("AndroidRuntime", "FATAL EXCEPTION", "InputDispatcher",
+                    "ViewRootImpl", "modular", "SurfaceControlViewHost").any { line.contains(it) } }
+                .takeLast(120).joinToString("\n")
+        }
+        attempt("mkdir") { shell("mkdir -p $directory") }
+        attempt("screen") {
+            shell("screencap -p $directory/$prefix-before-cleanup.png")
+            shell("stat -c %s $directory/$prefix-before-cleanup.png")
+        }
+        attempt("hierarchy") {
+            val xml = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
+                "$prefix-before-cleanup.xml")
             device.dumpWindowHierarchy(xml)
-            shell("cp ${xml.absolutePath} $directory/${xml.name}")
+            xml.readText()
         }
-        runCatching {
-            shell("logcat -d -b main -v threadtime -t 3000 | grep -E 'AndroidRuntime|FATAL EXCEPTION|InputDispatcher|ViewRootImpl|modular|SurfaceControlViewHost' > $directory/$prefix-before-cleanup.log")
+    }
+
+    private fun emitEvidence(label: String, value: String) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        value.chunked(2500).ifEmpty { listOf("(empty)") }.forEachIndexed { index, chunk ->
+            instrumentation.sendStatus(0, Bundle().apply { putString("stream", "$label [$index]: $chunk") })
         }
     }
 

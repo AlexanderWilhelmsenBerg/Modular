@@ -4,6 +4,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.ParcelFileDescriptor
+import android.os.Bundle
+import android.view.KeyEvent
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -18,7 +21,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import io.github.alexanderwilhelmsenberg.modular.MainActivity
 import io.github.alexanderwilhelmsenberg.modular.modules.ModuleManagementStore
 import io.github.alexanderwilhelmsenberg.modular.organization.HomePageId
@@ -86,6 +88,14 @@ class NativeIndependentSurfaceTest {
             nativeVisible("Surface taps: 1")
             val input = requireNotNull(device.findObject(By.desc("Module text input")))
             input.click()
+            rule.waitUntil(5_000) {
+                rule.runOnIdle {
+                    ViewCompat.getRootWindowInsets(rule.activity.window.decorView)
+                        ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+                }
+            }
+            assertTrue("OS key injection failed", device.pressKeyCode(KeyEvent.KEYCODE_A))
+            nativeVisible("Module text echo: a")
             input.text = "native edit works"
             nativeVisible("Module text echo: native edit works")
             requireNotNull(device.findObject(By.desc("Finish module input"))).click()
@@ -167,8 +177,8 @@ class NativeIndependentSurfaceTest {
     }
 
     private fun nativeVisible(description: String) {
-        assertTrue("Remote native control missing: $description",
-            device.wait(Until.hasObject(By.desc(description)), 20_000))
+        rule.waitUntil(20_000) { device.hasObject(By.desc(description)) }
+        assertTrue("Remote native control missing: $description", device.hasObject(By.desc(description)))
     }
 
     private fun swipePage(left: Boolean) {
@@ -194,19 +204,32 @@ class NativeIndependentSurfaceTest {
 
     private fun captureFailureEvidence(prefix: String) {
         val directory = "/sdcard/Pictures/ModularNativeSurfaces"
-        val local = requireNotNull(instrumentation.targetContext.getExternalFilesDir("surface-proof"))
-        runCatching { shell("mkdir -p $directory") }
-        runCatching {
-            val png = File(local, "$prefix-before-cleanup.png")
-            if (device.takeScreenshot(png)) shell("cp ${png.absolutePath} $directory/${png.name}")
+        fun attempt(label: String, action: () -> String) {
+            runCatching(action).onSuccess { emitEvidence("$prefix $label", it) }
+                .onFailure { emitEvidence("$prefix $label failed", it.toString()) }
         }
-        runCatching {
-            val xml = File(local, "$prefix-before-cleanup.xml")
+        attempt("Core semantics") { rule.onNodeWithTag("launcher-pages").printToString() }
+        attempt("logcat") {
+            shell("logcat -d -b main -v threadtime -t 1500").lines()
+                .filter { line -> listOf("AndroidRuntime", "FATAL EXCEPTION", "InputDispatcher",
+                    "ViewRootImpl", "modular", "SurfaceControlViewHost").any { line.contains(it) } }
+                .takeLast(120).joinToString("\n")
+        }
+        attempt("mkdir") { shell("mkdir -p $directory") }
+        attempt("screen") {
+            shell("screencap -p $directory/$prefix-before-cleanup.png")
+            shell("stat -c %s $directory/$prefix-before-cleanup.png")
+        }
+        attempt("hierarchy") {
+            val xml = File(instrumentation.targetContext.cacheDir, "$prefix-before-cleanup.xml")
             device.dumpWindowHierarchy(xml)
-            shell("cp ${xml.absolutePath} $directory/${xml.name}")
+            xml.readText()
         }
-        runCatching {
-            shell("logcat -d -b main -v threadtime -t 3000 | grep -E 'AndroidRuntime|FATAL EXCEPTION|InputDispatcher|ViewRootImpl|modular|SurfaceControlViewHost' > $directory/$prefix-before-cleanup.log")
+    }
+
+    private fun emitEvidence(label: String, value: String) {
+        value.chunked(2500).ifEmpty { listOf("(empty)") }.forEachIndexed { index, chunk ->
+            instrumentation.sendStatus(0, Bundle().apply { putString("stream", "$label [$index]: $chunk") })
         }
     }
 

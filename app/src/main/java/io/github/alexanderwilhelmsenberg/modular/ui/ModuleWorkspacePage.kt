@@ -158,17 +158,18 @@ private class SurfaceLease(
     val view: SurfaceView,
     val surfacePackage: SurfaceControlViewHost.SurfacePackage,
     val death: IBinder.DeathRecipient,
+    val effect: SurfaceEffectSnapshot,
 ) {
     var state by mutableStateOf(SurfaceState())
     var closed = false
-    fun detach() {
+    fun detach(hideView: Boolean = true) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            SurfaceCleanup.scope.launch(SurfaceUiThread.dispatcher) { detach() }
+            SurfaceCleanup.scope.launch(SurfaceUiThread.dispatcher) { detach(hideView) }
             return
         }
         if (closed) return
         closed = true
-        view.visibility = android.view.View.INVISIBLE
+        if (hideView) view.visibility = android.view.View.INVISIBLE
         // Older releases replace the child on the next setChildSurfacePackage call.
         // Release and close remove its resources while the SurfaceView stays hidden.
         if (Build.VERSION.SDK_INT >= 36) runCatching { view.clearChildSurfacePackage() }
@@ -315,7 +316,20 @@ fun ModuleWorkspacePage(
             if (prior.placement != now.placement) add("placement")
         }.joinToString(",").ifBlank { "no-key-change" }
         Log.d(SURFACE_LOG, "session effect: changes=$changes active=$active resumed=$resumed generation=$surfaceGeneration size=${width}x$height")
-        lease?.detach()
+        val existing = lease
+        if (Build.VERSION.SDK_INT >= 30 && canShow && existing != null && !existing.closed &&
+            sameSurfaceRoute(existing.route, route) && existing.view === surfaceView &&
+            existing.hostToken == surfaceView?.hostToken &&
+            existing.effect.generation == surfaceGeneration &&
+            existing.effect.retry == retryGeneration &&
+            existing.effect.signer == expectedSignerKey &&
+            existing.effect.placement == placementComponent) return@withContext
+        // Replacing a live session must not hide its retained SurfaceView.
+        // Toggling visibility destroys the holder and restarts this effect,
+        // discarding input and child windows from the newly attached session.
+        val retainView = canShow && existing?.view === surfaceView &&
+            sameSurfaceRoute(existing?.route, route) && existing?.effect?.signer == expectedSignerKey
+        existing?.detach(hideView = !retainView)
         lease = null
         if (Build.VERSION.SDK_INT < 30) return@withContext
         if (!canShow) return@withContext
@@ -401,7 +415,7 @@ fun ModuleWorkspacePage(
             pendingPackage = pkg
             if (!active || !resumed || !sameSurfaceRoute(currentRoute, selectedRoute) ||
                 currentModule?.sessionId != selectedRoute.sessionId ||
-                surfaceView !== view || view.hostToken != token) {
+                surfaceView !== view || view.hostToken != token || surfaceGeneration != now.generation) {
                 Log.d(SURFACE_LOG, "session changed before attach")
                 return@withContext
             }
@@ -411,7 +425,7 @@ fun ModuleWorkspacePage(
                 } }
             }
             session.asBinder().linkToDeath(death, 0)
-            val created = SurfaceLease(selectedRoute, id, session, token, view, pkg, death)
+            val created = SurfaceLease(selectedRoute, id, session, token, view, pkg, death, now)
             view.setChildSurfacePackage(pkg)
             view.visibility = android.view.View.VISIBLE
             view.requestFocus()

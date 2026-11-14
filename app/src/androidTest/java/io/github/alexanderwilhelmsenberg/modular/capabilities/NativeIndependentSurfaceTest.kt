@@ -130,6 +130,8 @@ class NativeIndependentSurfaceTest {
             // Activity recreation is a Core process rebind, not a Core package update.
             rule.activityRule.scenario.recreate()
             nativeVisible("Independent surface v2")
+            requireNotNull(device.findObject(By.desc("Tap native control"))).click()
+            nativeVisible("Surface taps: 1")
             requireNotNull(device.findObject(By.desc("New v2 native control"))).click()
             rule.waitUntil(10_000) { device.hasObject(By.text("New v2 native dialog")) }
             assertTrue("Native v2 dialog did not open", device.hasObject(By.text("New v2 native dialog")))

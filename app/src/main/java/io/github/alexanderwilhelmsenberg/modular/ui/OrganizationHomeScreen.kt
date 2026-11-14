@@ -1,9 +1,11 @@
 package io.github.alexanderwilhelmsenberg.modular.ui
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
@@ -16,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clipToBounds
@@ -89,10 +92,13 @@ fun OrganizationHomeScreen(
     onEditWorkspace: (String) -> Unit = {},
     onOpenWorkspaceAdvanced: (String) -> Unit = onEditWorkspace,
     listeningApps: List<LaunchableApp> = emptyList(),
-    modulePageContent: @Composable (String, Boolean, (Boolean) -> Unit, () -> Unit) -> Unit = { _, _, _, _ -> },
+    modulePageContent: @Composable (String, Boolean, (Boolean) -> Unit, (String) -> Unit) -> Unit = { _, _, _, _ -> },
     onActiveModuleChanged: (String?) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val neutralFocusRequester = remember { FocusRequester() }
+    val workspaceFocusManager = LocalFocusManager.current
+    var homeFocusRequest by remember { mutableIntStateOf(0) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     var sorterHeaderHeight by remember { mutableIntStateOf(0) }
     val statuses by runtime.signals.statuses.collectAsState()
@@ -107,6 +113,12 @@ fun OrganizationHomeScreen(
     var setupSorter by remember { mutableStateOf(false) }
     var categoryMembers by remember { mutableStateOf<String?>(null) }
     var pageName by rememberSaveable { mutableStateOf("home") }
+    LaunchedEffect(homeFocusRequest, pageName) {
+        if (homeFocusRequest > 0 && pageName == "home") {
+            workspaceFocusManager.clearFocus(force = true)
+            neutralFocusRequester.requestFocus()
+        }
+    }
     LaunchedEffect(pageName, workspaceMode) {
         onActiveModuleChanged(pageName.removePrefix("module:")
             .takeIf { workspaceMode && pageName.startsWith("module:") })
@@ -299,7 +311,32 @@ fun OrganizationHomeScreen(
         pageName.startsWith("category:") -> HomePageId.Category(pageName.removePrefix("category:"))
         else -> HomePageId.Category(pageName)
     }
-    Box(Modifier.fillMaxSize().clipToBounds()
+    val pagerGesturesEnabled = !editingSearch && searchQuery.isBlank() && sorter == null &&
+        openFolderId == null && organizeApp == null && folderAction == null &&
+        categoryMembers == null && editingFolderId == null && !setupSorter && !editingWidgetGrid &&
+        !moduleInteractionActive && vertical.progress == 0f
+    val pageKind = when {
+        pageName == "home" -> "home"
+        pageName.startsWith("module:") -> "module"
+        pageName.startsWith("widget:") -> "widget"
+        else -> "category"
+    }
+    LaunchedEffect(pageKind, pagerGesturesEnabled, editingSearch, searchQuery.isBlank(), sorter == null,
+        openFolderId == null, organizeApp == null, folderAction == null,
+        categoryMembers == null, editingFolderId == null, setupSorter, editingWidgetGrid,
+        moduleInteractionActive, vertical.progress == 0f, pagerScrolling, drawerPagerScrolling,
+        pageScrolling, pointerActive) {
+        Log.d("WorkspaceGestureGate", "page=$pageKind enabled=$pagerGesturesEnabled " +
+            "editingSearch=$editingSearch queryEmpty=${searchQuery.isBlank()} sorterAbsent=${sorter == null} " +
+            "folderAbsent=${openFolderId == null} organizeAbsent=${organizeApp == null} " +
+            "folderActionAbsent=${folderAction == null} categoryMembersAbsent=${categoryMembers == null} " +
+            "editingFolderAbsent=${editingFolderId == null} setupSorter=$setupSorter " +
+            "editingWidgetGrid=$editingWidgetGrid moduleInteraction=$moduleInteractionActive " +
+            "verticalProgress=${vertical.progress} pagerScrolling=$pagerScrolling " +
+            "drawerPagerScrolling=$drawerPagerScrolling pageScrolling=$pageScrolling pointerActive=$pointerActive")
+    }
+    Box(Modifier.fillMaxSize().focusRequester(neutralFocusRequester)
+        .focusable(enabled = pageName == "home").clipToBounds()
         .background(if (wallpaperMode) Color.Transparent else MaterialTheme.colorScheme.background)
         .onSizeChanged { viewportHeight = it.height }
         .then(if (workspaceMode) Modifier.nestedScroll(connection).pointerInput(workspaceGesturesEnabled) {
@@ -331,22 +368,24 @@ fun OrganizationHomeScreen(
         LauncherPages(snapshot = if (sorter != null) snapshot.copy(categoriesEnabled = false) else snapshot,
             pageSequence = if (workspaceMode) snapshot.workspaceSurfacePages() else
                 (if (sorter != null) snapshot.copy(categoriesEnabled = false) else snapshot).visiblePageOrder(),
-            gesturesEnabled = !editingSearch && searchQuery.isBlank() && sorter == null &&
-                openFolderId == null && organizeApp == null && folderAction == null &&
-                categoryMembers == null && editingFolderId == null && !setupSorter && !editingWidgetGrid &&
-                !moduleInteractionActive && vertical.progress == 0f,
+            gesturesEnabled = pagerGesturesEnabled,
             homeResetToken = homeResetToken, initialPageId = initialPage,
             requestedPage = requestedPage, pageRequestSerial = pageRequestSerial,
             modifier = Modifier.offset { IntOffset(0, if (workspaceMode && workspacePage) (-vertical.progress * viewportHeight).roundToInt() else 0) },
             onScrollingChange = { pagerScrolling = it },
             onPageChanged = {
-                if (it !is HomePageId.Module) moduleInteractionActive = false
-                pageName = when (it) {
+                val nextPageName = when (it) {
                 HomePageId.Home -> "home"
                 is HomePageId.Category -> "category:${it.id}"
                 is HomePageId.Widget -> "widget:${it.id}"
                 is HomePageId.Module -> "module:${it.component}"
-            } },
+                }
+                if (pageName != nextPageName) {
+                    if (pageName.startsWith("module:") && nextPageName == "home") homeFocusRequest++
+                    moduleInteractionActive = false
+                }
+                pageName = nextPageName
+            },
             renderPage = { page ->
                 val category = (page as? HomePageId.Category)?.let { id -> snapshot.categories.firstOrNull { it.id == id.id } }
                 val widgetPage = (page as? HomePageId.Widget)?.let { id -> snapshot.workspacePages.firstOrNull { it.id == id.id } }
@@ -368,9 +407,36 @@ fun OrganizationHomeScreen(
                 if (workspaceMode && page is HomePageId.Module && sorter == null) {
                     if (pageName == "module:${page.component}") SideEffect { activeWorkspaceList = null }
                     Box(Modifier.fillMaxSize().padding(bottom = 72.dp)) {
-                        modulePageContent(page.component, pageName == "module:${page.component}",
-                            { moduleInteractionActive = it },
-                            { requestedPage = HomePageId.Home; pageRequestSerial += 1 })
+                        modulePageContent(page.component, pageName == "module:${page.component}" && vertical.progress == 0f,
+                            { interacting ->
+                                if (pageName == "module:${page.component}") {
+                                    moduleInteractionActive = interacting && vertical.progress == 0f
+                                }
+                            },
+                            { destination ->
+                                if (pageName == "module:${page.component}") when (destination) {
+                                    "home" -> {
+                                        settle(false)
+                                        requestedPage = HomePageId.Home
+                                        pageRequestSerial += 1
+                                    }
+                                    "apps" -> {
+                                        requestedDrawerPage = HomePageId.Home
+                                        drawerRequestSerial += 1
+                                        settle(true)
+                                    }
+                                    "previous", "next" -> {
+                                        val sequence = snapshot.workspaceSurfacePages()
+                                        val index = sequence.indexOf(page)
+                                        val target = index + if (destination == "previous") -1 else 1
+                                        if (target in sequence.indices) {
+                                            requestedPage = sequence[target]
+                                            pageRequestSerial += 1
+                                        }
+                                    }
+                                    "settings" -> onOpenSettings()
+                                }
+                            })
                     }
                 } else if (workspaceMode && (page == HomePageId.Home || page is HomePageId.Widget) && sorter == null) {
                     val pageKey = if (page == HomePageId.Home) "home" else "widget:${(page as HomePageId.Widget).id}"

@@ -11,6 +11,7 @@ object ModuleContract {
     const val ACTION_OPEN_MODULE_SETTINGS =
         "io.github.alexanderwilhelmsenberg.modular.action.OPEN_MODULE_SETTINGS"
     const val EXTRA_MODULE_COMPONENT = "moduleComponent"
+    const val EXTRA_HOST_HANDOFF_NONCE = "filesHostHandoffNonce"
 
     /**
      * Protocol v1: discovery/metadata handshake only.

@@ -154,9 +154,26 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
                       cancel: Cancellation = Cancellation { false }): CleanerEngine.Plan {
         val reviewAnalysis = expandSelectedDirectories(analysis, selectedGroupIds, cancel)
         val preliminary = CleanerEngine.plan(reviewAnalysis, keeperByGroupId, selectedGroupIds, selectedSuggestionEntryIds)
-        if (preliminary.blockers().any { !it.startsWith("File fingerprint requires review preparation:") })
+        if (preliminary.issues().any { it.type() != CleanerEngine.ReviewIssueType.FINGERPRINT_PENDING }
+            || (preliminary.issues().isEmpty() && preliminary.blockers().isNotEmpty()))
             return preliminary
         if (preliminary.manifest().isEmpty()) return preliminary
+        val reviewedTrashIds = preliminary.trashSteps().flatMap { step ->
+            listOf(step.entryId()) + step.reviewedDescendantIds()
+        }.toSet()
+        for (rename in preliminary.renameSteps()) {
+            if (cancel.isCanceled()) throw CancellationException("Cleaner review canceled")
+            val keeper = reviewAnalysis.entries()[rename.keeperId()]
+                ?: throw IOException("Chosen keeper is missing; scan again")
+            val parentId = keeper.parentId() ?: throw IOException("Chosen keeper has no parent; scan again")
+            val occupant = listAllChildren(parentId, cancel).firstOrNull { child ->
+                child.name == rename.newName() && child.id != keeper.id() && child.id !in reviewedTrashIds
+            }
+            if (occupant != null) return preliminary.withIssue(CleanerEngine.ReviewIssue(
+                CleanerEngine.ReviewIssueType.RENAME_COLLISION, rename.groupId(), keeper.id(), occupant.id,
+                "Cannot rename ${keeper.name()} (${keeper.path()}) to ${rename.newName()}; " +
+                    "existing ${occupant.name} (${occupant.relativePath}) occupies that name"))
+        }
         val verifiedEntries = reviewAnalysis.entries().toMutableMap()
         for ((directoryId, expectedChildren) in preliminary.directoryChildren()) {
             if (cancel.isCanceled()) throw CancellationException("Cleaner review canceled")

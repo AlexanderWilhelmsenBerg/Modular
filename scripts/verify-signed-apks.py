@@ -27,7 +27,9 @@ def signing_identity(output):
     return next(iter(certificates)).lower(), next(iter(public_keys)).lower()
 
 
-def artifact_modules(core_only=False, include_files=False):
+def artifact_modules(core_only=False, include_files=False, files_only=False):
+    if files_only:
+        return [("addon-files", "io.github.alexanderwilhelmsenberg.modular.addon.files")]
     modules = [("app", "io.github.alexanderwilhelmsenberg.modular")]
     if include_files:
         modules.append(("addon-files", "io.github.alexanderwilhelmsenberg.modular.addon.files"))
@@ -44,10 +46,13 @@ def main():
     parser.add_argument("--expected-certificates", type=Path)
     parser.add_argument("--core-only", action="store_true", help="Verify only Core debug and release APKs")
     parser.add_argument("--include-files", action="store_true", help="Also verify Modular Files debug and release APKs")
+    parser.add_argument("--files-only", action="store_true", help="Verify only Files; Core need not be built or installed")
     args = parser.parse_args()
+    if args.files_only and (args.core_only or args.include_files):
+        parser.error("--files-only cannot be combined with Core build options")
     expected = json.loads(args.expected_certificates.read_text()) if args.expected_certificates else None
     signers = {}
-    for module, base_id in artifact_modules(args.core_only, args.include_files):
+    for module, base_id in artifact_modules(args.core_only, args.include_files, args.files_only):
         for variant in ("debug", "release"):
             apk = Path(module) / f"build/outputs/apk/{variant}/{module}-{variant}.apk"
             output = subprocess.check_output([android_tool("apksigner"), "verify", "--verbose", "--print-certs", apk], text=True)

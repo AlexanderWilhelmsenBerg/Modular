@@ -143,9 +143,15 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private val cleanerSelectedGroups = linkedSetOf<String>()
     private val cleanerSelectedSuggestions = linkedSetOf<String>()
     private var keeperGroupId: String? = null
+    private var reviewAfterKeeperGroupId: String? = null
+    private var cleanReviewIssues: List<CleanerEngine.ReviewIssue> = emptyList()
     private var cleanerLargeMiB = preferences.getInt("cleanLargeMiB", 512)
     private var cleanerOldDays = preferences.getInt("cleanOldDays", 90)
     private var cleanerIncludeSubfolders = preferences.getBoolean("cleanSubfolders", true)
+    private var cleanSort = preferences.getString("cleanSort", "priority")?.takeIf {
+        it in setOf("priority", "size", "items", "name")
+    } ?: "priority"
+    private var cleanSortDescending = preferences.getBoolean("cleanSortDescending", false)
     private val cleanerCategories = (preferences.getStringSet("cleanChecks", null)?.mapNotNull { name ->
         runCatching { CleanerEngine.Category.valueOf(name) }.getOrNull()
     }?.toMutableSet() ?: mutableSetOf(CleanerEngine.Category.NUMBERED_COPY))
@@ -165,7 +171,35 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     fun consumeHostHandoff(nonce: String): HostHandoff? = synchronized(lock) {
         if (nonce.length !in 32..64) return@synchronized null
         val item = handoffs.remove(nonce) ?: return@synchronized null
-        item.value.takeIf { item.expiresAt >= System.currentTimeMillis() }
+        item.value.takeIf { item.expiresAt >= System.currentTimeMillis() &&
+            (item.value.kind != "editDocument" || (view == "markdown" && documentId == item.value.documentId)) }
+    }
+
+    /** Used by the embedded renderer for an ordinary file row tap. The target Activity still
+     *  resolves the document through this add-on's repository and consumes the nonce once. */
+    fun createExternalOpenHandoff(documentId: String): String = synchronized(lock) {
+        require(documentId.length in 1..512) { "Invalid document ID" }
+        require(!repository.get(documentId).isDirectory) { "A folder cannot be opened as a document" }
+        issueHostHandoff("openDocument", documentId)
+    }
+
+    /** Opens this exact active Markdown document in our Activity for Activity-only picker work. */
+    fun createEditorHandoff(documentId: String): String = synchronized(lock) {
+        require(documentId.length in 1..512 && view == "markdown" && this.documentId == documentId) {
+            "The Markdown editor is no longer active"
+        }
+        val entry = repository.get(documentId)
+        require(!entry.isDirectory && entry.name.substringAfterLast('.', "").lowercase() in
+            setOf("md", "markdown", "mdown")) { "The active document is not Markdown" }
+        issueHostHandoff("editDocument", documentId)
+    }
+
+    private fun issueHostHandoff(kind: String, documentId: String?): String {
+        val nonce = UUID.randomUUID().toString().replace("-", "")
+        handoffs.entries.removeIf { it.value.expiresAt < System.currentTimeMillis() }
+        if (handoffs.size >= 16) handoffs.remove(handoffs.keys.first())
+        handoffs[nonce] = TimedHandoff(HostHandoff(kind, documentId), System.currentTimeMillis() + 60_000)
+        return nonce
     }
 
     fun getPage(requestJson: String): String = synchronized(lock) {
@@ -255,11 +289,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             currentOffset = 0; scrollAnchor = 0; scrollOffset = 0
         }
         if (outcome.isSuccess && command.hostAction != null) {
-            val nonce = UUID.randomUUID().toString().replace("-", "")
-            handoffs.entries.removeIf { it.value.expiresAt < System.currentTimeMillis() }
-            if (handoffs.size >= 16) handoffs.remove(handoffs.keys.first())
-            handoffs[nonce] = TimedHandoff(HostHandoff(command.hostAction, command.documentId),
-                System.currentTimeMillis() + 60_000)
+            val nonce = issueHostHandoff(command.hostAction, command.documentId)
             pendingHostLaunch = JSONObject().put("kind", command.hostAction).put("nonce", nonce)
         }
         if (outcome.isFailure) {
@@ -371,7 +401,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .put("scrollAnchor", scrollAnchor).put("scrollOffset", scrollOffset)
             .put("state", "ready")
         if (view == "clean" || (view == "progress" && jobReturnView == "clean")) {
-            page.put("presentation", "sheet").put("underlyingView", "browser")
+            page.put("presentation", "screen")
         }
         if (view == "browser" || view == "search") page.put("scrollKey", scrollKey())
         message?.let { page.put("message", it) }
@@ -976,39 +1006,114 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             return
         }
         page.put("cleanSetup", false).put("includeSubfolders", include)
+            .put("cleanSort", cleanSort).put("cleanSortDescending", cleanSortDescending)
             .put("cleanChecksSummary", analysis.options().selectedCategories().sortedBy { it.ordinal }.joinToString { cleanCategoryLabel(it) })
-            .put("summary", "${analysis.groups().size} copy/version groups · ${analysis.suggestions().size} optional findings · Highest priority and known space first")
+            .put("summary", "${analysis.groups().size} copy/version groups · ${analysis.suggestions().size} optional findings")
         action(actions, "Scan again", "scan") { startCleanScan(folder, force = true) }
-        action(actions, "Scan options", "configureClean") { cleanSetup = true; cleanPresentedKey = cleanKey(folder) }
-        if (analysis.coverageWarnings().isNotEmpty()) page.put("message", analysis.coverageWarnings().take(2).joinToString("; "))
-        action(actions, "Review selected", "review") {
+        action(actions, "Scan options", "configureClean") {
+            clearCleanReviewIssues(); cleanSetup = true; cleanPresentedKey = cleanKey(folder)
+        }
+        if (message == null && analysis.coverageWarnings().isNotEmpty())
+            page.put("message", analysis.coverageWarnings().take(2).joinToString("; "))
+        val selectionCount = cleanerSelectedGroups.size + analysis.suggestions().count {
+            it.entryId() in cleanerSelectedSuggestions
+        }
+        page.put("cleanSelectionCount", selectionCount).put("cleanCanReview", selectionCount > 0)
+        if (cleanReviewIssues.isNotEmpty()) {
+            page.put("cleanIssueCount", cleanReviewIssues.size)
+                .put("cleanIssues", JSONArray(cleanReviewIssues.take(20).map {
+                    JSONObject().put("message", it.message())
+                }))
+        }
+        val reviewAction = registered("Review selected", "review") {
             prepareCleanReview(analysis)
+        }
+        actions.put(reviewAction.put("enabled", selectionCount > 0))
+        val clearAction = registered("Clear selection", "clearCleanSelection") {
+            cleanerSelectedGroups.clear(); cleanerSelectedSuggestions.clear()
+            clearCleanReviewIssues()
+        }
+        actions.put(clearAction.put("enabled", selectionCount > 0))
+        val allAction = registered("Select all", "selectAllClean") {
+            cleanerSelectedGroups.addAll(analysis.groups().map { it.id() })
+            cleanerSelectedSuggestions.addAll(analysis.suggestions().map { it.entryId() })
+            clearCleanReviewIssues()
+        }
+        actions.put(allAction.put("enabled", selectionCount < analysis.groups().size + analysis.suggestions().size))
+        action(actions, "Sort findings", "cleanSort") { args ->
+            val requestedSort = args.optString("sort")
+            require(requestedSort in setOf("priority", "size", "items", "name")) { "Invalid cleanup sort" }
+            val descending = when (args.optString("direction")) {
+                "asc", "ascending" -> false
+                "desc", "descending" -> true
+                else -> throw IllegalArgumentException("Invalid cleanup sort direction")
+            }
+            cleanSort = requestedSort
+            cleanSortDescending = descending
+            currentOffset = 0
         }
         val displayGroups = analysis.groups().map { group ->
             val chosen = cleanerKeepers[group.id()] ?: return@map group
             CleanerEngine.Group(group.id(), group.category(), group.memberIds(), chosen,
                 group.requiresKeeperChoice(), group.baseName(), group.evidence())
         }
-        val findings = CleanerEngine.rankedFindings(analysis.entries(), displayGroups, analysis.suggestions())
+        val findings = sortedCleanFindings(analysis.entries(), displayGroups, analysis.suggestions())
         page.put("findingCount", findings.size)
         findings.drop(offset).take(limit).forEach { finding ->
             val item = cleanFindingItem(finding, analysis.entries(), preliminary = false)
             val row = JSONArray()
             val group = finding.group()
             if (group != null) {
-                action(row, if (group.id() in cleanerSelectedGroups) "Included" else "Include", "select") {
-                    if (!cleanerSelectedGroups.add(group.id())) cleanerSelectedGroups.remove(group.id())
+                action(row, if (group.id() in cleanerSelectedGroups) "Included" else "Include", "select") { args ->
+                    val includeGroup = if (args.has("included")) args.getBoolean("included")
+                        else group.id() !in cleanerSelectedGroups
+                    if (includeGroup) cleanerSelectedGroups.add(group.id()) else cleanerSelectedGroups.remove(group.id())
+                    clearCleanReviewIssues()
                 }
-                action(row, "Choose keeper", "keeper") { keeperGroupId = group.id(); view = "keeper" }
+                action(row, "Choose keeper", "keeper") {
+                    clearCleanReviewIssues(); keeperGroupId = group.id(); view = "keeper"
+                }
             } else {
                 val entryId = requireNotNull(finding.suggestion()).entryId()
-                action(row, if (entryId in cleanerSelectedSuggestions) "Included" else "Include", "select") {
-                    if (!cleanerSelectedSuggestions.add(entryId)) cleanerSelectedSuggestions.remove(entryId)
+                action(row, if (entryId in cleanerSelectedSuggestions) "Included" else "Include", "select") { args ->
+                    val includeSuggestion = if (args.has("included")) args.getBoolean("included")
+                        else entryId !in cleanerSelectedSuggestions
+                    if (includeSuggestion) cleanerSelectedSuggestions.add(entryId) else cleanerSelectedSuggestions.remove(entryId)
+                    clearCleanReviewIssues()
                 }
             }
-            items.put(item.put("actions", row))
+            action(row, "Review", "reviewFinding") { reviewOnlyFinding(analysis, finding) }
+            items.put(item.put("included", if (group != null) group.id() in cleanerSelectedGroups
+                else requireNotNull(finding.suggestion()).entryId() in cleanerSelectedSuggestions)
+                .put("actions", row))
         }
         next(page, actions, offset, limit, findings.size)
+    }
+
+    private fun sortedCleanFindings(entries: Map<String, CleanerEngine.Entry>, groups: List<CleanerEngine.Group>,
+        suggestions: List<CleanerEngine.Suggestion>): List<CleanerEngine.Finding> {
+        val ranked = CleanerEngine.rankedFindings(entries, groups, suggestions)
+        if (cleanSort == "priority" && !cleanSortDescending) return ranked
+        val priorityIndex = ranked.mapIndexed { index, finding -> finding.id() to index }.toMap()
+        fun name(finding: CleanerEngine.Finding) = finding.group()?.baseName()
+            ?: finding.suggestion()?.let { entries[it.entryId()]?.name() }.orEmpty()
+        fun itemCount(finding: CleanerEngine.Finding) = finding.group()?.memberIds()?.size ?: 1
+        val comparator = Comparator<CleanerEngine.Finding> { left, right ->
+            val comparison = when (cleanSort) {
+                "priority" -> left.priorityTier().compareTo(right.priorityTier())
+                "size" -> {
+                    // Unknown bytes stay after known estimates in both directions.
+                    val unknown = (left.unknownSizeFiles() > 0).compareTo(right.unknownSizeFiles() > 0)
+                    if (unknown != 0) return@Comparator unknown
+                    left.knownReclaimableBytes().compareTo(right.knownReclaimableBytes())
+                }
+                "items" -> itemCount(left).compareTo(itemCount(right))
+                else -> name(left).compareTo(name(right), ignoreCase = true)
+            }
+            val ordered = if (cleanSortDescending) -comparison else comparison
+            if (ordered != 0) ordered else priorityIndex.getValue(left.id()).compareTo(priorityIndex.getValue(right.id()))
+        }
+        return ranked.sortedWith(comparator)
     }
 
     private fun cleanFindingItem(finding: CleanerEngine.Finding, entries: Map<String, CleanerEngine.Entry>,
@@ -1020,6 +1125,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             else suggestion?.reason().orEmpty()
         return JSONObject().put("id", finding.id()).put("name", group?.baseName() ?: entry?.name() ?: cleanCategoryLabel(finding.category()))
             .put("kind", if (group != null) "group" else "suggestion")
+            .put("itemCount", group?.memberIds()?.size ?: 1)
+            .put("keeperRequired", group?.requiresKeeperChoice() == true && group.suggestedKeeperId() == null)
             .put("subtitle", (if (preliminary) "Preliminary · " else "") + details)
             .put("priorityTier", finding.priorityTier()).put("priorityLabel", finding.priorityLabel())
             .put("reclaimableKnownBytes", if (group?.memberIds()?.any {
@@ -1065,7 +1172,46 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         cleanPresentedFolderId = folder
         cleanPresentedKey = cleanKey(folder)
         cleanSetup = cleanerAnalysis == null || cleanerScopeKey != cleanPresentedKey
+        if (cleanSetup) clearCleanReviewIssues()
         view = "clean"
+    }
+
+    private fun clearCleanReviewIssues() {
+        cleanReviewIssues = emptyList()
+        reviewAfterKeeperGroupId = null
+        cleanerPlan = null
+        message = null
+    }
+
+    private fun reviewOnlyFinding(analysis: CleanerEngine.Analysis, finding: CleanerEngine.Finding) {
+        require(activeJobCancel == null && cleanScanCancel == null) { "Another file operation is running" }
+        clearCleanReviewIssues()
+        cleanerSelectedGroups.clear(); cleanerSelectedSuggestions.clear()
+        val group = finding.group()
+        if (group != null) {
+            cleanerSelectedGroups.add(group.id())
+            val chosen = cleanerKeepers[group.id()] ?: group.suggestedKeeperId()
+            if (chosen == null || chosen !in group.memberIds()) {
+                keeperGroupId = group.id()
+                reviewAfterKeeperGroupId = group.id()
+                message = "Choose a copy to keep before reviewing this group."
+                view = "keeper"
+                return
+            }
+        } else cleanerSelectedSuggestions.add(requireNotNull(finding.suggestion()).entryId())
+        prepareCleanReview(analysis)
+    }
+
+    private fun recordBlockedReview(plan: CleanerEngine.Plan) {
+        cleanerPlan = null
+        cleanReviewIssues = plan.issues().filter {
+            it.type() != CleanerEngine.ReviewIssueType.FINGERPRINT_PENDING
+        }
+        message = when (cleanReviewIssues.size) {
+            0 -> "Review verification did not complete. Scan again before reviewing these items."
+            1 -> cleanReviewIssues.first().message()
+            else -> "${cleanReviewIssues.size} issues prevent this review. ${cleanReviewIssues.first().message()}"
+        }
     }
 
     private fun prepareCleanReview(analysis: CleanerEngine.Analysis) {
@@ -1074,6 +1220,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val groups = cleanerSelectedGroups.toSet()
         val suggestions = cleanerSelectedSuggestions.toSet()
         require(groups.isNotEmpty() || suggestions.isNotEmpty()) { "Select findings to review" }
+        clearCleanReviewIssues()
         val cancel = AtomicBoolean(false)
         activeJobCancel = cancel
         cleanerPlan = null
@@ -1088,8 +1235,10 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             synchronized(lock) {
                 if (activeJobCancel !== cancel) return@synchronized
                 activeJobCancel = null
-                if (!cancel.get() && outcome.isSuccess) cleanerPlan = outcome.getOrThrow()
-                else message = outcome.exceptionOrNull()?.message ?: "Review preparation canceled"
+                if (!cancel.get() && outcome.isSuccess) {
+                    val plan = outcome.getOrThrow()
+                    if (plan.readyForReview()) cleanerPlan = plan else recordBlockedReview(plan)
+                } else message = outcome.exceptionOrNull()?.message ?: "Review preparation canceled"
                 if (view == "progress" && jobReturnView == "cleanReview")
                     view = if (cleanerPlan != null) "cleanReview" else "clean"
                 persist()
@@ -1134,7 +1283,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         cleanScanCategories = categories
         cleanScanIncludesSubfolders = include
         cleanSetup = false
-        message = null
+        clearCleanReviewIssues()
         cleanPresentedKey = scopeKey
         cleanPresentedFolderId = folder
         cleanProgressEntries.clear()
@@ -1177,7 +1326,6 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                     cleanerAnalysis = analysisResult
                     cleanerScopeKey = scopeKey
                     cleanerSelectedGroups.clear(); cleanerSelectedSuggestions.clear(); cleanerKeepers.clear()
-                    analysisResult.groups().filter { it.suggestedKeeperId() != null }.forEach { cleanerSelectedGroups.add(it.id()) }
                     preferences.edit().putLong("lastCleanScanAt:$folder", System.currentTimeMillis()).apply()
                     if (view == "progress" && jobReturnView == "clean" && cleanPresentedKey == scopeKey)
                         view = "clean"
@@ -1194,13 +1342,16 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val analysis = cleanerAnalysis ?: run { view = "clean"; return }
         val group = analysis.groups().firstOrNull { it.id() == keeperGroupId } ?: run { view = "clean"; return }
         page.put("summary", "${group.memberIds().size} copies · ${group.evidence()}")
-        action(actions, "Back to Clean", "back") { view = "clean" }
+        action(actions, "Back to Clean", "back") { reviewAfterKeeperGroupId = null; message = null; view = "clean" }
         group.memberIds().drop(offset).take(limit).forEach { id ->
             val entry = analysis.entries()[id] ?: return@forEach
             val chosen = cleanerKeepers[group.id()] ?: group.suggestedKeeperId()
             val row = JSONArray()
             action(row, if (id == chosen) "Keeping" else "Keep this", "keeper") {
-                cleanerKeepers[group.id()] = id; cleanerSelectedGroups.add(group.id()); view = "clean"
+                val reviewThisGroup = reviewAfterKeeperGroupId == group.id()
+                clearCleanReviewIssues()
+                cleanerKeepers[group.id()] = id; cleanerSelectedGroups.add(group.id())
+                if (reviewThisGroup) prepareCleanReview(analysis) else view = "clean"
             }
             items.put(JSONObject().put("id", id).put("name", entry.name())
                 .put("kind", "candidate").put("path", entry.path())
@@ -1266,9 +1417,10 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private fun renderProgress(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
         page.put("state", "loading").put("summary", jobStatus).put("jobStatus", jobStatus)
         if (jobReturnView == "clean") {
-            val findings = CleanerEngine.rankedFindings(cleanProgressEntries,
+            val findings = sortedCleanFindings(cleanProgressEntries,
                 cleanProgressGroups.values.toList(), cleanProgressSuggestions.values.toList())
             page.put("progressFor", "clean").put("complete", false)
+                .put("cleanSort", cleanSort).put("cleanSortDescending", cleanSortDescending)
                 .put("cleanScopeId", cleanScanFolderId)
                 .put("cleanScopeName", cleanScanFolderName)
                 .put("cleanChecksSummary", cleanScanCategories.sortedBy { it.ordinal }.joinToString { cleanCategoryLabel(it) })
@@ -1826,6 +1978,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             .putLong("modifiedAfter", modifiedAfter ?: -1).putLong("modifiedBefore", modifiedBefore ?: -1)
             .putLong("minSizeBytes", minSizeBytes ?: -1).putLong("maxSizeBytes", maxSizeBytes ?: -1)
             .putBoolean("cleanSubfolders", cleanerIncludeSubfolders)
+            .putString("cleanSort", cleanSort).putBoolean("cleanSortDescending", cleanSortDescending)
             .putInt("cleanLargeMiB", cleanerLargeMiB).putInt("cleanOldDays", cleanerOldDays)
             .putStringSet("cleanChecks", cleanerCategories.map { it.name }.toSet())
             .putStringSet("cleanExcludedIds", cleanerExcludedIds.toSet())

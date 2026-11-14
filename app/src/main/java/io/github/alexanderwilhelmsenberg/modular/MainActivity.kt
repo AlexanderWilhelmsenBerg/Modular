@@ -287,18 +287,6 @@ class MainActivity : ComponentActivity() {
                 val customizationError by appCustomizationStore.error.collectAsState()
                 val mostUsedSettings by mostUsedStore.settings.collectAsState(initial = initialMostUsed)
                 val organizationSnapshot by organization.store.snapshots.collectAsState(initial = initialOrganization)
-                var cachedPageComponents by remember {
-                    mutableStateOf(initialOrganization.modulePages.map { it.component }.toSet())
-                }
-                LaunchedEffect(organizationSnapshot.modulePages) {
-                    val current = organizationSnapshot.modulePages.map { it.component }.toSet()
-                    val removed = cachedPageComponents - current
-                    cachedPageComponents = current
-                    if (removed.isNotEmpty()) kotlinx.coroutines.withContext(Dispatchers.IO) {
-                        val snapshots = io.github.alexanderwilhelmsenberg.modular.ui.WorkspacePageSnapshotStore(this@MainActivity)
-                        removed.forEach(snapshots::purge)
-                    }
-                }
                 LaunchedEffect(organizationSnapshot.folders, organizationSnapshot.listeningPreferences.enabled) {
                     if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
                         organization.runtime.signals.start(organizationSnapshot.folders,
@@ -400,7 +388,8 @@ class MainActivity : ComponentActivity() {
                                         organizationSnapshot.modulePages.any { page ->
                                             page.enabled && page.component == activeWorkspaceModuleComponent &&
                                                 page.matchesInstalledProvider(
-                                                    module.component.flattenToString(), module.moduleId,
+                                                    module.component.flattenToString(),
+                                                    module.moduleId ?: moduleRegistry.managementStore.knownProviderId(module.component),
                                                     modulePageIdentityResolver.resolve(module.component.packageName)
                                                         .getOrNull()?.key,
                                                 )
@@ -427,7 +416,7 @@ class MainActivity : ComponentActivity() {
                             OrganizationHomeScreen(
                                 workspaceMode = true,
                                 onWidgetSurfaceVisible = { widgetSurfaceVisible = it },
-                                modulePageContent = { component, active, onInteractionActiveChange, onReturnHome ->
+                                modulePageContent = { component, active, onInteractionActiveChange, onNavigate ->
                                     val module = modules.firstOrNull { it.component.flattenToString() == component }
                                     val page = organizationSnapshot.modulePages.firstOrNull { it.component == component }
                                     val installedSignerKey = remember(module, identityRevision) {
@@ -437,7 +426,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                     val verifiedModule = module?.takeIf { record ->
                                         page?.matchesInstalledProvider(
-                                            record.component.flattenToString(), record.moduleId,
+                                            record.component.flattenToString(),
+                                            record.moduleId ?: moduleRegistry.managementStore.knownProviderId(record.component),
                                             installedSignerKey,
                                         ) == true
                                     }
@@ -450,7 +440,7 @@ class MainActivity : ComponentActivity() {
                                         else null,
                                         active = active,
                                         onInteractionActiveChange = onInteractionActiveChange,
-                                        onReturnHome = onReturnHome,
+                                        onNavigate = onNavigate,
                                         onOpenModuleSettings = {
                                             if (module != null) {
                                                 selectedModuleComponent = module.component.flattenToString()

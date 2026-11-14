@@ -21,7 +21,7 @@ object WorkspacePageContract {
     const val HOST_FULL_ACCESS = "fullAccess"
     const val HOST_OPEN_DOCUMENT = "openDocument"
     const val HOST_SHARE_DOCUMENT = "shareDocument"
-    const val EXTRA_HOST_HANDOFF_NONCE = "filesHostHandoffNonce"
+    const val EXTRA_HOST_HANDOFF_NONCE = ModuleContract.EXTRA_HOST_HANDOFF_NONCE
     private val writeMode = Regex("rw:[A-Za-z0-9._:-]{1,128}")
 
     fun validDocumentMode(mode: String): Boolean = mode == "r" || writeMode.matches(mode)

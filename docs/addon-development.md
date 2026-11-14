@@ -4,11 +4,11 @@ Modular add-ons are separately installed Android APKs. They expose a service ove
 
 ## Obtain the API
 
-The version 0.3.0 Android libraries use Maven coordinates:
+The version 0.4.0 Android libraries use Maven coordinates:
 
 ```kotlin
-implementation("io.github.alexanderwilhelmsenberg.modular:module-api:0.3.0")
-implementation("io.github.alexanderwilhelmsenberg.modular:module-sdk:0.3.0")
+implementation("io.github.alexanderwilhelmsenberg.modular:module-api:0.4.0")
+implementation("io.github.alexanderwilhelmsenberg.modular:module-sdk:0.4.0")
 ```
 
 Android CI publishes the release API/SDK libraries as the Maven-layout `modular-addon-sdk` artifact. Download it from a successful Android CI run and extract it into a directory such as `sdk-repository`. Point a Maven repository in your add-on's Gradle settings at the extracted directory. The standalone example takes it through `-PmodularSdkRepository=/absolute/path/to/sdk-repository`. This is a local artifact source; no Core source checkout or `project(":module-api")` dependency is needed. Android Gradle Plugin 9.4.1, Gradle 9.6, Java 17, compile SDK 37, and min SDK 29 match this release.
@@ -86,28 +86,78 @@ Core independently verifies the add-on's current package and certificate for gra
 
 Build the example with `gradle -p examples/standalone-sort-addon -PmodularSdkRepository=/absolute/path/to/sdk-repository :app:assembleDebug`. Install the add-on APK as a separate package. In Core Settings, inspect and enable its service, create two instances of its provider with `{"reverse":false}` and `{"reverse":true}`, and bind each to `modular.apps.sort/v1` in separate contexts. Switching contexts should change order while Core Home remains usable if the add-on is disabled or fails. Only one context is active at a time.
 
-The APK install is handled by Android; Core does not silently sideload packages. The baseline Home and Settings work with no add-ons. Native Files Home pages use the optional `modular.workspace.page/v1` contract described below. Arbitrary external UI rendering, external themes, automation, scripting, MCP transport, and terminal capabilities remain later contracts.
+The APK install is handled by Android; Core does not silently sideload packages. The baseline Home and Settings work with no add-ons. Add-on Home screens use the independent native surface capability below. External themes, automation, scripting, MCP transport, and terminal capabilities remain separate future contracts.
 
-## Native workspace pages (SDK 0.3.0)
+## Independent native workspace screens (SDK 0.4.0)
 
-`modular.workspace.page/v1` is an optional protocol-v4 capability. It does not
-change existing sort/featured parcel layouts. The first trusted renderer is
-`kind: files`; this is a bounded native data contract, not permission to execute
-add-on UI code inside Core. New renderer kinds need Core support and a defined
-contract before a module can use them.
+Declare `modular.workspace.surface/v1` in `providedCapabilities` and return a
+`WorkspaceSurfaceEndpoint` from your `BaseModuleService.createCapability`.
+Override `onCreateView(scope)` to return a View built with `scope.context`.
+A ComposeView can set its own content; Core does not compile or load that UI.
+The SDK installs lifecycle, saved-state, ViewModel, and Back owners on the view
+hierarchy. The same contract can host new controls without a Core update.
 
-Implement `IWorkspacePageCapability`: `getPage(requestJson)`,
-`performAction(requestJson)`, and `openDocument(documentId, mode)`. Every call
-must authenticate the live Core instance. JSON envelopes carry `version: 1`;
-`WorkspacePageContract` defines byte, page, field, and action-token bounds. Use
-opaque document identities, frozen server-owned action plans, and durable
-idempotency for destructive actions. Never put passwords, file contents, or raw
-filesystem authority into page metadata. Scoped descriptors must be closed by
-the receiver.
+Use `scope.hostState` for the host's bounded viewport, visibility, palette, font
+scale and locale. Respect those changes or apply an explicit add-on appearance
+setting. The viewport already excludes Core's controls: do not add system-bar
+padding again. Keep feature/network/storage state in your add-on. Closing a
+surface is a UI lifecycle event, not permission to discard saved browsing state
+or replay a destructive action.
 
-Core discovers the page capability in the packaged descriptor. Users enable the
-module and add its page through Home screen Settings; the organizer persists the
-component identity and order. Module Settings owns access onboarding. Core owns
-Home/Apps navigation, page timeouts and unavailable-provider recovery. The Files
-implementation and [architecture plan](implementation/files-addon-architecture.md)
-show the complete integration.
+`scope.updateState(canGoBack, exclusiveGestures)` reports generic input state.
+The SDK forwards horizontal navigation when exclusive gestures are false;
+selection and local editing should keep their own gestures. Use
+`scope.requestNavigation("apps")`, `"home"`, `"previous"`, `"next"`, or `"settings"`
+for host navigation. Back first visits child windows belonging to the session,
+then enabled view-tree Back callbacks and `scope.onBackRequested`; return false
+when the host should leave the page.
+
+On Android 13+, collect `scope.windowToken` when composing dialogs. Use
+`DialogProperties(windowType = WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+windowToken = token)` for Compose dialogs. For an Android `Dialog`, call
+`scope.configureDialog(dialog)` on Main before `dialog.show()`. These bind the
+child window to this surface; an embedded context is not an Activity token.
+
+An embedded View is not an Activity. Put Android permission, picker, and other
+Activity-based operations in your add-on's own declared `managementActivity`.
+`scope.requestActivity(nonce)` asks the active host to open that Activity with a
+one-use opaque nonce; validate and consume the nonce in the add-on. The provider
+cannot choose another component through this API. Own network/storage
+permissions stay in the add-on APK.
+
+Basic embedded Views require Android 11/API 30. Declare `workspaceSurfaceMinSdk`
+to set your screen's minimum (default 30). Screens using nested popup or dialog
+windows must declare at least 33: Android 13 first routes these child windows
+through the embedded surface. Files and the native-window example declare 33.
+Optional `workspaceActivity` names an Activity in the same APK for an explicit
+standalone fallback below that minimum. Core retains its Android 10 minimum and
+validates declarations at discovery and launch. Swiping to a page never launches
+an Activity automatically.
+
+The [standalone page example](../examples/standalone-page-addon/README.md) builds
+from published API/SDK artifacts without Core source. It includes compatible v1
+and v2 APKs with different UI. The device acceptance test updates only that APK
+and compares Core's installed SHA-256, version, path and update time.
+The example's installed-Core enrollment is a local test convenience; published
+third-party modules should pin the verified Core certificate using
+`TrustedCorePolicy.pinned(...)` and the official public signing information.
+
+See [ADR-0009](decisions/ADR-0009-independent-native-module-surfaces.md) and the
+[implementation/validation plan](implementation/independent-native-surfaces-plan.md).
+
+### Legacy data-only workspace pages
+
+`modular.workspace.page/v1`, `IWorkspacePageCapability` and `WorkspacePageEndpoint`
+remain in the SDK for older Core clients. That Files-specific data protocol is
+not the extension path for new screen add-ons. New Core has no Files renderer;
+users update the provider or choose its declared standalone fallback.
+
+## Independent delivery
+
+After the native framework migration, Files feature/UI releases use the Signed
+APKs workflow's `files-only` build target. It builds and verifies only Files and
+checks that no Core APK was produced. Use `core-only` for a Core change and
+`core-and-files` for a change that intentionally migrates the host contract.
+Changing add-on layout or adding provider-owned native controls is not a reason
+to rebuild or reinstall Core. Independent publishers use their own signing key
+and retain that identity across add-on updates.

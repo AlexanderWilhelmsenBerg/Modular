@@ -1,4 +1,4 @@
-package io.github.alexanderwilhelmsenberg.modular.ui
+package io.github.alexanderwilhelmsenberg.modular.addon.files
 
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
@@ -27,6 +27,9 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasStateDescription
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.alexanderwilhelmsenberg.modular.filesui.FilesPage
 import java.io.File
@@ -128,6 +131,49 @@ class FilesPageVisualFixtureTest {
                         updated.put("includeSubfolders", !updated.getBoolean("includeSubfolders"))
                         page = updated.toString()
                     }
+                    if (id.startsWith("fixture-select-")) {
+                        val updated = JSONObject(page)
+                        val items = updated.getJSONArray("items")
+                        for (index in 0 until items.length()) {
+                            val item = items.getJSONObject(index)
+                            if (item.getString("id") == id.removePrefix("fixture-select-"))
+                                item.put("included", !item.optBoolean("included"))
+                        }
+                        val count = (0 until items.length()).count {
+                            items.getJSONObject(it).optBoolean("included")
+                        }
+                        updated.put("cleanSelectionCount", count)
+                            .put("cleanCanReview", count > 0)
+                        val actions = updated.getJSONArray("actions")
+                        for (index in 0 until actions.length()) {
+                            val action = actions.getJSONObject(index)
+                            if (action.optString("kind") in setOf("review", "clearCleanSelection"))
+                                action.put("enabled", count > 0)
+                        }
+                        page = updated.toString()
+                    }
+                    if (id == "fixture-selectAllClean-Select all" ||
+                        id == "fixture-clearCleanSelection-Deselect all") {
+                        val updated = JSONObject(page)
+                        val items = updated.getJSONArray("items")
+                        val included = id.startsWith("fixture-selectAllClean")
+                        for (index in 0 until items.length()) items.getJSONObject(index).put("included", included)
+                        updated.put("cleanSelectionCount", if (included) items.length() else 0)
+                            .put("cleanCanReview", included)
+                        val actions = updated.getJSONArray("actions")
+                        for (index in 0 until actions.length()) {
+                            val action = actions.getJSONObject(index)
+                            if (action.optString("kind") in setOf("review", "clearCleanSelection"))
+                                action.put("enabled", included)
+                        }
+                        page = updated.toString()
+                    }
+                    if (id == "fixture-cleanSort-Sort") {
+                        val updated = JSONObject(page)
+                        updated.put("cleanSort", requireNotNull(args).getString("sort"))
+                            .put("cleanSortDescending", args.getString("direction") == "desc")
+                        page = updated.toString()
+                    }
                 },
                     onOpenDocument = { _, _ -> })
             }
@@ -194,8 +240,17 @@ class FilesPageVisualFixtureTest {
             assertTrue(JSONObject(page).getBoolean("includeSubfolders"))
         }
 
+        rule.runOnIdle {
+            page = JSONObject(fixture("progress")).put("progressFor", "cleanReview")
+                .put("cleanScanRunning", false).toString()
+        }
+        rule.onNodeWithTag("files.clean.preparing").assertIsDisplayed()
+        rule.onNodeWithText("Refresh progress").assertDoesNotExist()
+        rule.onNodeWithTag("files.clean.cancel").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.findings").assertDoesNotExist()
+
         rule.runOnIdle { page = fixture("progress") }
-        rule.onNodeWithTag("files.clean.sheet").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.page").assertIsDisplayed()
         rule.onNodeWithTag("files.clean.progress").assertIsDisplayed()
         rule.onNodeWithTag("files.clean.findings").assertExists()
         rule.onNodeWithText("Project notes").assertIsDisplayed()
@@ -203,16 +258,62 @@ class FilesPageVisualFixtureTest {
         rule.onNodeWithTag("files.clean.cancel").assertIsDisplayed()
         rule.onNodeWithTag("files.clean.counters").assertIsDisplayed()
         rule.onNodeWithTag("files.clean.scope").assertIsDisplayed()
-        rule.onNodeWithText("Choose keeper").assertDoesNotExist()
+        rule.onNode(hasContentDescription("Choose keeper")).assertDoesNotExist()
+        rule.onNodeWithTag("files.clean.sort").assertDoesNotExist()
         capture("clean-progress", requestedTheme.lowercase(Locale.ROOT))
         rule.runOnIdle { page = fixture("clean") }
-        rule.onNodeWithTag("files.clean.sheet").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.page").assertIsDisplayed()
         rule.onNodeWithText("Clean folder").assertIsDisplayed()
-        rule.onNodeWithText("Choose keeper").assertIsDisplayed()
-        rule.onNodeWithText("Include").assertIsDisplayed()
-        rule.onNodeWithText("Scan options").assertIsDisplayed()
+        rule.onNode(hasContentDescription("Choose keeper")).assertIsDisplayed()
+        rule.onNodeWithText("Include").assertDoesNotExist()
         rule.onNodeWithText("High priority").assertIsDisplayed()
         rule.onNodeWithText("known space", substring = true).assertIsDisplayed()
+        assertTrue(rule.onNodeWithTag("files.clean.recommendation:copies")
+            .getBoundsInRoot().top.value < 280f)
+        rule.onNodeWithTag("files.action.review").assertIsNotEnabled()
+        rule.onNodeWithTag("files.clean.selection.count").assertIsDisplayed()
+        rule.onNodeWithTag("files.action.selectAllClean").assertExists()
+        rule.onNode(hasTestTag("files.action.selectAllClean") and hasContentDescription("Select all"))
+            .assertExists()
+        rule.onNodeWithTag("files.action.clearCleanSelection").assertIsNotEnabled()
+        rule.onNode(hasTestTag("files.clean.sort") and hasContentDescription("Sort by Priority"))
+            .assertExists()
+        rule.onNodeWithTag("files.clean.sort").performClick()
+        rule.onNodeWithTag("files.clean.sort.size").performClick()
+        rule.runOnIdle {
+            assertEquals("size", requests.last().getJSONObject("args").getString("sort"))
+            assertEquals("desc", requests.last().getJSONObject("args").getString("direction"))
+        }
+        rule.onNodeWithTag("files.clean.sort.direction").performClick()
+        rule.runOnIdle { assertEquals("asc", requests.last().getJSONObject("args").getString("direction")) }
+        rule.onNodeWithTag("files.clean.recommendation:copies").performClick()
+        rule.runOnIdle {
+            assertEquals("fixture-select-copies", requests.last().getString("actionId"))
+            assertTrue(JSONObject(page).getJSONArray("items").getJSONObject(0).getBoolean("included"))
+        }
+        rule.onNode(hasTestTag("files.clean.recommendation:copies") and
+            hasStateDescription("Selected")).assertExists()
+        rule.onNodeWithTag("files.action.review").assertIsEnabled()
+        rule.onNodeWithTag("files.action.clearCleanSelection").performClick()
+        rule.onNodeWithTag("files.action.review").assertIsNotEnabled()
+        rule.onNodeWithTag("files.action.selectAllClean").performClick()
+        rule.runOnIdle { assertEquals(2, JSONObject(page).getInt("cleanSelectionCount")) }
+        rule.onNodeWithTag("files.action.review").assertIsEnabled()
+        rule.onNodeWithTag("files.action.clearCleanSelection").performClick()
+        rule.onNodeWithTag("files.clean.showIssues").performClick()
+        rule.onNodeWithTag("files.clean.issues.dialog").assertIsDisplayed()
+        rule.onNodeWithText("Project notes: notes (1).md would replace notes.md in the destination.").assertIsDisplayed()
+        rule.onNodeWithText("Review a smaller selection to see remaining issues.").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.issues.close").performClick()
+        rule.onNodeWithTag("files.clean.issues.dialog").assertDoesNotExist()
+        rule.onNodeWithTag("files.clean.more").performClick()
+        rule.onNodeWithTag("files.action.configureClean").performClick()
+        rule.runOnIdle { assertEquals("fixture-configureClean-Scan options", requests.last().getString("actionId")) }
+        rule.onNodeWithTag("files.clean.findings")
+            .performScrollToNode(hasTestTag("files.clean.item.reviewFinding"))
+        rule.onNodeWithTag("files.clean.item.reviewFinding").assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.item.reviewFinding").performClick()
+        rule.runOnIdle { assertEquals("fixture-review-finding-copies", requests.last().getString("actionId")) }
         capture("clean-sheet", requestedTheme.lowercase(Locale.ROOT))
 
         rule.runOnIdle { page = fixture("info") }
@@ -280,7 +381,7 @@ class FilesPageVisualFixtureTest {
             }
             "clean-options" -> {
                 page.put("view", "clean").put("title", "Clean folder")
-                    .put("presentation", "sheet").put("underlyingView", "browser")
+                    .put("presentation", "screen")
                     .put("cleanSetup", true).put("cleanCanScan", true)
                     .put("includeSubfolders", false)
                     .put("cleanChecks", JSONArray()
@@ -297,7 +398,7 @@ class FilesPageVisualFixtureTest {
             }
             "progress" -> {
                 page.put("title", "Working").put("summary", "Scanning cleanup candidates")
-                    .put("presentation", "sheet").put("underlyingView", "browser")
+                    .put("presentation", "screen")
                     .put("progressFor", "clean").put("cleanScanRunning", true).put("complete", false)
                     .put("cleanChecksSummary", "Numbered copies")
                     .put("foldersScanned", 3).put("filesScanned", 84).put("findingCount", 1)
@@ -311,20 +412,35 @@ class FilesPageVisualFixtureTest {
             "clean" -> {
                 page.put("title", "Recommended cleanup")
                     .put("summary", "1 duplicate/copy/version groups · 1 other suggestions")
-                    .put("presentation", "sheet").put("underlyingView", "browser")
+                    .put("presentation", "screen")
                     .put("cleanChecksSummary", "Numbered copies")
+                    .put("cleanSort", "priority").put("cleanSortDescending", true)
+                    .put("cleanSelectionCount", 0).put("cleanCanReview", false)
+                    .put("message", "Project notes needs attention before review.")
+                    .put("cleanIssues", JSONArray()
+                        .put(JSONObject().put("message", "Project notes: notes (1).md would replace notes.md in the destination."))
+                        .put(JSONObject().put("message", "Project notes: choose which copy to keep.")))
+                    .put("cleanIssueCount", 3)
                 actions.put(action("Back to folder", "back"))
                     .put(action("Scan again", "scan"))
                     .put(action("Scan options", "configureClean"))
-                    .put(action("Review selected", "review"))
+                    .put(action("Review selected", "review").put("enabled", false))
+                    .put(action("Sort", "cleanSort"))
+                    .put(action("Select all", "selectAllClean"))
+                    .put(action("Deselect all", "clearCleanSelection").put("enabled", false))
                 items.put(item("copies", "Project notes", "group", "Downloads/Project notes", 2048, null)
                     .put("subtitle", "numbered copies · 2 items").put("priorityLabel", "High priority")
-                    .put("reclaimableKnownBytes", 2048).put("unknownSizeFiles", 1)
-                    .put("actions", JSONArray().put(action("Included", "select"))
-                        .put(action("Choose keeper", "keeper"))))
+                    .put("reclaimableKnownBytes", 2048).put("unknownSizeFiles", 1).put("included", false)
+                    .put("actions", JSONArray().put(action("Select", "select")
+                        .put("id", "fixture-select-copies"))
+                        .put(action("Choose keeper", "keeper"))
+                        .put(action("Review", "reviewFinding")
+                            .put("id", "fixture-review-finding-copies"))))
                 items.put(item("copy", "notes (1).md", "suggestion", "Downloads/notes (1).md", 14_208, null)
                     .put("subtitle", "numbered copy · Check before including")
-                    .put("actions", JSONArray().put(action("Include", "select"))))
+                    .put("included", false)
+                    .put("actions", JSONArray().put(action("Select", "select")
+                        .put("id", "fixture-select-copy"))))
             }
             "info" -> {
                 page.put("title", "Downloads").put("summary", "Storage details for this folder")

@@ -1,25 +1,21 @@
 package io.github.alexanderwilhelmsenberg.modular.capabilities
 
 import android.content.res.Configuration
-import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.asAndroidBitmap
+import android.os.Bundle
+import android.os.Build
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.hasText
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performTouchInput
 import io.github.alexanderwilhelmsenberg.modular.MainActivity
 import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceSettingsStore
 import io.github.alexanderwilhelmsenberg.modular.appearance.AppearanceTheme
@@ -32,9 +28,9 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import java.io.File
-import java.io.FileOutputStream
 import java.util.Locale
 import java.util.regex.Pattern
+import kotlin.math.abs
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -44,6 +40,7 @@ import org.junit.Test
 /** Requires the independently installed addon-files debug APK on the device. */
 class FilesCrossApkHomeTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
+    private val device by lazy { UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()) }
 
     @Test fun addFilesFromSettingsAndRenderItsEmbeddedPage() {
         val store = OrganizationStore(rule.activity)
@@ -92,20 +89,20 @@ class FilesCrossApkHomeTest {
                 rule.onAllNodesWithTag("launcher-pages").fetchSemanticsNodes().isNotEmpty()
             }
             swipePage(left = true)
-            rule.waitUntil(20_000) {
-                rule.onAllNodesWithTag("files.page.overview").fetchSemanticsNodes().isNotEmpty()
+            if (Build.VERSION.SDK_INT < 33) {
+                assertStandaloneFilesFallback()
+                return
             }
-            rule.onNodeWithTag("files.page.overview").assertIsDisplayed()
+            assertNativeOverview()
+            assertNativePopupOpensAndDismisses()
             if (InstrumentationRegistry.getArguments().getString("files_capture") == "true") captureOverview()
             val statusBarBottom = rule.runOnIdle {
                 ViewCompat.getRootWindowInsets(rule.activity.window.decorView)
                     ?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0
             }
-            val titleTop = rule.onNode(hasText("Files") and
-                hasAnyAncestor(hasTestTag("files.page.overview"))).fetchSemanticsNode().boundsInWindow.top
+            val titleTop = requireNotNull(device.findObject(By.text("Files"))).visibleBounds.top
             assertTrue("Embedded Files title overlaps the status bar: title=$titleTop, bar=$statusBarBottom",
                 titleTop >= statusBarBottom)
-            rule.onNodeWithTag("files.trash.badge").assertIsDisplayed()
             rule.onNodeWithTag("alphabet-rail").assertDoesNotExist()
             rule.onNodeWithTag("home-search-field").assertIsDisplayed()
             assertTrue(rule.onAllNodesWithTag("workspace-apps-action").fetchSemanticsNodes().isNotEmpty())
@@ -113,30 +110,20 @@ class FilesCrossApkHomeTest {
 
             repeat(2) {
                 swipePage(left = false)
-                rule.waitUntil(15_000) {
-                    runCatching {
-                        rule.onNode(hasTestTag("launcher-page:home") and
-                            hasAnyAncestor(hasTestTag("launcher-pages"))).assertIsDisplayed()
-                    }.isSuccess
-                }
+                waitForHomePageSettled()
                 swipePage(left = true)
-                rule.waitUntil(20_000) {
-                    runCatching { rule.onNodeWithTag("files.page.overview").assertIsDisplayed() }.isSuccess
-                }
+                assertNativeOverview()
                 rule.onNodeWithTag("home-search-field").assertIsDisplayed()
-                rule.onNodeWithTag("files.trash.badge").assertIsDisplayed()
             }
 
-            rule.onNodeWithText("Add folder").performClick()
-            val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            requireNotNull(device.findObject(By.text("Add folder"))).click()
             assertTrue("Embedded Files did not open Android's tree picker",
                 device.wait(Until.hasObject(By.pkg(Pattern.compile(".*documentsui.*"))), 10_000))
             device.pressBack()
-            rule.waitUntil(15_000) {
-                rule.onAllNodesWithTag("files.page.overview").fetchSemanticsNodes().isNotEmpty()
-            }
-            rule.onNodeWithTag("files.page.overview").assertIsDisplayed()
-            rule.onNodeWithTag("files.trash.badge").assertIsDisplayed()
+            assertNativeOverview()
+        } catch (failure: Throwable) {
+            runCatching { captureFailureEvidence("files") }
+            throw failure
         } finally {
             addedComponent?.let { component ->
                 runBlocking {
@@ -151,14 +138,84 @@ class FilesCrossApkHomeTest {
         }
     }
 
+    private fun assertStandaloneFilesFallback() {
+        rule.waitUntil(20_000) { device.hasObject(By.text("Open add-on screen")) }
+        requireNotNull(device.findObject(By.text("Open add-on screen"))).click()
+        assertTrue("Core did not open the Files add-on Activity",
+            device.wait(Until.hasObject(By.text("Files")), 20_000))
+        assertTrue("Files fallback opened the wrong package",
+            device.currentPackageName.orEmpty().startsWith(
+                "io.github.alexanderwilhelmsenberg.modular.addon.files"))
+        assertTrue("Files Activity toolbar menu is missing",
+            device.wait(Until.hasObject(By.desc("More options")), 10_000))
+        val toolbarMore = device.findObjects(By.desc("More options"))
+            .minByOrNull { it.visibleBounds.top } ?: error("Files toolbar menu disappeared")
+        toolbarMore.click()
+        assertTrue("Files Activity popup did not show its overview action",
+            device.wait(Until.hasObject(By.text("Full storage access")), 10_000))
+        device.pressBack()
+        assertTrue("Files Activity popup did not dismiss",
+            device.wait(Until.gone(By.text("Full storage access")), 10_000))
+        assertTrue(device.hasObject(By.text("Files")))
+        device.pressBack()
+        rule.waitUntil(15_000) { device.hasObject(By.text("Open add-on screen")) }
+        rule.onNodeWithTag("home-search-field").assertIsDisplayed()
+    }
+
+    private fun assertNativeOverview() {
+        val statusTop = rule.runOnIdle {
+            ViewCompat.getRootWindowInsets(rule.activity.window.decorView)
+                ?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0
+        }
+        rule.waitUntil(20_000) { device.hasObject(By.text("Files")) }
+        val title = device.findObject(By.text("Files"))
+        assertTrue("Remote header overlaps the system status bar",
+            title != null && title.visibleBounds.top >= statusTop)
+        assertTrue("Files title is missing from the remote native surface",
+            device.hasObject(By.text("Files")))
+        rule.waitUntil(10_000) { device.hasObject(By.text("Add folder")) }
+        assertTrue("Files setup control is missing from the remote native surface",
+            device.hasObject(By.text("Add folder")))
+    }
+
+    private fun assertNativePopupOpensAndDismisses() {
+        rule.waitUntil(10_000) { device.hasObject(By.desc("More options")) }
+        assertTrue("Files toolbar menu is missing from the remote surface",
+            device.hasObject(By.desc("More options")))
+        // Item rows can also have More buttons; the toolbar button is highest.
+        val toolbarMore = device.findObjects(By.desc("More options"))
+            .minByOrNull { it.visibleBounds.top }
+            ?: error("Files toolbar menu disappeared")
+        toolbarMore.click()
+        rule.waitUntil(10_000) { device.hasObject(By.text("Full storage access")) }
+        assertTrue("Files popup did not expose its overview action",
+            device.hasObject(By.text("Full storage access")))
+        device.pressBack()
+        rule.waitUntil(10_000) { !device.hasObject(By.text("Full storage access")) }
+        assertTrue("Files popup did not dismiss on Back",
+            !device.hasObject(By.text("Full storage access")))
+        assertNativeOverview()
+    }
+
     private fun swipePage(left: Boolean) {
-        rule.onNodeWithTag("launcher-pages").performTouchInput {
-            val y = height * 0.5f
-            val start = Offset(width * (if (left) 0.82f else 0.18f), y)
-            down(start)
-            for (step in 1..12) moveTo(Offset(
-                start.x + width * (if (left) -0.64f else 0.64f) * step / 12f, y), 20L)
-            up()
+        val width = device.displayWidth
+        val y = (device.displayHeight * .42f).toInt()
+        assertTrue("Could not inject an OS page swipe", device.swipe(
+            (width * (if (left) .82f else .18f)).toInt(), y,
+            (width * (if (left) .18f else .82f)).toInt(), y, 40))
+        rule.waitForIdle()
+    }
+
+    private fun waitForHomePageSettled() {
+        rule.waitUntil(15_000) {
+            runCatching {
+                val pager = rule.onNodeWithTag("launcher-pages").fetchSemanticsNode().boundsInWindow
+                val home = rule.onNode(hasTestTag("launcher-page:home") and
+                    hasAnyAncestor(hasTestTag("launcher-pages")))
+                home.assertIsDisplayed()
+                val bounds = home.fetchSemanticsNode().boundsInWindow
+                abs(bounds.left - pager.left) <= 1f && abs(bounds.right - pager.right) <= 1f
+            }.getOrDefault(false)
         }
         rule.waitForIdle()
     }
@@ -174,11 +231,7 @@ class FilesCrossApkHomeTest {
         val font = String.format(Locale.ROOT, "%.1f", configuration.fontScale)
         val filename = "files-overview-${configuration.screenWidthDp}dp-$theme-font$font.png"
         val file = File(requireNotNull(context.getExternalFilesDir("files-screenshots")), filename)
-        FileOutputStream(file).use { output ->
-            val bitmap = rule.onRoot().captureToImage().asAndroidBitmap()
-            assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-            bitmap.recycle()
-        }
+        assertTrue("Could not capture the cross-process Files surface", device.takeScreenshot(file))
         fun shell(command: String) = ParcelFileDescriptor.AutoCloseInputStream(
             instrumentation.uiAutomation.executeShellCommand(command),
         ).bufferedReader().use { it.readText().trim() }
@@ -186,4 +239,39 @@ class FilesCrossApkHomeTest {
         shell("cp ${file.absolutePath} /sdcard/Pictures/ModularFiles/$filename")
         assertEquals(file.length(), shell("stat -c %s /sdcard/Pictures/ModularFiles/$filename").toLong())
     }
+
+    private fun captureFailureEvidence(prefix: String) {
+        val directory = "/sdcard/Pictures/ModularNativeSurfaces"
+        fun attempt(label: String, action: () -> String) {
+            runCatching(action).onSuccess { emitEvidence("$prefix $label", it) }
+                .onFailure { emitEvidence("$prefix $label failed", it.toString()) }
+        }
+        attempt("Core semantics") { rule.onNodeWithTag("launcher-pages").printToString() }
+        attempt("logcat") {
+            shell("logcat -d -b main -v threadtime -s ModuleWorkspaceSurface:D WorkspaceSurfaceEndpoint:D WorkspaceGestureGate:D WorkspacePagerState:D AndroidRuntime:E")
+                .lines().takeLast(120).joinToString("\n")
+        }
+        attempt("mkdir") { shell("mkdir -p $directory") }
+        attempt("screen") {
+            shell("screencap -p $directory/$prefix-before-cleanup.png")
+            shell("stat -c %s $directory/$prefix-before-cleanup.png")
+        }
+        attempt("hierarchy") {
+            val xml = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
+                "$prefix-before-cleanup.xml")
+            device.dumpWindowHierarchy(xml)
+            xml.readText()
+        }
+    }
+
+    private fun emitEvidence(label: String, value: String) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        value.chunked(2500).ifEmpty { listOf("(empty)") }.forEachIndexed { index, chunk ->
+            instrumentation.sendStatus(0, Bundle().apply { putString("stream", "$label [$index]: $chunk") })
+        }
+    }
+
+    private fun shell(command: String): String = ParcelFileDescriptor.AutoCloseInputStream(
+        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command),
+    ).bufferedReader().use { it.readText().trim() }
 }

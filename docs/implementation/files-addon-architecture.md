@@ -5,11 +5,20 @@ Scope: [accepted Files v1 specification](../product/file-manager-cleaner-v1.md).
 
 ## Ownership and module boundaries
 
-- `addon-files`: separately installed APK; owns user-granted storage access, opaque document identities, scans, operation plans, trash, archive extraction, and private browsing/history state. Core does not request its storage permissions.
-- `module-api`: bounded versioned `modular.workspace.page/v1` AIDL/JSON contract. Native page data and explicit action tokens cross Binder; add-on executable UI code does not load into Core.
-- `module-sdk`: authenticated Core session endpoint, continuing the existing module trust and capability framework.
-- `module-files-ui`: trusted native Compose file surface shared by Core and the standalone Files activity. Scoped file descriptors support integrated document viewing and editing.
-- Core: persists one module component as a Home page, handles placement/discovery/disconnection, controls workspace gestures, and keeps Home/Apps/Settings reachable if a module is unavailable.
+- `addon-files` owns the complete interface, user-granted storage access, scans,
+  trash, archives, documents, and private browsing/history state.
+- `module-api` supplies `modular.workspace.surface/v1`; `module-sdk` authenticates
+  sessions and hosts the add-on's own view hierarchy. SurfacePackage handles
+  cross Binder; executable add-on classes do not load into Core.
+- `module-files-ui` is a private Files library shared by its Activity and native
+  provider. Core has no production or test dependency on it.
+- Core owns the generic page placement, native surface viewport, lifecycle,
+  navigation, trust checks and unavailable-provider recovery.
+- The old `modular.workspace.page/v1` endpoint remains in Files for older Core
+  versions. New Core uses its native surface. After the one-time framework
+  migration, Files UI updates require only a Files APK.
+
+See [ADR-0009](../decisions/ADR-0009-independent-native-module-surfaces.md).
 
 ## Work allocation
 

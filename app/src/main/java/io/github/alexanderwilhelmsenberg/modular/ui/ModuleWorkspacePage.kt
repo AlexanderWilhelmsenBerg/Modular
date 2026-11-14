@@ -171,8 +171,10 @@ private class SurfaceLease(
         view.visibility = android.view.View.INVISIBLE
         // Older releases replace the child on the next setChildSurfacePackage call.
         // Release and close remove its resources while the SurfaceView stays hidden.
-        if (Build.VERSION.SDK_INT >= 36) view.clearChildSurfacePackage()
-        if (Build.VERSION.SDK_INT >= 33) surfacePackage.notifyDetachedFromWindow()
+        if (Build.VERSION.SDK_INT >= 36) runCatching { view.clearChildSurfacePackage() }
+        // A package update kills the provider before its death callback reaches us.
+        // Notify it when possible, then continue releasing local resources.
+        if (Build.VERSION.SDK_INT >= 33) runCatching { surfacePackage.notifyDetachedFromWindow() }
         runCatching { session.asBinder().unlinkToDeath(death, 0) }
         if (Build.VERSION.SDK_INT >= 30) runCatching { surfacePackage.release() }
         SurfaceCleanup.scope.launch { runCatching { SurfaceBinderCalls.run(3_000) { session.close() } } }

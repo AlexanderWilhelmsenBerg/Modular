@@ -10,7 +10,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
 /** Validated, immutable declaration of a protocol v4 provider. */
-data class ModuleDescriptor(
+data class ModuleDescriptor @JvmOverloads constructor(
     val schemaVersion: Int,
     val moduleId: String,
     val moduleVersion: String,
@@ -22,6 +22,7 @@ data class ModuleDescriptor(
     val requestedCoreCapabilities: List<String>,
     val managementActivity: String?,
     val configurationFields: List<InstanceConfigurationField>,
+    val workspaceActivity: String? = null,
 )
 
 /** A flat, bounded setting. Every field has a default value. */
@@ -58,7 +59,7 @@ object ModuleDescriptorCodec {
             "Descriptor exceeds size limit"
         }
         val root = parseObject(rawJson, "Invalid descriptor JSON")
-        exactKeys(root, setOf("schemaVersion", "moduleId", "moduleVersion", "displayName", "description", "coreProtocol", "providedCapabilities", "requestedCoreCapabilities", "managementActivity", "instanceConfiguration"), "Invalid descriptor fields")
+        exactKeys(root, setOf("schemaVersion", "moduleId", "moduleVersion", "displayName", "description", "coreProtocol", "providedCapabilities", "requestedCoreCapabilities", "managementActivity", "workspaceActivity", "instanceConfiguration"), "Invalid descriptor fields")
         require(int(root, "schemaVersion") == 1) { "Unsupported descriptor schema version" }
         val moduleId = string(root, "moduleId", 160)
         require(moduleIdPattern.matches(moduleId)) { "Invalid module ID" }
@@ -81,6 +82,14 @@ object ModuleDescriptorCodec {
             }
             value
         }
+        val workspaceActivity = root["workspaceActivity"]?.let {
+            val value = (it as? JsonPrimitive)?.takeIf { primitive -> primitive.isString }?.contentOrNull
+                ?: throw IllegalArgumentException("Invalid workspace Activity")
+            require(value.length <= 200 && activityPattern.matches(value)) {
+                "Invalid workspace Activity"
+            }
+            value
+        }
         val schema = root["instanceConfiguration"] as? JsonObject
             ?: throw IllegalArgumentException("Invalid instance configuration schema")
         exactKeys(schema, setOf("schemaVersion", "fields"), "Invalid instance configuration schema")
@@ -90,7 +99,7 @@ object ModuleDescriptorCodec {
         require(fieldsArray.size <= MAX_CONFIGURATION_FIELDS) { "Too many configuration fields" }
         val fields = fieldsArray.map(::parseField)
         require(fields.map { it.key }.distinct().size == fields.size) { "Duplicate configuration key" }
-        val descriptor = ModuleDescriptor(1, moduleId, moduleVersion, displayName, description, min, max, provided, requested, activity, fields)
+        val descriptor = ModuleDescriptor(1, moduleId, moduleVersion, displayName, description, min, max, provided, requested, activity, fields, workspaceActivity)
         normalizeConfiguration(descriptor, "{}")
         return descriptor
     }

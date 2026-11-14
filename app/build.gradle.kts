@@ -75,7 +75,6 @@ android {
 
 dependencies {
     implementation(project(":module-api"))
-    implementation(project(":module-files-ui"))
 
     implementation("androidx.core:core-ktx:1.19.0")
     implementation("androidx.activity:activity-compose:1.13.0")

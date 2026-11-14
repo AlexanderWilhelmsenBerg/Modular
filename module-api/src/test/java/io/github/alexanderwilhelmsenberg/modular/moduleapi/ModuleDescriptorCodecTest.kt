@@ -44,6 +44,14 @@ class ModuleDescriptorCodecTest {
         assertEquals("{}", ModuleDescriptorCodec.normalizeConfiguration(ModuleDescriptorCodec.parse(empty), "{}"))
     }
 
+    @Test fun workspaceActivityIsOptionalAndValidatedLikeManagementActivity() {
+        assertEquals(null, ModuleDescriptorCodec.parse(descriptor).workspaceActivity)
+        val withActivity = descriptor.replace(
+            "\"instanceConfiguration\":", "\"workspaceActivity\":\".WorkspaceActivity\",\"instanceConfiguration\":")
+        assertEquals(".WorkspaceActivity", ModuleDescriptorCodec.parse(withActivity).workspaceActivity)
+        rejects { ModuleDescriptorCodec.parse(withActivity.replace(".WorkspaceActivity", "other/package.Activity")) }
+    }
+
     @Test fun rejectsInvalidDescriptorAndUnknownFields() {
         rejects { ModuleDescriptorCodec.parse(descriptor.replace("\"schemaVersion\":1", "\"schemaVersion\":2")) }
         rejects { ModuleDescriptorCodec.parse(descriptor.replace("\"max\":4", "\"max\":3")) }

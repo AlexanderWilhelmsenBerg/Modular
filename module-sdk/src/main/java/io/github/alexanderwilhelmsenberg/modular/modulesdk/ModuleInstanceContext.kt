@@ -16,6 +16,8 @@ class ModuleInstanceContext internal constructor(
     private val trustedCaller: (Int) -> Boolean,
 ) {
     private val active = AtomicBoolean(true)
+    private val revokeLock = Any()
+    private val revokeActions = mutableListOf<() -> Unit>()
 
     val isActive: Boolean get() = active.get()
 
@@ -43,7 +45,19 @@ class ModuleInstanceContext internal constructor(
     fun appLaunch(): IAppLaunchCapability? =
         hostCapability(CoreCapabilities.AppsLaunch.wireValue)?.let(IAppLaunchCapability.Stub::asInterface)
 
+    /** Register teardown without holding the SDK's session lock on the main thread. */
+    fun onRevoke(action: () -> Unit) {
+        val invokeNow = synchronized(revokeLock) {
+            if (active.get()) { revokeActions += action; false } else true
+        }
+        if (invokeNow) action()
+    }
+
     internal fun revoke() {
-        active.set(false)
+        val actions = synchronized(revokeLock) {
+            if (!active.compareAndSet(true, false)) return
+            revokeActions.toList().also { revokeActions.clear() }
+        }
+        actions.forEach { runCatching { it() } }
     }
 }

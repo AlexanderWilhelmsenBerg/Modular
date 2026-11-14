@@ -171,7 +171,7 @@ fun WorkspaceSettingsUi(
                     modifier = Modifier.fillMaxWidth().testTag("workspace-add-page"),
                 ) { Text("Add widget screen") }
                 pageModules.filter { module ->
-                    StandardCapabilities.WorkspacePage.wireValue in
+                    StandardCapabilities.WorkspaceSurface.wireValue in
                         (module.descriptor?.providedCapabilities ?: module.capabilities) &&
                         snapshot.modulePages.none { it.component == module.component.flattenToString() }
                 }.forEach { module ->

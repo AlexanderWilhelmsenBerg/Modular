@@ -1,0 +1,1 @@
+{"schemaVersion":1,"moduleId":"modular.test.independent.surface","moduleVersion":"1.0","displayName":"Independent surface test module","description":"Native cross-process surface fixture, revision 1.","coreProtocol":{"min":4,"max":4},"providedCapabilities":["modular.workspace.surface/v1"],"requestedCoreCapabilities":[],"instanceConfiguration":{"schemaVersion":1,"fields":[]}}

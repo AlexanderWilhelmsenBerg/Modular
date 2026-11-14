@@ -25,6 +25,15 @@ class SignerOutputTest(unittest.TestCase):
         self.assertEqual(["app", "addon-files"],
                          [module for module, _ in artifact_modules(core_only=True, include_files=True)])
 
+    def test_independent_files_distribution_does_not_require_core(self):
+        self.assertEqual(["addon-files"], [module for module, _ in artifact_modules(files_only=True)])
+
+    def test_files_only_cannot_silently_include_core(self):
+        with patch.object(sys, "argv", ["verify-signed-apks.py", "--files-only", "--core-only"]):
+            with self.assertRaises(SystemExit) as error:
+                verifier["main"]()
+        self.assertEqual(2, error.exception.code)
+
     def test_default_checks_all_six_apks(self):
         self.assertEqual(["app", "reference-sort-alphabetical", "addon-most-used"],
                          [module for module, _ in artifact_modules()])

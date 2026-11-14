@@ -89,7 +89,7 @@ fun OrganizationHomeScreen(
     onEditWorkspace: (String) -> Unit = {},
     onOpenWorkspaceAdvanced: (String) -> Unit = onEditWorkspace,
     listeningApps: List<LaunchableApp> = emptyList(),
-    modulePageContent: @Composable (String, Boolean, (Boolean) -> Unit, () -> Unit) -> Unit = { _, _, _, _ -> },
+    modulePageContent: @Composable (String, Boolean, (Boolean) -> Unit, (String) -> Unit) -> Unit = { _, _, _, _ -> },
     onActiveModuleChanged: (String?) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
@@ -368,9 +368,32 @@ fun OrganizationHomeScreen(
                 if (workspaceMode && page is HomePageId.Module && sorter == null) {
                     if (pageName == "module:${page.component}") SideEffect { activeWorkspaceList = null }
                     Box(Modifier.fillMaxSize().padding(bottom = 72.dp)) {
-                        modulePageContent(page.component, pageName == "module:${page.component}",
+                        modulePageContent(page.component, pageName == "module:${page.component}" && vertical.progress == 0f,
                             { moduleInteractionActive = it },
-                            { requestedPage = HomePageId.Home; pageRequestSerial += 1 })
+                            { destination ->
+                                if (pageName == "module:${page.component}") when (destination) {
+                                    "home" -> {
+                                        settle(false)
+                                        requestedPage = HomePageId.Home
+                                        pageRequestSerial += 1
+                                    }
+                                    "apps" -> {
+                                        requestedDrawerPage = HomePageId.Home
+                                        drawerRequestSerial += 1
+                                        settle(true)
+                                    }
+                                    "previous", "next" -> {
+                                        val sequence = snapshot.workspaceSurfacePages()
+                                        val index = sequence.indexOf(page)
+                                        val target = index + if (destination == "previous") -1 else 1
+                                        if (target in sequence.indices) {
+                                            requestedPage = sequence[target]
+                                            pageRequestSerial += 1
+                                        }
+                                    }
+                                    "settings" -> onOpenSettings()
+                                }
+                            })
                     }
                 } else if (workspaceMode && (page == HomePageId.Home || page is HomePageId.Widget) && sorter == null) {
                     val pageKey = if (page == HomePageId.Home) "home" else "widget:${(page as HomePageId.Widget).id}"

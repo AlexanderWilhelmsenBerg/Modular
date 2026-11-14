@@ -5,8 +5,9 @@
   "displayName": "Modular Files",
   "description": "File browser, storage map and reviewed cleanup on a Home page.",
   "coreProtocol": {"min": 4, "max": 4},
-  "providedCapabilities": ["modular.workspace.page/v1"],
+  "providedCapabilities": ["modular.workspace.surface/v1", "modular.workspace.page/v1"],
   "requestedCoreCapabilities": [],
   "managementActivity": ".FilesSettingsActivity",
+  "workspaceActivity": ".FilesActivity",
   "instanceConfiguration": {"schemaVersion": 1, "fields": []}
 }

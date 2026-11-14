@@ -174,6 +174,22 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         item.value.takeIf { item.expiresAt >= System.currentTimeMillis() }
     }
 
+    /** Used by the embedded renderer for an ordinary file row tap. The target Activity still
+     *  resolves the document through this add-on's repository and consumes the nonce once. */
+    fun createExternalOpenHandoff(documentId: String): String = synchronized(lock) {
+        require(documentId.length in 1..512) { "Invalid document ID" }
+        require(!repository.get(documentId).isDirectory) { "A folder cannot be opened as a document" }
+        issueHostHandoff("openDocument", documentId)
+    }
+
+    private fun issueHostHandoff(kind: String, documentId: String?): String {
+        val nonce = UUID.randomUUID().toString().replace("-", "")
+        handoffs.entries.removeIf { it.value.expiresAt < System.currentTimeMillis() }
+        if (handoffs.size >= 16) handoffs.remove(handoffs.keys.first())
+        handoffs[nonce] = TimedHandoff(HostHandoff(kind, documentId), System.currentTimeMillis() + 60_000)
+        return nonce
+    }
+
     fun getPage(requestJson: String): String = synchronized(lock) {
         val request = JSONObject(requestJson)
         require(request.optInt("version") == 1) { "Unsupported page version" }
@@ -261,11 +277,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             currentOffset = 0; scrollAnchor = 0; scrollOffset = 0
         }
         if (outcome.isSuccess && command.hostAction != null) {
-            val nonce = UUID.randomUUID().toString().replace("-", "")
-            handoffs.entries.removeIf { it.value.expiresAt < System.currentTimeMillis() }
-            if (handoffs.size >= 16) handoffs.remove(handoffs.keys.first())
-            handoffs[nonce] = TimedHandoff(HostHandoff(command.hostAction, command.documentId),
-                System.currentTimeMillis() + 60_000)
+            val nonce = issueHostHandoff(command.hostAction, command.documentId)
             pendingHostLaunch = JSONObject().put("kind", command.hostAction).put("nonce", nonce)
         }
         if (outcome.isFailure) {

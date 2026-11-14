@@ -1,4 +1,4 @@
-package io.github.alexanderwilhelmsenberg.modular.ui
+package io.github.alexanderwilhelmsenberg.modular.addon.files
 
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor

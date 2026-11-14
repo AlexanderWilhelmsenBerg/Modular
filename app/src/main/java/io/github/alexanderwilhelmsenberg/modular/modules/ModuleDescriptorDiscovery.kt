@@ -41,6 +41,9 @@ internal object ModuleDescriptorDiscovery {
             descriptor.managementActivity?.let { activity ->
                 validateManagementActivity(packageManager, service, activity)
             }
+            descriptor.workspaceActivity?.let { activity ->
+                validateManagementActivity(packageManager, service, activity)
+            }
             Discovery(descriptor, null, sha256(raw))
         } catch (error: Exception) {
             val reason = if (error is IllegalArgumentException) error.message ?: "Invalid JSON"

@@ -21,6 +21,6 @@ android {
 }
 
 dependencies {
-    implementation("io.github.alexanderwilhelmsenberg.modular:module-api:0.3.0")
-    implementation("io.github.alexanderwilhelmsenberg.modular:module-sdk:0.3.0")
+    implementation("io.github.alexanderwilhelmsenberg.modular:module-api:0.4.0")
+    implementation("io.github.alexanderwilhelmsenberg.modular:module-sdk:0.4.0")
 }

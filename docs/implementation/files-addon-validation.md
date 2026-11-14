@@ -118,3 +118,17 @@ Home and back twice without invoking Retry.
 These refresh checks remain **pending** until the root build/device run reports
 their exact test results and nonempty capture files. Previous run results above
 apply to their recorded revisions only.
+
+## Independent native surface migration
+
+[ADR-0009](../decisions/ADR-0009-independent-native-module-surfaces.md) moves the
+Files interface and renderer tests into the Files APK. Core embeds a platform
+surface and no longer stores Files page snapshots or document descriptors.
+SDK 0.4.0 and the new surface major version are the migration boundary.
+
+The local API/SDK/Core/Files unit, build, Android test compile and lint gate passed.
+The separate native provider builds from published AARs; its device proof must
+update only the provider from v1 to v2 while Core's APK fingerprint stays equal.
+API 30/API 35 native input, popup, Back, lifecycle and module-only update evidence,
+and the new Files capture matrix, are recorded by commit on the pull request.
+Do not infer OEM or removable-media acceptance from those emulator checks.

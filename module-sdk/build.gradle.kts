@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "io.github.alexanderwilhelmsenberg.modular"
-version = "0.3.0"
+version = "0.4.0"
 
 android {
     namespace = "io.github.alexanderwilhelmsenberg.modular.modulesdk"
@@ -30,6 +30,11 @@ android {
 
 dependencies {
     api(project(":module-api"))
+    api("androidx.lifecycle:lifecycle-viewmodel:2.11.0")
+    api("androidx.lifecycle:lifecycle-runtime:2.11.0")
+    api("androidx.savedstate:savedstate:1.4.0")
+    api("androidx.activity:activity:1.13.0")
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     testImplementation("junit:junit:4.13.2")
 }
 
@@ -40,7 +45,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "io.github.alexanderwilhelmsenberg.modular"
                 artifactId = "module-sdk"
-                version = "0.3.0"
+                version = "0.4.0"
             }
         }
         repositories {

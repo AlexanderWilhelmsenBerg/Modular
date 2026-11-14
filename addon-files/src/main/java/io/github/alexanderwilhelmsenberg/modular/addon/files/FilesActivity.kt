@@ -1,100 +1,67 @@
 package io.github.alexanderwilhelmsenberg.modular.addon.files
 
-import android.content.Intent
-import android.os.Bundle
-import android.os.Build
-import android.provider.Settings
-import android.net.Uri
 import android.content.ClipData
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.lifecycle.lifecycleScope
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.background
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.Text
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.Lifecycle
-import io.github.alexanderwilhelmsenberg.modular.filesui.FilesPage
+import androidx.lifecycle.lifecycleScope
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.WorkspacePageContract
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import org.json.JSONObject
 
-/** Standalone setup and file browser share the same trusted renderer as Core. */
+/** Standalone browser and the declared host handoff target. */
 open class FilesActivity : ComponentActivity() {
     private lateinit var controller: FilesPageController
     private var launchedFromCoreHandoff = false
+    private var refreshToken by mutableIntStateOf(0)
+
     private val chooseFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri == null) {
             if (launchedFromCoreHandoff) finish()
             return@registerForActivityResult
         }
-            lifecycleScope.launch {
-                val result = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val full = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        val flags = runCatching { contentResolver.takePersistableUriPermission(uri, full); full }
-                            .getOrElse { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION }
-                        val location = (application as FilesApplication).repository.addSelectedFolder(uri, flags)
-                        controller.addedLocation(location.id)
-                    }
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val full = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    val flags = runCatching { contentResolver.takePersistableUriPermission(uri, full); full }
+                        .getOrElse {
+                            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        }
+                    val location = (application as FilesApplication).repository.addSelectedFolder(uri, flags)
+                    controller.addedLocation(location.id)
                 }
-                result.exceptionOrNull()?.let { Toast.makeText(this@FilesActivity,
-                    it.message ?: "Folder access could not be saved", Toast.LENGTH_LONG).show() }
-                refresh?.invoke()
-                if (launchedFromCoreHandoff) finish()
             }
-    }
-    private var refresh: (() -> Unit)? = null
-    private val scrollScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val scrollMutex = Mutex()
-    private var pendingScroll: Triple<String, Int, Int>? = null
-    private var scrollJob: Job? = null
-
-    private fun saveScroll(position: Triple<String, Int, Int>, debounce: Boolean) {
-        scrollJob?.cancel()
-        scrollJob = scrollScope.launch {
-            if (debounce) delay(250)
-            scrollMutex.withLock {
-                controller.recordScrollPosition(position.first, position.second, position.third)
+            result.exceptionOrNull()?.let {
+                Toast.makeText(this@FilesActivity, it.message ?: "Folder access could not be saved", Toast.LENGTH_LONG).show()
             }
+            refreshToken++
+            if (launchedFromCoreHandoff) finish()
         }
-    }
-
-    private fun flushScroll() {
-        pendingScroll?.let { saveScroll(it, debounce = false) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -103,11 +70,9 @@ open class FilesActivity : ComponentActivity() {
         if (intent?.getBooleanExtra(EXTRA_SETTINGS, false) == true) controller.openSettings()
         val handoff = if (savedInstanceState == null) intent?.getStringExtra(WorkspacePageContract.EXTRA_HOST_HANDOFF_NONCE)
             ?.let(controller::consumeHostHandoff) else null
-        if (savedInstanceState == null) {
-            if (handoff != null) {
-                launchedFromCoreHandoff = true
-                window.decorView.post { handleHandoff(handoff, true) }
-            }
+        if (handoff != null) {
+            launchedFromCoreHandoff = true
+            window.decorView.post { handleHandoff(handoff, true) }
         }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
@@ -115,27 +80,12 @@ open class FilesActivity : ComponentActivity() {
         window.isStatusBarContrastEnforced = false
         window.isNavigationBarContrastEnforced = false
         setContent {
-            var page by remember { mutableStateOf<String?>(null) }
-            var error by remember { mutableStateOf<String?>(null) }
-            val scope = rememberCoroutineScope()
-            DisposableEffect(Unit) {
-                onDispose { flushScroll() }
-            }
-            fun load() {
-                scope.launch {
-                    page = withContext(Dispatchers.IO) {
-                        runCatching { controller.getPage("{\"version\":1,\"pageSize\":100}") }
-                            .onFailure { error = it.message }.getOrNull()
-                    }
-                }
-            }
-            refresh = ::load
-            LaunchedEffect(Unit) { load() }
             val themeName = getSharedPreferences("files-page", MODE_PRIVATE).getString("theme", "system") ?: "system"
-            val dark = themeName == "dark" || themeName == "amoled" || (themeName == "system" && isSystemInDarkTheme())
-            MaterialTheme(colorScheme = if (themeName == "amoled") darkColorScheme(background = Color.Black,
-                surface = Color.Black, surfaceContainer = Color(0xFF101010))
-                else if (dark) darkColorScheme() else lightColorScheme()) {
+            val dark = themeName == "dark" || themeName == "amoled" ||
+                (themeName == "system" && isSystemInDarkTheme())
+            MaterialTheme(colorScheme = if (themeName == "amoled") darkColorScheme(
+                background = Color.Black, surface = Color.Black, surfaceContainer = Color(0xFF101010))
+            else if (dark) darkColorScheme() else lightColorScheme()) {
                 SideEffect {
                     WindowInsetsControllerCompat(window, window.decorView).apply {
                         isAppearanceLightStatusBars = !dark
@@ -143,58 +93,14 @@ open class FilesActivity : ComponentActivity() {
                     }
                 }
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
-                if (page == null) {
-                    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(error ?: "Loading Files…")
-                        Button(onClick = { chooseFolder.launch(null) }) { Text("Choose folder") }
-                    }
-                } else FilesPage(page!!, onScrollState = { key, anchor, offset ->
-                    val position = Triple(key, anchor, offset)
-                    pendingScroll = position
-                    saveScroll(position, debounce = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
-                }, documentLoader = { id, mode ->
-                    withContext(Dispatchers.IO) { controller.openDocument(id, mode) }
-                }, documentCommit = { request ->
-                    val response = withContext(Dispatchers.IO) { controller.performAction(request) }
-                    page = response
-                    JSONObject(response).optString("documentSaveStatus") == "saved"
-                }, documentCancel = { request ->
-                    page = withContext(Dispatchers.IO) { controller.performAction(request) }
-                }, onAction = { request ->
-                    scrollJob?.cancel()
-                    val position = pendingScroll
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            runCatching {
-                                scrollMutex.withLock {
-                                    position?.let { controller.recordScrollPosition(it.first, it.second, it.third) }
-                                    controller.performAction(request)
-                                }
-                            }
-                        }
-                        result.exceptionOrNull()?.let { error = it.message }
-                        page = result.getOrNull() ?: page
-                        page?.let { response ->
-                            val host = JSONObject(response).optJSONObject("hostLaunch")
-                            host?.optString("nonce")?.let(controller::consumeHostHandoff)?.let {
-                                handleHandoff(it, false)
-                            }
-                        }
-                    }
-                }, onOpenDocument = { documentId, _ -> openOrShare(documentId, false) })
+                    FilesNativeContent(controller, refreshToken,
+                        onHostLaunch = { nonce ->
+                            controller.consumeHostHandoff(nonce)?.let { handleHandoff(it, false) }
+                        },
+                        onExternalDocument = { id -> openOrShare(id, false) })
                 }
             }
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        refresh?.invoke()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        flushScroll()
     }
 
     private fun openOrShare(documentId: String, share: Boolean, finishAfter: Boolean = false) {
@@ -215,8 +121,9 @@ open class FilesActivity : ComponentActivity() {
                     addFlags(content.grantFlags or Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 })
             }
-            result.exceptionOrNull()?.let { Toast.makeText(this@FilesActivity,
-                it.message ?: "No compatible app could open this file", Toast.LENGTH_LONG).show() }
+            result.exceptionOrNull()?.let {
+                Toast.makeText(this@FilesActivity, it.message ?: "No compatible app could open this file", Toast.LENGTH_LONG).show()
+            }
             if (finishAfter && result.isSuccess) finish()
         }
     }
@@ -225,29 +132,16 @@ open class FilesActivity : ComponentActivity() {
         when (handoff.kind) {
             "pickFolder" -> chooseFolder.launch(null)
             "fullAccess" -> {
-                if (fromCore) { controller.openSettings(); refresh?.invoke() }
-                else if (Build.VERSION.SDK_INT >= 30) startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:$packageName")))
+                if (Build.VERSION.SDK_INT >= 30) {
+                    startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:$packageName")))
+                }
+                if (fromCore) finish()
             }
             "openDocument" -> handoff.documentId?.let { openOrShare(it, false, fromCore) }
             "shareDocument" -> handoff.documentId?.let { openOrShare(it, true, fromCore) }
         }
     }
 
-    private fun findAction(page: String?, id: String): JSONObject? {
-        if (page == null || id.isBlank()) return null
-        val root = runCatching { JSONObject(page) }.getOrNull() ?: return null
-        fun match(array: org.json.JSONArray?): JSONObject? = (0 until (array?.length() ?: 0))
-            .mapNotNull { array?.optJSONObject(it) }.firstOrNull { it.optString("id") == id }
-        match(root.optJSONArray("actions"))?.let { return it }
-        val items = root.optJSONArray("items")
-        for (i in 0 until (items?.length() ?: 0)) {
-            match(items?.optJSONObject(i)?.optJSONArray("actions"))?.let { return it }
-        }
-        return null
-    }
-
-    companion object {
-        const val EXTRA_SETTINGS = "openFilesSettings"
-    }
+    companion object { const val EXTRA_SETTINGS = "openFilesSettings" }
 }

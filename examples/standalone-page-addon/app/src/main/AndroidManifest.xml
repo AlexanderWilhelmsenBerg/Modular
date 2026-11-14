@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="io.github.alexanderwilhelmsenberg.modular.debug" />
+    </queries>
+    <application android:allowBackup="false" android:label="Independent surface test module">
+        <service android:name=".SurfaceModuleService" android:exported="true">
+            <intent-filter>
+                <action android:name="io.github.alexanderwilhelmsenberg.modular.action.MODULE" />
+            </intent-filter>
+            <meta-data android:name="io.github.alexanderwilhelmsenberg.modular.MODULE_DESCRIPTOR"
+                android:resource="@raw/module_descriptor" />
+        </service>
+    </application>
+</manifest>

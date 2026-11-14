@@ -1,4 +1,4 @@
-package io.github.alexanderwilhelmsenberg.modular.ui
+package io.github.alexanderwilhelmsenberg.modular.addon.files
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider

@@ -59,6 +59,7 @@ internal fun FilesNativeContent(
     var page by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scroll = remember { ScrollSaveState() }
+    val reloadRunning = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     fun reportFailure(operation: String, failure: Throwable, fallback: String) {
         error = failure.message ?: fallback
@@ -76,12 +77,15 @@ internal fun FilesNativeContent(
     }
 
     fun load() {
+        if (!reloadRunning.compareAndSet(false, true)) return
         scope.launch {
+            try {
             val result = withContext(Dispatchers.IO) {
                 ioMutex.withLock { runCatching { controller.getPage(PAGE_REQUEST) } }
             }
             result.onSuccess { page = it; error = null }
                 .onFailure { reportFailure("Load Files page", it, "Files could not be loaded") }
+            } finally { reloadRunning.set(false) }
         }
     }
 
@@ -173,6 +177,7 @@ internal fun FilesNativeContent(
             }
         } else {
             FilesPage(currentPage,
+                onRefresh = ::load,
                 onScrollState = { key, anchor, offset ->
                     val position = Triple(key, anchor, offset)
                     scroll.pending = position

@@ -17,6 +17,35 @@ import org.junit.Test
 class FilesEventLogUiTest {
     @get:Rule val rule = createComposeRule()
 
+    @Test fun keeperChoiceShowsDatesAndCanBeSelectedDirectly() {
+        val requests = mutableListOf<String>()
+        val item = JSONObject().put("id", "copy").put("name", "report (1).txt").put("kind", "candidate")
+            .put("modifiedAt", 123L).put("sizeBytes", 12L).put("actions", JSONArray().put(
+                JSONObject().put("id", "choose").put("kind", "keeper").put("label", "Keep this")))
+        val page = JSONObject().put("version", 1).put("kind", "files").put("view", "keeper")
+            .put("title", "Choose a copy to keep").put("keeperGroupName", "report.txt")
+            .put("keeperChoicesRemaining", 2).put("cleanSelectionCount", 3)
+            .put("items", JSONArray().put(item)).put("actions", JSONArray())
+        rule.setContent { MaterialTheme { FilesPage(page.toString(), onAction = {
+            requests.add(JSONObject(it).getString("actionId"))
+        }, onOpenDocument = { _, _ -> }) } }
+        rule.onNodeWithText("2 choices remaining · 3 findings selected").assertIsDisplayed()
+        rule.onNodeWithText("Modified", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("report (1).txt").performClick()
+        rule.runOnIdle { assertEquals(listOf("choose"), requests) }
+    }
+
+    @Test fun backgroundPollingUsesReadOnlyRefreshInsteadOfAnOldAction() {
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        var actions = 0
+        val page = """{"version":1,"kind":"files","view":"progress","actions":[{"id":"old","kind":"refresh","label":"Refresh"}],"items":[]}"""
+        rule.setContent { MaterialTheme { FilesPage(page, onAction = { actions++ },
+            onOpenDocument = { _, _ -> }, onRefresh = { reads.incrementAndGet() }) } }
+        rule.mainClock.advanceTimeBy(1_000)
+        rule.waitUntil(5_000) { reads.get() > 0 }
+        rule.runOnIdle { assertEquals(0, actions) }
+    }
+
     @Test fun eventDetailsCopyAndBackWorkWithoutOpeningAnotherApp() {
         val detail = JSONObject().put("id", "failure").put("at", 123).put("level", "ERROR")
             .put("event", "operation.failed").put("message", "Trash review failed")

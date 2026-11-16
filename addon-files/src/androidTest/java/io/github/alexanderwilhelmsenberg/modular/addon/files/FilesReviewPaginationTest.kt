@@ -38,6 +38,78 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun reviewSelectedResolvesEveryKeeperWithoutDroppingOtherSelections() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        for (name in listOf("alpha", "beta", "gamma")) {
+            repository.files.add(FileEntry("$name-base", "test-volume", "root", "$name.txt", "$name.txt",
+                false, "text/plain", 12, 1, null, true, true))
+            repository.files.add(FileEntry("$name-copy", "test-volume", "root", "$name (1).txt", "$name (1).txt",
+                false, "text/plain", 12, if (name == "gamma") 2 else 1, null, true, true))
+        }
+        val controller = FilesPageController(context, repository)
+        controller.addedLocation("test-volume")
+        action(controller, action(controller, page(controller), "Clean"), "Start scan")
+        val selected = action(controller, awaitView(controller, "clean"), "Select all")
+        assertEquals(3, selected.getInt("cleanSelectionCount"))
+        assertEquals(2, selected.getInt("cleanKeeperChoiceCount"))
+        var chooser = action(controller, selected, "Review selected")
+        assertEquals("keeper", chooser.getString("view"))
+        assertEquals(0, repository.fingerprintCalls)
+        repeat(2) { index ->
+            assertEquals(2 - index, chooser.getInt("keeperChoicesRemaining"))
+            assertEquals(3, chooser.getInt("cleanSelectionCount"))
+            val candidates = chooser.getJSONArray("items")
+            val keep = (0 until candidates.length()).map { candidates.getJSONObject(it) }
+                .single { it.getString("id").endsWith("-base") }
+            chooser = rowAction(controller, keep, "Keep this")
+            if (index == 0) {
+                val back = action(controller, chooser, "Back to Clean")
+                assertEquals(3, back.getInt("cleanSelectionCount"))
+                assertEquals(1, back.getInt("cleanKeeperChoiceCount"))
+                chooser = action(controller, back, "Review selected")
+            }
+        }
+        val review = awaitView(controller, "cleanReview")
+        assertEquals(6, review.getJSONArray("items").length())
+        assertTrue(repository.fingerprintCalls > 0)
+        assertEquals(0, repository.moveCalls)
+        val back = action(controller, review, "Back")
+        assertEquals(3, back.getInt("cleanSelectionCount"))
+        assertEquals(0, back.getInt("cleanKeeperChoiceCount"))
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+    }
+
+    @Test fun skippingAKeeperGroupRetainsTheOtherSelectedGroups() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        for (name in listOf("alpha", "beta")) for ((suffix, label) in listOf("base" to "$name.txt", "copy" to "$name (1).txt")) {
+            repository.files.add(FileEntry("$name-$suffix", "test-volume", "root", label, label,
+                false, "text/plain", 12, 1, null, true, true))
+        }
+        val controller = FilesPageController(context, repository)
+        controller.addedLocation("test-volume")
+        action(controller, action(controller, page(controller), "Clean"), "Start scan")
+        val selected = action(controller, awaitView(controller, "clean"), "Select all")
+        val first = action(controller, selected, "Review selected")
+        val skippedIds = first.getJSONArray("items").let { list ->
+            (0 until list.length()).map { list.getJSONObject(it).getString("id") }.toSet()
+        }
+        val next = action(controller, first, "Skip this group")
+        assertEquals("keeper", next.getString("view"))
+        assertEquals(1, next.getInt("cleanSelectionCount"))
+        val keep = next.getJSONArray("items").getJSONObject(0)
+        rowAction(controller, keep, "Keep this")
+        val review = awaitView(controller, "cleanReview")
+        val items = review.getJSONArray("items")
+        assertEquals(2, items.length())
+        assertTrue((0 until items.length()).none { items.getJSONObject(it).getString("id") in skippedIds })
+        assertEquals(0, repository.moveCalls)
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+    }
+
     @Test fun progressUnderRepositoryLockDoesNotDeadlockConcurrentPageRead() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()

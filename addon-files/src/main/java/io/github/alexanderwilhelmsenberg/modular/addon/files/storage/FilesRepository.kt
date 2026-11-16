@@ -36,9 +36,15 @@ interface FilesRepository {
     /** Refuses incomplete or changed plans. Never falls back to permanent deletion. */
     fun moveToTrash(plan: DeletionPlan, cancel: Cancellation = Cancellation { false }, progress: Progress = Progress { _, _, _ -> }): OperationResult
     fun trashEntries(): List<TrashEntry>
+    /** Display-only snapshot while a mutation owns storage; review always reads live entries. */
+    fun cachedTrashEntries(): List<TrashEntry>? = null
     fun trashSummary(): TrashSummary
     fun restore(ids: List<String>, choices: Map<String, RestoreChoice>, cancel: Cancellation = Cancellation { false }): OperationResult
     fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan
+    fun prepareEmptyTrash(ids: List<String>, cancel: Cancellation): EmptyTrashPlan {
+        check(!cancel.isCanceled()) { "Trash review canceled" }
+        return prepareEmptyTrash(ids).also { check(!cancel.isCanceled()) { "Trash review canceled" } }
+    }
     fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation = Cancellation { false }): OperationResult
     fun history(): List<OperationHistoryEntry>
     fun clearHistory()

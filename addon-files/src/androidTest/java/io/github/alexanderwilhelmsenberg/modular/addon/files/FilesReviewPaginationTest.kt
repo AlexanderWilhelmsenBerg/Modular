@@ -38,6 +38,105 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun progressUnderRepositoryLockDoesNotDeadlockConcurrentPageRead() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 1)
+        repository.progressGate = CountDownLatch(1)
+        val reader = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it).apply { isDaemon = true } }
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val search = action(controller, page(controller), "Search", JSONObject().put("query", "item"))
+            action(controller, search, "Delete all results")
+            action(controller, awaitView(controller, "review"), "Delete")
+            assertTrue(repository.progressEntered.await(5, TimeUnit.SECONDS))
+            repository.blockTrashRead = true
+            val read = reader.submit<JSONObject> { page(controller) }
+            assertTrue(repository.trashReadEntered.await(5, TimeUnit.SECONDS))
+            repository.progressGate!!.countDown()
+            read.get(5, TimeUnit.SECONDS)
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertEquals(1, repository.moveCalls)
+        } finally {
+            repository.progressGate!!.countDown(); reader.shutdownNow()
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun completedBackgroundJobCannotDismissCleanAndTrashCanBeRetried() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 1)
+        val release = CountDownLatch(1)
+        repository.prepareRelease = release
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val search = action(controller, page(controller), "Search", JSONObject().put("query", "item"))
+            action(controller, search, "Delete all results")
+            assertTrue(repository.prepareEntered.await(5, TimeUnit.SECONDS))
+            val browser = action(controller, page(controller), "Back to files")
+            val clean = action(controller, browser, "Clean")
+            assertEquals("clean", clean.getString("view"))
+            release.countDown()
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertEquals("clean", page(controller).getString("view"))
+
+            val trashRecord = TrashEntry("trash-one", "test-volume", "item-0", "root", "item-0", "item-0",
+                1, 1, 1, null, false, true)
+            repository.trash.add(trashRecord)
+            val folder = action(controller, page(controller), "Back to folder")
+            val trash = action(controller, folder, "Trash")
+            repository.trashPrepareRelease = CountDownLatch(1)
+            action(controller, trash, "Empty trash")
+            assertTrue(repository.trashPrepareEntered.await(5, TimeUnit.SECONDS))
+            val behind = action(controller, page(controller), "Back to files")
+            val busy = action(controller, behind, "Empty trash")
+            assertEquals("trash", busy.getString("view"))
+            assertTrue(busy.getString("message").contains("still running"))
+            action(controller, busy, "Cancel current operation")
+            repository.trashPrepareRelease!!.countDown()
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertEquals("trash", page(controller).getString("view"))
+            assertEquals(0, repository.emptyCalls)
+            repository.trashPrepareRelease = null
+            action(controller, page(controller), "Empty trash")
+            val review = awaitView(controller, "emptyTrashReview")
+            action(controller, review, "Empty permanently")
+            val empty = awaitView(controller, "trash")
+            assertEquals(0L, empty.getJSONObject("trash").getLong("fileCount"))
+            assertEquals(1, repository.emptyCalls)
+        } finally { release.countDown(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun failedTrashPreparationReleasesBusyStateAndPersistsDiagnostic() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        repository.trash.add(TrashEntry("trash-one", "test-volume", "file", "root", "file", "file", 1, 1, 1, null, false, true))
+        repository.trashPreparationFailure = true
+        repository.trashPrepareRelease = CountDownLatch(1)
+        val controller = FilesPageController(context, repository)
+        controller.addedLocation("test-volume")
+        action(controller, action(controller, page(controller), "Trash"), "Empty trash")
+        assertTrue(repository.trashPrepareEntered.await(5, TimeUnit.SECONDS))
+        action(controller, page(controller), "Event log")
+        repository.trashPrepareRelease!!.countDown()
+        awaitCondition { !page(controller).has("activeOperation") }
+        val failed = action(controller, page(controller), "Back")
+        assertEquals("trash", failed.getString("view"))
+        assertFalse(failed.has("activeOperation"))
+        assertTrue(failed.getString("message").contains("fixture storage unavailable"))
+        val log = action(controller, failed, "Event log")
+        assertTrue(log.getString("eventLogText").contains("fixture storage unavailable"))
+        assertTrue(log.getString("eventLogText").contains("operation.failed"))
+        repository.trashPreparationFailure = false
+        action(controller, action(controller, log, "Back"), "Empty trash")
+        assertTrue(awaitView(controller, "emptyTrashReview").getBoolean("complete"))
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+    }
+
     @Test fun blockedBatchReturnsNamedConflictAndSingleFindingReviewStaysIndependent() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear()
@@ -784,6 +883,18 @@ class FilesReviewPaginationTest {
         var sizeWalks = 0
         var moveCalls = 0
         var lastPlanSize = 0
+        val trash = mutableListOf<TrashEntry>()
+        var emptyCalls = 0
+        var trashPreparationFailure = false
+        var prepareRelease: CountDownLatch? = null
+        val prepareEntered = CountDownLatch(1)
+        var trashPrepareRelease: CountDownLatch? = null
+        val trashPrepareEntered = CountDownLatch(1)
+        val repositoryLock = java.util.concurrent.locks.ReentrantLock()
+        var progressGate: CountDownLatch? = null
+        val progressEntered = CountDownLatch(1)
+        @Volatile var blockTrashRead = false
+        val trashReadEntered = CountDownLatch(1)
 
         override fun locations() = listOf(StorageLocation("test-volume", "Fixture", "root",
             StorageLocation.Kind.SELECTED_FOLDER, true, true, 1_000_000, 500_000))
@@ -827,19 +938,36 @@ class FilesReviewPaginationTest {
             else -> null
         }
         override fun prepareDeletion(ids: List<String>, cancel: Cancellation): DeletionPlan {
+            prepareEntered.countDown()
+            prepareRelease?.let { check(it.await(10, TimeUnit.SECONDS)) }
             val selected = files.filter { it.id in ids }
             return DeletionPlan("fixture-plan", selected, selected, selected.size.toLong(),
                 selected.size.toLong(), true, emptyList(), emptyMap(), emptyMap())
         }
         override fun moveToTrash(plan: DeletionPlan, cancel: Cancellation, progress: Progress): OperationResult {
+            progressGate?.let { gate ->
+                repositoryLock.lock()
+                try {
+                    progressEntered.countDown()
+                    check(gate.await(10, TimeUnit.SECONDS))
+                    progress.onProgress(1, 1, "item")
+                } finally { repositoryLock.unlock() }
+            }
             moveCalls++
             lastPlanSize = plan.descendants.size
             return OperationResult("fixture-delete", plan.roots.map {
                 FileOutcome(it.id, FileOutcome.Status.SUCCESS)
             })
         }
-        override fun trashSummary() = TrashSummary(0, 0, 0, 0)
-        override fun trashEntries(): List<TrashEntry> = emptyList()
+        override fun trashSummary(): TrashSummary {
+            if (blockTrashRead) {
+                trashReadEntered.countDown()
+                repositoryLock.lock()
+                repositoryLock.unlock()
+            }
+            return TrashSummary(trash.size.toLong(), 0, trash.sumOf { it.sizeBytes ?: 0L }, 0)
+        }
+        override fun trashEntries(): List<TrashEntry> = trash.toList()
         override fun openRead(id: String): ParcelFileDescriptor = error("Unexpected read")
         override fun openWrite(id: String, expectedFingerprint: String): ParcelFileDescriptor = error("Unexpected write")
         override fun beginStagedWrite(id: String, expectedFingerprint: String): StagedWrite = error("Unexpected staged write")
@@ -862,8 +990,17 @@ class FilesReviewPaginationTest {
             replacementPlans: Map<String, DeletionPlan>): OperationResult = error("Unexpected copy")
         override fun restore(ids: List<String>, choices: Map<String, RestoreChoice>,
             cancel: Cancellation): OperationResult = error("Unexpected restore")
-        override fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan = error("Unexpected empty")
-        override fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation): OperationResult = error("Unexpected empty")
+        override fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan {
+            trashPrepareEntered.countDown()
+            trashPrepareRelease?.let { check(it.await(10, TimeUnit.SECONDS)) }
+            check(!trashPreparationFailure) { "fixture storage unavailable" }
+            return EmptyTrashPlan(trash.filter { it.id in ids }, emptyList(), true, emptyList(), emptyMap())
+        }
+        override fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation): OperationResult {
+            emptyCalls++
+            trash.removeAll { entry -> plan.entries.any { it.id == entry.id } }
+            return OperationResult("empty", plan.entries.map { FileOutcome(it.id, FileOutcome.Status.SUCCESS) })
+        }
         override fun history(): List<OperationHistoryEntry> = emptyList()
         override fun clearHistory() = Unit
         override fun undoLast(): OperationResult = error("Unexpected undo")

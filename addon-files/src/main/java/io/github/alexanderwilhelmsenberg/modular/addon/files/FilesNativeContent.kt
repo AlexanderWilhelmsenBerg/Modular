@@ -60,6 +60,11 @@ internal fun FilesNativeContent(
     var error by remember { mutableStateOf<String?>(null) }
     val scroll = remember { ScrollSaveState() }
 
+    fun reportFailure(operation: String, failure: Throwable, fallback: String) {
+        error = failure.message ?: fallback
+        scope.launch(Dispatchers.IO) { controller.recordUiFailure(operation, failure) }
+    }
+
     fun saveScroll(position: Triple<String, Int, Int>, debounce: Boolean) {
         scroll.job?.cancel()
         scroll.job = scope.launch {
@@ -76,7 +81,7 @@ internal fun FilesNativeContent(
                 ioMutex.withLock { runCatching { controller.getPage(PAGE_REQUEST) } }
             }
             result.onSuccess { page = it; error = null }
-                .onFailure { error = it.message ?: "Files could not be loaded" }
+                .onFailure { reportFailure("Load Files page", it, "Files could not be loaded") }
         }
     }
 
@@ -97,7 +102,7 @@ internal fun FilesNativeContent(
                 error = null
                 JSONObject(response).optJSONObject("hostLaunch")?.optString("nonce")
                     ?.takeIf { it.isNotBlank() }?.let(onHostLaunch)
-            }.onFailure { error = it.message ?: "Files action failed" }
+            }.onFailure { reportFailure("Perform Files action", it, "Files action failed") }
         }
     }
 
@@ -231,7 +236,8 @@ internal fun filesSurfaceUiState(pageJson: String?): FilesSurfaceUiState {
     val backActionId = (0 until (actions?.length() ?: 0)).mapNotNull { actions?.optJSONObject(it) }
         .firstOrNull { it.optString("kind") == "back" }?.optString("id")?.takeIf { it.isNotBlank() }
     val view = page.optString("view")
-    val protectedView = view in setOf("review", "markdown", "pdf", "clean", "cleanReview", "progress", "keeper")
+    val protectedView = view in setOf("review", "markdown", "pdf", "clean", "cleanReview", "progress", "keeper",
+        "emptyTrashReview", "eventLog", "eventDetail")
     val exclusive = protectedView || (page.optJSONArray("selectedIds")?.length() ?: 0) > 0 ||
         page.optJSONObject("dialog") != null
     return FilesSurfaceUiState(backActionId, exclusive,

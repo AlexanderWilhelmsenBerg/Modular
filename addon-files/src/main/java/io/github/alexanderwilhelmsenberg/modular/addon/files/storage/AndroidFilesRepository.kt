@@ -509,6 +509,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         } finally { mutationLock.unlock() }
     }
 
+    override fun cachedTrashEntries(): List<TrashEntry> = readTrashCache()
+
     override fun trashSummary(): TrashSummary {
         val entries = if (mutationLock.tryLock()) {
             try { trashEntries() } finally { mutationLock.unlock() }
@@ -548,21 +550,26 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         } finally { mutationLock.unlock() }
     }
 
-    override fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan {
+    override fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan = prepareEmptyTrash(ids, Cancellation { false })
+
+    override fun prepareEmptyTrash(ids: List<String>, cancel: Cancellation): EmptyTrashPlan {
+        check(!cancel.isCanceled()) { "Trash review canceled" }
         val selected = trashEntries().filter { it.id in ids.toSet() }
         val errors = selected.filter { !it.available }.map { "${it.originalPath}: storage unavailable" }.toMutableList()
         ids.distinct().filter { wanted -> selected.none { it.id == wanted } }.forEach { errors.add("$it: trash entry missing") }
         val manifest = ArrayList<FileEntry>()
         val fingerprints = LinkedHashMap<String, String>()
         selected.filter { it.available }.forEach { item ->
+            check(!cancel.isCanceled()) { "Trash review canceled" }
             try {
                 val payload = locatePayload(item) ?: error("Payload missing")
                 require(!(payload.directory && payload.root.tree != null)) { "Provider cannot safely empty a folder in trash" }
                 val seen = HashSet<String>()
                 fun visit(node: Node) {
+                    check(!cancel.isCanceled()) { "Trash review canceled" }
                     require(seen.add(nodeIdentity(node))) { "Cyclic or repeated trash item" }
                     manifest.add(node.entry())
-                    fingerprints[node.id] = fingerprint(node)
+                    fingerprints[node.id] = fingerprint(node, cancel)
                     if (node.directory) children(node).forEach(::visit)
                 }
                 visit(payload)
@@ -583,9 +590,10 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
             try {
                 val payload = locatePayload(record) ?: error("Storage unavailable")
                 val covered = plan.descendants.filter { it.id == payload.id || it.relativePath.startsWith(payload.relative.trimEnd('/') + "/") }
-                val error = validateGroup(covered, plan.fingerprints, covered.filter { it.isDirectory }.associate { folder -> folder.id to covered.filter { it.parentId == folder.id }.map { it.id }.toSet() })
+                val error = validateGroup(covered, plan.fingerprints, covered.filter { it.isDirectory }.associate { folder -> folder.id to covered.filter { it.parentId == folder.id }.map { it.id }.toSet() }, cancel)
                 require(error == null) { error ?: "Changed" }
                 covered.sortedWith(compareBy<FileEntry> { it.isDirectory }.thenByDescending { it.relativePath.length }).forEach { item ->
+                    check(!cancel.isCanceled()) { "Empty trash canceled; remaining entries retained" }
                     val node = resolveInternal(item.id)
                     if (node.directory) require(children(node).isEmpty()) { "New trash child" }
                     deleteExact(node)
@@ -891,12 +899,14 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         return resolveInternal(safChildId(parent.id, DocumentsContract.getDocumentId(uri)))
     }
 
-    private fun validateGroup(group: List<FileEntry>, fingerprints: Map<String, String>, dirChildren: Map<String, Set<String>>): String? {
+    private fun validateGroup(group: List<FileEntry>, fingerprints: Map<String, String>, dirChildren: Map<String, Set<String>>,
+        cancel: Cancellation = Cancellation { false }): String? {
         return try {
             val actualChildren = LinkedHashMap<String, Set<String>>()
             for (item in group) {
+                check(!cancel.isCanceled()) { "Operation canceled" }
                 val node = resolveInternal(item.id)
-                if (fingerprint(node) != fingerprints[item.id]) return "File or folder changed; review again"
+                if (fingerprint(node, cancel) != fingerprints[item.id]) return "File or folder changed; review again"
                 if (node.directory) actualChildren[node.id] = children(node).map { it.id }.toSet()
             }
             if (!StorageSafety.reviewedChildrenUnchanged(dirChildren.filterKeys { it in actualChildren.keys }, actualChildren)) return "Folder children changed; review again"
@@ -914,10 +924,10 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         } catch (e: Exception) { e.message ?: "Folder unavailable" }
     }
 
-    private fun fingerprint(node: Node): String {
+    private fun fingerprint(node: Node, cancel: Cancellation = Cancellation { false }): String {
         val identity = node.file?.let { file -> runCatching { val stat = Os.stat(file.path); "${stat.st_dev}:${stat.st_ino}" }.getOrNull() }
         val metadata = "${node.id}|${node.name}|${node.directory}|${node.size}|${node.modified}|${node.mime}|$identity"
-        return digest(metadata.toByteArray() + if (node.directory) byteArrayOf() else digest(input(node)).toByteArray())
+        return digest(metadata.toByteArray() + if (node.directory) byteArrayOf() else digest(input(node), cancel).toByteArray())
     }
 
     private fun trashOne(node: Node, cancel: Cancellation, progress: (Long) -> Unit): TrashEntry {
@@ -1075,10 +1085,13 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     private fun encode(value: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray(Charsets.UTF_8))
     private fun decode(value: String): String = String(Base64.getUrlDecoder().decode(value), Charsets.UTF_8)
     private fun digest(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
-    private fun digest(input: InputStream): String = input.use { stream ->
+    private fun digest(input: InputStream, cancel: Cancellation = Cancellation { false }): String = input.use { stream ->
         val md = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(128 * 1024)
-        while (true) { val count = stream.read(buffer); if (count < 0) break; md.update(buffer, 0, count) }
+        while (true) {
+            check(!cancel.isCanceled()) { "Operation canceled" }
+            val count = stream.read(buffer); if (count < 0) break; md.update(buffer, 0, count)
+        }
         md.digest().toHex()
     }
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }

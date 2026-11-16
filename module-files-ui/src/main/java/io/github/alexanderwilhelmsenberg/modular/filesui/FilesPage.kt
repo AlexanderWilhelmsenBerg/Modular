@@ -143,6 +143,10 @@ fun FilesPage(
         if (args != null) request.put("args", args)
         onAction(request.toString())
     }
+    if (view == "eventLog" || view == "eventDetail") {
+        FilesEventLogPage(page, { send(PageAction(it), null) }, modifier)
+        return
+    }
     val openFolder: (JSONObject, PageAction, Rect) -> Unit = { item, action, bounds ->
         if (flyingFolder == null) {
             flyingFolder = FolderFlight(item.optString("id"), item.optString("name"), item.optString("subtitle"),
@@ -433,7 +437,8 @@ fun FilesPage(
                 }
                 Spacer(Modifier.height(6.dp))
             }
-            val commandActions = actions.filterNot { it.kind in setOf("trash", "loadMore", "confirm", "cancel", "scroll", "documentCommit", "documentCancel", "back") }
+            FilesActiveOperation(page) { send(PageAction(it), null) }
+            val commandActions = actions.filterNot { it.kind in setOf("trash", "loadMore", "confirm", "cancel", "scroll", "documentCommit", "documentCancel", "back", "showOperation", "cancelOperation") }
             if (commandActions.isNotEmpty() && view !in setOf("overview", "browser", "search")) {
                 val primaryKinds = if (view == "overview") setOf("setup", "settings") else
                     if (view == "browser" || view == "search") setOf("search", "clean", "map", "create") else
@@ -841,27 +846,26 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                 if (scanning) actions.firstOrNull { it.kind == "cancel" }?.let { action ->
                     FilesCleanIcon("close", "Cancel scan", "files.clean.cancel") { send(action, null) }
                 }
-                if (!scanning && !setup) {
-                    val menuActions = actions.filter {
-                        it.kind in setOf("scan", "configureClean", "settings")
+                val menuActions = actions.filter {
+                    it.kind in setOf("scan", "configureClean", "settings", "eventLog")
+                }
+                if (menuActions.isNotEmpty()) Box {
+                    FilesCleanIcon("more", "More clean options", "files.clean.more") {
+                        cleanMenuExpanded = true
                     }
-                    if (menuActions.isNotEmpty()) Box {
-                        FilesCleanIcon("more", "More clean options", "files.clean.more") {
-                            cleanMenuExpanded = true
-                        }
-                        DropdownMenu(shape = RectangleShape, expanded = cleanMenuExpanded,
-                            onDismissRequest = { cleanMenuExpanded = false }) {
-                            menuActions.forEach { action ->
-                                DropdownMenuItem(text = { Text(action.label) }, enabled = action.enabled,
-                                    modifier = Modifier.testTag("files.action.${action.kind}"), onClick = {
-                                        cleanMenuExpanded = false; send(action, null)
-                                    })
-                            }
+                    DropdownMenu(shape = RectangleShape, expanded = cleanMenuExpanded,
+                        onDismissRequest = { cleanMenuExpanded = false }) {
+                        menuActions.forEach { action ->
+                            DropdownMenuItem(text = { Text(action.label) }, enabled = action.enabled,
+                                modifier = Modifier.testTag("files.action.${action.kind}"), onClick = {
+                                    cleanMenuExpanded = false; send(action, null)
+                                })
                         }
                     }
                 }
             }
             HorizontalDivider()
+            if (!scanning) FilesActiveOperation(page) { send(PageAction(it), null) }
             page.optString("cleanScopeName").takeIf { it.isNotBlank() }?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

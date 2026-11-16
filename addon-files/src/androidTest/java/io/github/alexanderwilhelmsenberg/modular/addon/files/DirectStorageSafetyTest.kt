@@ -5,6 +5,7 @@ import android.os.Environment
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FileOutcome
+import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Cancellation
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.CollisionChoice
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Progress
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.StorageLocation
@@ -22,6 +23,44 @@ import org.junit.runner.RunWith
 /** Real direct-storage operations, scoped to a unique folder created by this test. */
 @RunWith(AndroidJUnit4::class)
 class DirectStorageSafetyTest {
+    @Test fun emptyTrashRemovesReviewedNestedFolderAndKeepsUnreviewedFiles() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "ModularFilesEmpty-${UUID.randomUUID()}"
+        val fixture = File(Environment.getExternalStorageDirectory(), name)
+        val repository = createFilesRepository(context)
+        try {
+            assertTrue(Environment.isExternalStorageManager())
+            val root = repository.locations().single { it.kind == StorageLocation.Kind.PHONE }
+            val directory = repository.createDirectory(root.rootId, name)
+            val deleting = repository.createDirectory(directory.id, "reviewed")
+            val nested = repository.createDirectory(deleting.id, "nested")
+            repository.createFile(nested.id, "notes.txt", "text/plain")
+            File(fixture, "reviewed/nested/notes.txt").writeText("Nested trash contents")
+            val other = repository.createFile(directory.id, "unreviewed.txt", "text/plain")
+            for (entry in listOf(deleting, other)) {
+                val result = repository.moveToTrash(repository.prepareDeletion(listOf(entry.id)))
+                assertTrue(result.outcomes.toString(), result.outcomes.all { it.status == FileOutcome.Status.SUCCESS })
+            }
+            val records = repository.trashEntries().filter { it.originalPath.startsWith("$name/") }
+            val selected = records.single { it.originalName == "reviewed" }
+            val retained = records.single { it.originalName == "unreviewed.txt" }
+            assertTrue(runCatching { repository.prepareEmptyTrash(listOf(selected.id), Cancellation { true }) }.isFailure)
+            assertTrue(repository.trashEntries().any { it.id == selected.id })
+            val plan = repository.prepareEmptyTrash(listOf(selected.id))
+            assertTrue(plan.errors.toString(), plan.complete)
+            assertTrue(plan.descendants.any { it.name == "notes.txt" })
+            val emptied = repository.emptyTrash(plan)
+            assertTrue(emptied.outcomes.toString(), emptied.outcomes.all { it.status == FileOutcome.Status.SUCCESS })
+            val remaining = repository.trashEntries()
+            assertFalse(remaining.any { it.id == selected.id })
+            assertTrue(remaining.any { it.id == retained.id })
+        } finally {
+            val own = repository.trashEntries().filter { it.originalPath.startsWith("$name/") }
+            if (own.isNotEmpty()) repository.emptyTrash(repository.prepareEmptyTrash(own.map { it.id }))
+            fixture.deleteRecursively()
+        }
+    }
+
     @Test fun parentScanCachesNestedSizesAndCreatingTextNeverOverwrites() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "ModularFilesSizes-${UUID.randomUUID()}"

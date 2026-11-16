@@ -42,17 +42,21 @@ class DirectStorageSafetyTest {
                 assertTrue(result.outcomes.toString(), result.outcomes.all { it.status == FileOutcome.Status.SUCCESS })
             }
             val records = repository.trashEntries().filter { it.originalPath.startsWith("$name/") }
-            val selected = records.single { it.originalName == "reviewed" }
+            // Trash keeps reviewed files and emptied folder markers as separate records.
+            val selected = records.filter { it.originalPath == "$name/reviewed" ||
+                it.originalPath.startsWith("$name/reviewed/") }
+            assertEquals(3, selected.size)
+            val selectedIds = selected.map { it.id }
             val retained = records.single { it.originalName == "unreviewed.txt" }
-            assertTrue(runCatching { repository.prepareEmptyTrash(listOf(selected.id), Cancellation { true }) }.isFailure)
-            assertTrue(repository.trashEntries().any { it.id == selected.id })
-            val plan = repository.prepareEmptyTrash(listOf(selected.id))
+            assertTrue(runCatching { repository.prepareEmptyTrash(selectedIds, Cancellation { true }) }.isFailure)
+            assertTrue(repository.trashEntries().map { it.id }.containsAll(selectedIds))
+            val plan = repository.prepareEmptyTrash(selectedIds)
             assertTrue(plan.errors.toString(), plan.complete)
-            assertTrue(plan.descendants.any { it.name == "notes.txt" })
+            assertTrue(plan.entries.any { it.originalName == "notes.txt" })
             val emptied = repository.emptyTrash(plan)
             assertTrue(emptied.outcomes.toString(), emptied.outcomes.all { it.status == FileOutcome.Status.SUCCESS })
             val remaining = repository.trashEntries()
-            assertFalse(remaining.any { it.id == selected.id })
+            assertFalse(remaining.any { it.id in selectedIds })
             assertTrue(remaining.any { it.id == retained.id })
         } finally {
             val own = repository.trashEntries().filter { it.originalPath.startsWith("$name/") }

@@ -60,9 +60,10 @@ internal fun FilesNativeContent(
     var error by remember { mutableStateOf<String?>(null) }
     val scroll = remember { ScrollSaveState() }
     val reloadRunning = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    val pageUpdates = remember { FilesPageRequestGate() }
 
-    fun reportFailure(operation: String, failure: Throwable, fallback: String) {
-        error = failure.message ?: fallback
+    fun reportFailure(operation: String, failure: Throwable, fallback: String, show: Boolean = true) {
+        if (show) error = failure.message ?: fallback
         scope.launch(Dispatchers.IO) { controller.recordUiFailure(operation, failure) }
     }
 
@@ -77,22 +78,25 @@ internal fun FilesNativeContent(
     }
 
     fun load() {
+        val ticket = pageUpdates.beginRead() ?: return
         if (!reloadRunning.compareAndSet(false, true)) return
         scope.launch {
             try {
             val result = withContext(Dispatchers.IO) {
                 ioMutex.withLock { runCatching { controller.getPage(PAGE_REQUEST) } }
             }
-            result.onSuccess { page = it; error = null }
-                .onFailure { reportFailure("Load Files page", it, "Files could not be loaded") }
+            result.onSuccess { if (pageUpdates.mayApply(ticket)) { page = it; error = null } }
+                .onFailure { reportFailure("Load Files page", it, "Files could not be loaded", pageUpdates.mayApply(ticket)) }
             } finally { reloadRunning.set(false) }
         }
     }
 
     fun performAction(request: String) {
+        val ticket = pageUpdates.beginAction()
         scroll.job?.cancel()
         val position = scroll.pending
         scope.launch {
+            try {
             val result = withContext(Dispatchers.IO) {
                 ioMutex.withLock {
                     runCatching {
@@ -102,11 +106,11 @@ internal fun FilesNativeContent(
                 }
             }
             result.onSuccess { response ->
-                page = response
-                error = null
+                if (pageUpdates.mayApply(ticket)) { page = response; error = null }
                 JSONObject(response).optJSONObject("hostLaunch")?.optString("nonce")
                     ?.takeIf { it.isNotBlank() }?.let(onHostLaunch)
-            }.onFailure { reportFailure("Perform Files action", it, "Files action failed") }
+            }.onFailure { reportFailure("Perform Files action", it, "Files action failed", pageUpdates.mayApply(ticket)) }
+            } finally { pageUpdates.endAction() }
         }
     }
 
@@ -187,19 +191,25 @@ internal fun FilesNativeContent(
                     ioMutex.withLock { controller.openDocument(id, mode) }
                 } },
                 documentCommit = { request ->
+                    val ticket = pageUpdates.beginAction()
+                    try {
                     val result = withContext(Dispatchers.IO) {
                         ioMutex.withLock { runCatching { controller.performAction(request) } }
                     }
-                    result.onSuccess { page = it; error = null }
+                    result.onSuccess { if (pageUpdates.mayApply(ticket)) { page = it; error = null } }
                         .onFailure { error = it.message ?: "Document save failed" }
                     result.getOrNull()?.let { JSONObject(it).optString("documentSaveStatus") == "saved" } ?: false
+                    } finally { pageUpdates.endAction() }
                 },
                 documentCancel = { request ->
+                    val ticket = pageUpdates.beginAction()
+                    try {
                     val result = withContext(Dispatchers.IO) {
                         ioMutex.withLock { runCatching { controller.performAction(request) } }
                     }
-                    result.onSuccess { page = it; error = null }
+                    result.onSuccess { if (pageUpdates.mayApply(ticket)) { page = it; error = null } }
                         .onFailure { error = it.message ?: "Document cancel failed" }
+                    } finally { pageUpdates.endAction() }
                 },
                 onAction = ::performAction,
                 onOpenDocument = { id, mode ->

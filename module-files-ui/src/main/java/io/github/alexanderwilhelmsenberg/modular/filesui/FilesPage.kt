@@ -116,6 +116,7 @@ fun FilesPage(
     documentCommit: suspend (String) -> Boolean = { false },
     documentCancel: suspend (String) -> Unit = { },
     onScrollState: (String, Int, Int) -> Unit = { _, _, _ -> },
+    onRefresh: (() -> Unit)? = null,
 ) {
     val page = remember(pageJson) { runCatching { JSONObject(pageJson) }.getOrNull() }
     if (page == null || page.optInt("version") != 1 || page.optString("kind") != "files") {
@@ -166,6 +167,7 @@ fun FilesPage(
     val scrollKey = page.optString("scrollKey")
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestOnScrollState by rememberUpdatedState(onScrollState)
+    val latestOnRefresh by rememberUpdatedState(onRefresh)
     DisposableEffect(pageKey, lifecycleOwner) {
         val flushLocal = {
             if (view == "browser" || view == "search") {
@@ -201,7 +203,8 @@ fun FilesPage(
             }
             while (refresh != null) {
                 delay(900)
-                send(refresh, null)
+                val reload = latestOnRefresh
+                if (reload != null) reload() else send(refresh, null)
             }
         }
     }
@@ -431,6 +434,12 @@ fun FilesPage(
                     maxLines = if (view == "info") Int.MAX_VALUE else 1,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 6.dp))
             }
+            if (view == "keeper") {
+                Text(page.optString("keeperGroupName"), style = MaterialTheme.typography.titleMedium)
+                val remaining = page.optInt("keeperChoicesRemaining", 1)
+                Text("$remaining choices remaining · ${page.optInt("cleanSelectionCount")} findings selected",
+                    style = MaterialTheme.typography.bodySmall)
+            }
             page.optString("message").takeIf { it.isNotBlank() }?.let {
                 Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RectangleShape) {
                     Text(it, Modifier.fillMaxWidth().padding(12.dp), style = MaterialTheme.typography.bodyMedium)
@@ -442,7 +451,7 @@ fun FilesPage(
             if (commandActions.isNotEmpty() && view !in setOf("overview", "browser", "search")) {
                 val primaryKinds = if (view == "overview") setOf("setup", "settings") else
                     if (view == "browser" || view == "search") setOf("search", "clean", "map", "create") else
-                        setOf("scan", "review", "refresh", "setup")
+                        setOf("scan", "review", "refresh", "setup", "skipKeeperGroup")
                 val primaryActions = if (view == "settings") commandActions.filter { it.kind != "info" }
                     else commandActions.filter { it.kind in primaryKinds }.take(4)
                 val overflowActions = commandActions.filterNot { it in primaryActions }
@@ -822,7 +831,7 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
     val checks = page.optJSONArray("cleanChecks").objects()
     val enabledChecks = checks.filter { it.optBoolean("enabled") }
     val cleanIssues = page.optJSONArray("cleanIssues").objects()
-        .map { it.optString("message") }.filter { it.isNotBlank() }
+        .filter { it.optString("message").isNotBlank() }
     val cleanIssueCount = page.optInt("cleanIssueCount", cleanIssues.size)
     val sort = page.optString("cleanSort", "priority")
     val descending = page.optBoolean("cleanSortDescending", false)
@@ -1007,7 +1016,7 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                     page.optString("message").takeIf { it.isNotBlank() }?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            maxLines = 3, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.testTag("files.clean.message"))
                     }
                     if (cleanIssues.isNotEmpty()) {
@@ -1016,6 +1025,10 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary)
                     }
+                    val keeperChoices = page.optInt("cleanKeeperChoiceCount")
+                    if (keeperChoices > 0) Text("$keeperChoices selected groups need a keeper. Review selected will guide you.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag("files.clean.keeperChoices"))
                 }
                 LazyColumn(Modifier.weight(1f).testTag("files.clean.findings")) {
                     items(items, key = { it.optString("id") }) { item ->
@@ -1064,6 +1077,9 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                                 Text(it, style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+                            if (item.optBoolean("keeperRequired")) Text("Choose a copy to keep",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 item.optString("priorityLabel").takeIf { it.isNotBlank() }?.let {
                                     Text(it, style = MaterialTheme.typography.labelMedium,
@@ -1111,7 +1127,15 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
             text = {
                 Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    cleanIssues.forEach { issue -> Text(issue, style = MaterialTheme.typography.bodyMedium) }
+                    cleanIssues.forEach { issue ->
+                        Text(issue.optString("message"), style = MaterialTheme.typography.bodyMedium)
+                        Row {
+                            issue.optJSONArray("actions").objects().map(::PageAction).forEach { action ->
+                                TextButton(onClick = { issuesOpen = false; send(action, null) },
+                                    modifier = Modifier.testTag("files.clean.issue.${action.kind}")) { Text(action.label) }
+                            }
+                        }
+                    }
                     if (cleanIssueCount > cleanIssues.size) {
                         Text("Review a smaller selection to see remaining issues.",
                             style = MaterialTheme.typography.bodySmall,
@@ -1138,6 +1162,7 @@ private fun FileRow(item: JSONObject, view: String, send: (PageAction, JSONObjec
     var expanded by remember(item.optString("id")) { mutableStateOf(false) }
     Row(modifier.fillMaxWidth().testTag("files.item.${item.optString("id")}").combinedClickable(onClick = {
         when {
+            view == "keeper" -> itemActions.firstOrNull { it.kind == "keeper" }?.let { send(it, null) }
             primary != null -> send(primary, null)
             kind == "markdown" || kind == "pdf" -> onOpenDocument(item.optString("id"), "r")
         }
@@ -1160,14 +1185,18 @@ private fun FileRow(item: JSONObject, view: String, send: (PageAction, JSONObjec
             val subtitle = item.optString("subtitle").ifBlank { item.optString("path") }
             if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-            if (view == "review" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview" || view == "restoreReview" || view == "trash" || view == "emptyTrashReview" || view == "properties") {
+            if (view == "review" || view == "cleanReview" || view == "pasteReview" || view == "archiveReview" || view == "restoreReview" || view == "trash" || view == "emptyTrashReview" || view == "properties" || view == "keeper") {
                 val size = if (item.isNull("sizeBytes")) "Size unavailable" else formatBytes(item.optLong("sizeBytes"))
                 val modified = date(item, "modifiedAt")
                 val created = date(item, "createdAt")
                 Text("$size · Modified $modified · Created $created", style = MaterialTheme.typography.bodySmall)
             }
         }
-        if (view != "review" && view != "cleanReview" && view != "pasteReview") {
+        if (view == "keeper") {
+            itemActions.firstOrNull { it.kind == "keeper" }?.let { action ->
+                TextButton(onClick = { send(action, null) }, modifier = Modifier.testTag("files.keeper.choose")) { Text(action.label) }
+            }
+        } else if (view != "review" && view != "cleanReview" && view != "pasteReview") {
             val secondary = itemActions.filterNot { it.kind == "open" }
             if (secondary.isNotEmpty()) {
                 Box {

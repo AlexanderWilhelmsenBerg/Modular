@@ -42,7 +42,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private var eventDetailId: String? = null
     private val folderAppearance = FolderAppearance(preferences)
     private val lock = Any()
-    private val commands = LinkedHashMap<String, Command>()
+    private val commands = FilesActionRegistry<Command>()
     private data class ScrollCommand(val revision: Long, val key: String)
     private val scrollCommands = LinkedHashMap<String, ScrollCommand>()
     private data class SizeProgressCommand(val revision: Long, val folderId: String)
@@ -153,6 +153,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private val cleanerSelectedSuggestions = linkedSetOf<String>()
     private var keeperGroupId: String? = null
     private var reviewAfterKeeperGroupId: String? = null
+    private var batchReviewPending = false
     private var cleanReviewIssues: List<CleanerEngine.ReviewIssue> = emptyList()
     private var cleanerLargeMiB = preferences.getInt("cleanLargeMiB", 512)
     private var cleanerOldDays = preferences.getInt("cleanOldDays", 90)
@@ -400,7 +401,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     fun openSettings() = synchronized(lock) { cleanSettingsFolderId = null; view = "settings"; persist() }
 
     private fun render(offset: Int, limit: Int): String {
-        if (commands.size > 2048) commands.clear()
+        commands.beginPage()
+        try {
         val page = JSONObject().put("version", 1).put("kind", "files")
             .put("title", when (view) { "trash" -> "Trash"; "review" -> "Review deletion";
                 "emptyTrashReview" -> "Empty trash"; "map" -> "Storage map"; "clean" -> "Clean folder";
@@ -486,6 +488,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             lastBrowserFolderId = folderId
         }
         return rendered
+        } finally { commands.endPage() }
     }
 
     private fun renderOverview(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
@@ -1058,14 +1061,28 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             it.entryId() in cleanerSelectedSuggestions
         }
         page.put("cleanSelectionCount", selectionCount).put("cleanCanReview", selectionCount > 0)
+            .put("cleanKeeperChoiceCount", unresolvedSelectedKeepers(analysis).size)
         if (cleanReviewIssues.isNotEmpty()) {
             page.put("cleanIssueCount", cleanReviewIssues.size)
                 .put("cleanIssues", JSONArray(cleanReviewIssues.take(20).map {
-                    JSONObject().put("message", it.message())
+                    val issue = JSONObject().put("message", it.message()).put("type", it.type().name)
+                    val group = analysis.groups().firstOrNull { group -> group.id() == it.groupId() }
+                    if (group != null) {
+                        val row = JSONArray()
+                        action(row, "Choose keeper", "resolveKeeper") {
+                            batchReviewPending = true; keeperGroupId = group.id(); view = "keeper"
+                        }
+                        action(row, "Exclude group", "excludeGroup") {
+                            cleanerSelectedGroups.remove(group.id()); clearCleanReviewIssues(); view = "clean"
+                        }
+                        issue.put("name", group.baseName()).put("actions", row)
+                    }
+                    issue
                 }))
         }
         val reviewAction = registered("Review selected", "review") {
-            prepareCleanReview(analysis)
+            requireIdle(); clearCleanReviewIssues(); batchReviewPending = true
+            continueSelectedReview(analysis)
         }
         actions.put(reviewAction.put("enabled", selectionCount > 0))
         val clearAction = registered("Clear selection", "clearCleanSelection") {
@@ -1218,6 +1235,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private fun clearCleanReviewIssues() {
         cleanReviewIssues = emptyList()
         reviewAfterKeeperGroupId = null
+        batchReviewPending = false
         cleanerPlan = null
         message = null
     }
@@ -1253,6 +1271,24 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         }
     }
 
+    private fun unresolvedSelectedKeepers(analysis: CleanerEngine.Analysis) = analysis.groups().filter { group ->
+        val chosen = cleanerKeepers[group.id()] ?: group.suggestedKeeperId()
+        group.id() in cleanerSelectedGroups && (chosen == null || chosen !in group.memberIds())
+    }
+
+    private fun continueSelectedReview(analysis: CleanerEngine.Analysis) {
+        val unresolved = unresolvedSelectedKeepers(analysis)
+        if (unresolved.isNotEmpty()) {
+            keeperGroupId = unresolved.first().id()
+            view = "keeper"; currentOffset = 0
+            message = "Choose which copy to keep. ${unresolved.size} selected groups need a choice before review."
+            events.record("review.keeper_required", message ?: "Keeper choice required")
+        } else {
+            batchReviewPending = false
+            prepareCleanReview(analysis)
+        }
+    }
+
     private fun prepareCleanReview(analysis: CleanerEngine.Analysis) {
         requireIdle()
         val keepers = cleanerKeepers.toMap()
@@ -1285,9 +1321,14 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                     val plan = outcome.getOrThrow()
                     if (plan.readyForReview()) cleanerPlan = plan else recordBlockedReview(plan)
                 } else message = outcome.exceptionOrNull()?.message ?: "Review preparation canceled"
-                events.record(if (cancel.get()) "operation.canceled" else if (outcome.isFailure) "operation.failed" else "operation.completed",
-                    message ?: "Cleanup review prepared", if (outcome.isFailure && !cancel.get()) "ERROR" else "INFO",
-                    operationId, outcome.exceptionOrNull())
+                val blocked = !cancel.get() && outcome.isSuccess && cleanerPlan == null
+                events.record(if (blocked) "review.blocked" else if (cancel.get()) "operation.canceled"
+                    else if (outcome.isFailure) "operation.failed" else "operation.completed",
+                    message ?: "Cleanup review prepared", if (blocked) "WARN"
+                    else if (outcome.isFailure && !cancel.get()) "ERROR" else "INFO",
+                    operationId, outcome.exceptionOrNull(), details = cleanReviewIssues.joinToString("\n") {
+                        "${it.type()}: ${it.message()}"
+                    })
                 jobResultView = if (cleanerPlan != null) "cleanReview" else "clean"
                 if (view == "progress" && jobReturnView == "cleanReview") view = jobResultView
                 persist()
@@ -1399,16 +1440,31 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         val analysis = cleanerAnalysis ?: run { view = "clean"; return }
         val group = analysis.groups().firstOrNull { it.id() == keeperGroupId } ?: run { view = "clean"; return }
         page.put("summary", "${group.memberIds().size} copies · ${group.evidence()}")
-        action(actions, "Back to Clean", "back") { reviewAfterKeeperGroupId = null; message = null; view = "clean" }
+            .put("title", "Choose a copy to keep").put("keeperGroupName", group.baseName())
+            .put("keeperChoicesRemaining", if (batchReviewPending) unresolvedSelectedKeepers(analysis).size else 1)
+            .put("cleanSelectionCount", cleanerSelectedGroups.size + cleanerSelectedSuggestions.size)
+        action(actions, "Back to Clean", "back") {
+            reviewAfterKeeperGroupId = null; batchReviewPending = false; message = null; view = "clean"
+        }
+        if (batchReviewPending) action(actions, "Skip this group", "skipKeeperGroup") {
+            cleanerSelectedGroups.remove(group.id())
+            events.record("review.group_skipped", group.baseName())
+            if (cleanerSelectedGroups.isEmpty() && cleanerSelectedSuggestions.isEmpty()) {
+                batchReviewPending = false; view = "clean"; message = "No findings selected for review"
+            } else continueSelectedReview(analysis)
+        }
         group.memberIds().drop(offset).take(limit).forEach { id ->
             val entry = analysis.entries()[id] ?: return@forEach
             val chosen = cleanerKeepers[group.id()] ?: group.suggestedKeeperId()
             val row = JSONArray()
             action(row, if (id == chosen) "Keeping" else "Keep this", "keeper") {
                 val reviewThisGroup = reviewAfterKeeperGroupId == group.id()
+                val reviewBatch = batchReviewPending
                 clearCleanReviewIssues()
                 cleanerKeepers[group.id()] = id; cleanerSelectedGroups.add(group.id())
-                if (reviewThisGroup) prepareCleanReview(analysis) else view = "clean"
+                events.record("review.keeper_chosen", "${group.baseName()}: keep ${entry.name()}")
+                if (reviewBatch) { batchReviewPending = true; continueSelectedReview(analysis) }
+                else if (reviewThisGroup) prepareCleanReview(analysis) else view = "clean"
             }
             items.put(JSONObject().put("id", id).put("name", entry.name())
                 .put("kind", "candidate").put("path", entry.path())

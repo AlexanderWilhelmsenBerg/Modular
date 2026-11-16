@@ -24,7 +24,7 @@ BROAD_TESTS = (
     "FilesHandoffNonceTest",
     "ArchiveRealStorageTest",
 )
-EXPECTED_COUNTS = {"FilesReviewPaginationTest": 18, "DirectStorageSafetyTest": 3, "FilesPageVisualFixtureTest": 2}
+EXPECTED_COUNTS = {"FilesReviewPaginationTest": 20, "DirectStorageSafetyTest": 3, "FilesPageVisualFixtureTest": 2, "FilesEventLogUiTest": 3, "FilesNativeDocumentUiTest": 2}
 
 
 def adb(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -62,7 +62,7 @@ def main() -> None:
     # after the APKs are installed and before the next instrumentation starts.
     try:
         try:
-            adb("shell", "appops", "set", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "allow")
+            adb("shell", "appops", "set", "--uid", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "allow")
             for name in BROAD_TESTS:
                 try:
                     run_test(name)
@@ -72,13 +72,13 @@ def main() -> None:
             failures.append(f"Broad-access setup: {error}")
 
         try:
-            adb("shell", "appops", "set", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "ignore")
+            adb("shell", "appops", "set", "--uid", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "ignore")
             run_test("SelectedFolderSafTest")
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
             failures.append(f"SelectedFolderSafTest: {error}")
     finally:
         try:
-            adb("shell", "appops", "set", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "default")
+            adb("shell", "appops", "set", "--uid", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "default")
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
             failures.append(f"App-op restore: {error}")
     if failures:

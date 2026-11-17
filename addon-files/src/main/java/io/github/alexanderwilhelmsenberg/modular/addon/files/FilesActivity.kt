@@ -43,18 +43,14 @@ open class FilesActivity : ComponentActivity() {
             if (launchedFromCoreHandoff) finish()
             return@registerForActivityResult
         }
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val json = controller.exportEventLogJson()
-                    requireNotNull(contentResolver.openOutputStream(uri, "wt")) { "Could not open the log destination" }
-                        .bufferedWriter().use { it.write(json) }
-                }
-            }
+        val app = application as FilesApplication
+        app.logExporter.export(uri) { result ->
             result.exceptionOrNull()?.let { controller.recordUiFailure("Download event log", it) }
-            Toast.makeText(this@FilesActivity,
-                result.fold({ "Event log saved" }, { it.message ?: "Could not save the event log" }), Toast.LENGTH_LONG).show()
-            if (launchedFromCoreHandoff) finish()
+            android.os.Handler(mainLooper).post {
+                Toast.makeText(app,
+                    result.fold({ "Event log saved" }, { it.message ?: "Could not save the event log" }), Toast.LENGTH_LONG).show()
+                if (!isDestroyed && launchedFromCoreHandoff) finish()
+            }
         }
     }
 
@@ -151,6 +147,30 @@ open class FilesActivity : ComponentActivity() {
 
     private fun handleHandoff(handoff: FilesPageController.HostHandoff, fromCore: Boolean) {
         when (handoff.kind) {
+            "startOperation" -> handoff.documentId?.let { id ->
+                val app = application as FilesApplication
+                app.operationLifetime.retryFromActivity(id)
+                Thread({
+                    val result = runCatching { app.operationLifetime.awaitReady(id,
+                        io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Cancellation { false }) }
+                    result.exceptionOrNull()?.let { controller.recordUiFailure("Start background operation", it) }
+                    android.os.Handler(mainLooper).post { if (!isDestroyed && fromCore) finish() }
+                }, "files-operation-start").start()
+            }
+            "shareEventLog" -> (application as FilesApplication).logExporter.prepare { result ->
+                result.exceptionOrNull()?.let { controller.recordUiFailure("Share event log", it) }
+                android.os.Handler(mainLooper).post {
+                    if (!isDestroyed) result.onSuccess { file ->
+                        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", file)
+                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/json")
+                            .putExtra(Intent.EXTRA_STREAM, uri).apply {
+                                clipData = ClipData.newUri(contentResolver, "Event log", uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }, "Share event log"))
+                        if (fromCore) finish()
+                    }.onFailure { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+                }
+            }
             "exportEventLog" -> saveEventLog.launch("modular-files-events-${java.time.LocalDate.now()}.json")
             "pickFolder" -> chooseFolder.launch(null)
             "editDocument" -> {

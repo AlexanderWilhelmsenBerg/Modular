@@ -7,4 +7,5 @@ class FilesApplication : Application() {
     val repository by lazy { createFilesRepository(this) }
     internal val operationLifetime by lazy { AndroidFilesOperationLifetime(this) }
     val pageController by lazy { FilesPageController(this, repository, operationLifetime) }
+    internal val logExporter by lazy { FilesLogExporter(this, snapshot = { pageController.exportEventLogJson() }) }
 }

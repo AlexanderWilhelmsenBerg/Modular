@@ -125,7 +125,7 @@ public class CleanerEngineTest {
                 new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
                     case "get" -> root;
                     case "list" -> new FilePage(List.of(first, second, occupied), null, 3, true);
-                    case "fingerprint" -> {
+                    case "fingerprint", "identityFingerprint" -> {
                         fingerprints.add((String) args[0]);
                         yield "rev-" + args[0];
                     }
@@ -202,7 +202,7 @@ public class CleanerEngineTest {
         var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
                 new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
                     case "get" -> root;
-                    case "fingerprint" -> {
+                    case "fingerprint", "identityFingerprint" -> {
                         fingerprintCalled.set(true);
                         yield "rev-" + args[0];
                     }
@@ -251,7 +251,7 @@ public class CleanerEngineTest {
         var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
                 new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
                     case "get" -> current.get(args[0]);
-                    case "fingerprint" -> {
+                    case "fingerprint", "identityFingerprint" -> {
                         fingerprinted.add((String) args[0]);
                         yield "rev-" + args[0];
                     }
@@ -304,7 +304,7 @@ public class CleanerEngineTest {
         var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
                 new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
                     case "get" -> Map.of("root", root, "one", one, "two", two, "unrelated", unrelated).get(args[0]);
-                    case "fingerprint" -> {
+                    case "fingerprint", "identityFingerprint" -> {
                         fingerprinted.add((String) args[0]);
                         yield "after";
                     }
@@ -335,7 +335,7 @@ public class CleanerEngineTest {
                         yield new FileEntry(e.id(), e.volumeId(), e.parentId(), e.name(), e.path(), false,
                                 "application/zip", e.size(), e.modified().toEpochMilli(), null, true, true);
                     }
-                    case "fingerprint" -> "rev-" + args[0];
+                    case "fingerprint", "identityFingerprint" -> "rev-" + args[0];
                     case "moveToTrash" -> {
                         var deletion = (io.github.alexanderwilhelmsenberg.modular.addon.files.storage.DeletionPlan) args[0];
                         moved.add(deletion);
@@ -369,7 +369,7 @@ public class CleanerEngineTest {
                         yield new FileEntry(e.id(), e.volumeId(), e.parentId(), e.name(), e.path(), true,
                                 null, null, e.modified().toEpochMilli(), null, true, true);
                     }
-                    case "fingerprint" -> "rev-" + args[0];
+                    case "fingerprint", "identityFingerprint" -> "rev-" + args[0];
                     case "list" -> new FilePage(List.of(), null, 0, true);
                     case "prepareDeletion" -> {
                         gated.incrementAndGet();
@@ -413,7 +413,7 @@ public class CleanerEngineTest {
                                 : id.equals("old") ? List.of(oldChild)
                                 : id.equals("keeper") ? List.of(keptChild) : List.of(), null, null, true);
                     }
-                    case "fingerprint" -> {
+                    case "fingerprint", "identityFingerprint" -> {
                         fingerprinted.add((String) args[0]);
                         yield "rev-" + args[0];
                     }

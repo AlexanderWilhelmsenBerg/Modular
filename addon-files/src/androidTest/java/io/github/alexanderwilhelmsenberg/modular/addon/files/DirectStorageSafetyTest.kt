@@ -23,11 +23,48 @@ import org.junit.runner.RunWith
 /** Real direct-storage operations, scoped to a unique folder created by this test. */
 @RunWith(AndroidJUnit4::class)
 class DirectStorageSafetyTest {
+    @Test fun trashNeverReadsPayloadAndMetadataChecksStillRejectReplacedOrEditedFiles() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "ModularIdentity-${UUID.randomUUID()}"
+        val fixture = File(Environment.getExternalStorageDirectory(), name)
+        val reads = mutableListOf<String>()
+        val repository = io.github.alexanderwilhelmsenberg.modular.addon.files.storage.AndroidFilesRepository(context) { reads.add(it) }
+        try {
+            val root = repository.locations().single { it.kind == StorageLocation.Kind.PHONE }
+            val directory = repository.createDirectory(root.rootId, name)
+            val file = repository.createFile(directory.id, "payload.bin", "application/octet-stream")
+            val local = File(fixture, "payload.bin").apply { writeText("original") }
+            val modified = local.lastModified()
+            val editedPlan = repository.prepareDeletion(listOf(file.id))
+            Thread.sleep(1_100) // Also exercises filesystems with only whole-second ctime.
+            local.writeText("changed!") // Same length; restoring mtime must not hide the edit.
+            assertTrue(local.setLastModified(modified))
+            assertTrue(repository.moveToTrash(editedPlan).outcomes.all { it.status != FileOutcome.Status.SUCCESS })
+            assertTrue(local.exists())
+            val replacedPlan = repository.prepareDeletion(listOf(file.id))
+            val replacement = File(fixture, "replacement.bin").apply { writeText("replaced"); setLastModified(modified) }
+            java.nio.file.Files.move(replacement.toPath(), local.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            assertTrue(repository.moveToTrash(replacedPlan).outcomes.all { it.status != FileOutcome.Status.SUCCESS })
+            val valid = repository.prepareDeletion(listOf(file.id))
+            val result = repository.moveToTrash(valid)
+            assertTrue(result.outcomes.toString(), result.outcomes.all { it.status == FileOutcome.Status.SUCCESS })
+            val ids = result.outcomes.mapNotNull { it.resultingId }
+            val empty = repository.emptyTrash(repository.prepareEmptyTrash(ids))
+            assertTrue(empty.outcomes.toString(), empty.outcomes.all { it.status == FileOutcome.Status.SUCCESS })
+            assertFalse(reads.toString(), reads.any { it == "payload.bin" || it.endsWith(".payload") })
+        } finally {
+            val own = repository.trashEntries().filter { it.originalPath.startsWith("$name/") }
+            if (own.isNotEmpty()) repository.emptyTrash(repository.prepareEmptyTrash(own.map { it.id }))
+            fixture.deleteRecursively()
+        }
+    }
+
     @Test fun cleanerShowsCancellableProgressAndSafelyKeepsTheHighestCopyWithAYearInItsName() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "ModularFilesCleaner-${UUID.randomUUID()}"
         val fixture = File(Environment.getExternalStorageDirectory(), name)
-        val repository = createFilesRepository(context)
+        val reads = mutableListOf<String>()
+        val repository = io.github.alexanderwilhelmsenberg.modular.addon.files.storage.AndroidFilesRepository(context) { reads.add(it) }
         try {
             val root = repository.locations().single { it.kind == StorageLocation.Kind.PHONE }
             val directory = repository.createDirectory(root.rootId, name)
@@ -45,6 +82,7 @@ class DirectStorageSafetyTest {
                 Progress { done, _, _ -> observed = done; if (done > 0) canceled.set(true) }) }.isFailure)
             assertTrue(observed > 0)
             assertTrue(File(fixture, labels.last()).exists())
+            reads.clear()
             val options = io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerEngine.Options(
                 directory.id, true, emptySet(), emptySet(), 512L * 1024 * 1024, 90,
                 java.time.Instant.now(), setOf(io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerEngine.Category.NUMBERED_COPY))
@@ -63,6 +101,7 @@ class DirectStorageSafetyTest {
             assertTrue(progressCalls > 0)
             assertEquals(setOf("guide (2017).txt"), fixture.listFiles()!!.map { it.name }.toSet())
             assertEquals(3.toByte(), File(fixture, "guide (2017).txt").readBytes()[0])
+            assertFalse("Numbered cleanup must not read payloads: $reads", reads.any { it in labels || it.endsWith(".payload") })
         } finally {
             val own = repository.trashEntries().filter { it.originalPath.startsWith("$name/") }
             if (own.isNotEmpty()) repository.emptyTrash(repository.prepareEmptyTrash(own.map { it.id }))

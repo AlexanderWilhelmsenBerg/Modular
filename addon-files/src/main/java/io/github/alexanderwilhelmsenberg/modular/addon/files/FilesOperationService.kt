@@ -24,15 +24,47 @@ internal class AndroidFilesOperationLifetime(private val context: Context) : Fil
     @Volatile var state: State? = null
         private set
     private var lastNotification = 0L
+    @Volatile private var ready: Pair<String, java.util.concurrent.CountDownLatch>? = null
+    @Volatile private var startFailure: String? = null
     private val main = Handler(Looper.getMainLooper())
 
     @Synchronized override fun begin(id: String, label: String): String? {
         state = State(id, label, label)
+        ready = id to java.util.concurrent.CountDownLatch(1)
+        startFailure = null
         lastNotification = 0
         return runCatching {
             ContextCompat.startForegroundService(context, Intent(context, FilesOperationService::class.java))
             null
         }.getOrElse { failure -> "Android could not keep this operation running in the background: ${failure.message}" }
+    }
+
+    @Synchronized fun retryFromActivity(id: String): Boolean {
+        if (state?.id != id) return false
+        return runCatching {
+            ContextCompat.startForegroundService(context, Intent(context, FilesOperationService::class.java)); true
+        }.getOrElse { markFailed(id, it); false }
+    }
+
+    fun markStarted(id: String) { ready?.takeIf { it.first == id }?.second?.countDown() }
+    fun markFailed(id: String, failure: Throwable) {
+        if (state?.id != id) return
+        startFailure = failure.message ?: "Android could not start the foreground operation"
+        ready?.takeIf { it.first == id }?.second?.countDown()
+    }
+
+    override fun awaitReady(id: String, cancel: io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Cancellation) {
+        val gate = ready?.takeIf { it.first == id }?.second ?: error("Operation is no longer active")
+        val deadline = android.os.SystemClock.elapsedRealtime() + 30_000
+        while (!gate.await(100, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            check(!cancel.isCanceled()) { "Operation canceled before start" }
+            check(state?.id == id && android.os.SystemClock.elapsedRealtime() < deadline) {
+                "Android did not start the background operation. Open Files and retry."
+            }
+        }
+        check(!cancel.isCanceled()) { "Operation canceled before start" }
+        check(state?.id == id) { "Operation is no longer active" }
+        check(startFailure == null) { startFailure ?: "Background operation unavailable" }
     }
 
     @Synchronized override fun update(id: String, status: String, done: Long, total: Long?) {
@@ -73,23 +105,30 @@ class FilesOperationService : Service() {
         val state = app.operationLifetime.state
         // A short operation can finish before Android delivers this start request.
         val shown = state ?: AndroidFilesOperationLifetime.State("finished", "Files", "Operation finished")
-        ServiceCompat.startForeground(this, NOTIFICATION, notification(this, shown),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        try {
+            ServiceCompat.startForeground(this, NOTIFICATION, notification(this, shown),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } catch (failure: RuntimeException) {
+            if (state != null) app.operationLifetime.markFailed(state.id, failure)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (state == null) { stopSelf(startId); return START_NOT_STICKY }
+        app.operationLifetime.markStarted(state.id)
         if (wakeLock == null) {
             wakeLock = getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:files-operation")
                 .apply { acquire(60 * 60 * 1000L) }
         }
         if (intent?.action == CANCEL) {
-            Thread { app.pageController.cancelCurrentOperation() }.start()
+            Thread { app.pageController.cancelCurrentOperation("notification") }.start()
         }
         // Destructive jobs must never be blindly replayed after process death.
         return START_NOT_STICKY
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
-        (application as FilesApplication).pageController.cancelCurrentOperation()
+        Thread { (application as FilesApplication).pageController.cancelCurrentOperation("android_data_sync_timeout") }.start()
         stopSelf()
     }
 

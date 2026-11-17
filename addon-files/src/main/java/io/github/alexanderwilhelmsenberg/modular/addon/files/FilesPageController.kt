@@ -193,7 +193,12 @@ class FilesPageController internal constructor(context: Context,
         val warning = operationLifetime.begin(id, label)
         operationDisplay = OperationDisplay(id, label, System.currentTimeMillis(), label,
             backgroundWarning = warning)
-        if (warning != null) events.record("operation.background_unavailable", warning, "WARN", id)
+        if (warning != null) {
+            events.record("operation.foreground_handoff", warning, "WARN", id)
+            jobStatus = "Starting background operation through Files"
+            val nonce = issueHostHandoff("startOperation", id)
+            pendingHostLaunch = JSONObject().put("kind", "startOperation").put("nonce", nonce)
+        }
     }
 
     /** Progress is published without taking the page lock while storage owns its mutation lock. */
@@ -217,6 +222,13 @@ class FilesPageController internal constructor(context: Context,
         preferences.edit().remove("runningOperationId").remove("runningOperationLabel").apply()
     }
 
+    private fun operationReady(id: String) {
+        operationDisplay?.takeIf { it.id == id }?.let {
+            operationDisplay = it.copy(backgroundWarning = null)
+            if (it.backgroundWarning != null) events.record("operation.foreground_ready", "Background operation started", operationId = id)
+        }
+    }
+
     private fun operationJson(): JSONObject? = operationDisplay?.let {
         JSONObject().put("id", it.id).put("label", it.label).put("status", it.status)
             .put("doneBytes", it.done).put("totalBytes", it.total ?: JSONObject.NULL)
@@ -225,11 +237,20 @@ class FilesPageController internal constructor(context: Context,
             .put("cancelRequested", activeJobCancel?.get() == true || cleanScanCancel?.get() == true)
     }
 
-    internal fun cancelCurrentOperation() { requestOperationCancel() }
+    internal fun cancelCurrentOperation(reason: String = "user") { requestOperationCancel(reason) }
 
-    fun exportEventLogJson(): String = JSONObject(events.exportJson())
-        .put("appVersion", BuildConfig.VERSION_NAME).put("androidApi", android.os.Build.VERSION.SDK_INT)
-        .put("activeOperation", operationJson()).toString(2)
+    fun exportEventLogJson(): String {
+        val history = runCatching { repository.history().map { operation ->
+            JSONObject().put("id", operation.id).put("kind", operation.kind).put("at", operation.atMillis)
+                .put("outcomes", JSONArray(operation.outcomes.map { outcome ->
+                    JSONObject().put("itemId", outcome.id).put("status", outcome.status.name)
+                        .put("message", outcome.message).put("resultingId", outcome.resultingId)
+                }))
+        } }.getOrElse { events.record("history.export_failed", it.message ?: "History unavailable", "WARN"); emptyList() }
+        return JSONObject(events.exportJson())
+            .put("appVersion", BuildConfig.VERSION_NAME).put("androidApi", android.os.Build.VERSION.SDK_INT)
+            .put("activeOperation", operationJson()).put("operationHistory", JSONArray(history)).toString(2)
+    }
 
     private fun cleanKey(folder: String): String = listOf(folder, cleanerIncludeSubfolders,
         cleanerLargeMiB, cleanerOldDays, cleanerExcludedIds.sorted().joinToString("|"),
@@ -246,6 +267,7 @@ class FilesPageController internal constructor(context: Context,
         if (nonce.length !in 32..64) return@synchronized null
         val item = handoffs.remove(nonce) ?: return@synchronized null
         item.value.takeIf { item.expiresAt >= System.currentTimeMillis() &&
+            (item.value.kind != "startOperation" || operationDisplay?.id == item.value.documentId) &&
             (item.value.kind != "editDocument" || (view == "markdown" && documentId == item.value.documentId)) }
     }
 
@@ -1401,6 +1423,8 @@ class FilesPageController internal constructor(context: Context,
         view = "progress"
         worker.execute {
             val outcome = runCatching {
+                operationLifetime.awaitReady(operationId, Cancellation { cancel.get() })
+                operationReady(operationId)
                 cleaner.prepareReview(analysis, keepers, groups, suggestions, Cancellation { cancel.get() },
                     Progress { done, total, name -> updateOperation(name, done, total) })
             }
@@ -1483,6 +1507,8 @@ class FilesPageController internal constructor(context: Context,
         view = "progress"
         worker.execute {
             val outcome = runCatching {
+                operationLifetime.awaitReady("clean:$scanId", Cancellation { cancel.get() })
+                operationReady("clean:$scanId")
                 val snapshot = cleaner.snapshot(folder, Cancellation { cancel.get() }, excluded,
                     progressiveOptions = options, onProgress = { batch ->
                         synchronized(lock) {
@@ -1591,9 +1617,17 @@ class FilesPageController internal constructor(context: Context,
         if (plan.readyForReview()) action(actions, "Delete", "confirm", destructive = true) {
             startJob("Moving reviewed cleanup files to trash", "browser") { cancel, progress ->
                 val result = cleaner.executeReviewed(plan, cancel, progress)
+                result.trash?.let { logOperationResult("clean.trash", it) }
+                val renameFailures = result.renames.filter { it.status.name != "SUCCESS" }
+                if (renameFailures.isNotEmpty()) events.record("clean.rename", "${renameFailures.size} renames need attention",
+                    "WARN", activeJobId, details = renameFailures.joinToString("\n") {
+                        "${plan.manifest()[it.id]?.name() ?: it.id}: ${it.status}: ${it.message.orEmpty()}"
+                    })
                 synchronized(lock) { cleanerPlan = null }
                 if (result.errors.isNotEmpty()) result.errors.joinToString("; ")
-                else "Moved ${result.trash?.outcomes?.count { it.status.name == "SUCCESS" } ?: 0} to trash; ${result.renames.count { it.status.name == "SUCCESS" }} renamed"
+                else "Moved ${result.trash?.outcomes?.count { it.status.name == "SUCCESS" } ?: 0} to trash; " +
+                    "${result.trash?.outcomes?.count { it.status.name != "SUCCESS" } ?: 0} retained; " +
+                    "${result.renames.count { it.status.name == "SUCCESS" }} renamed; ${renameFailures.size} renames need attention"
             }
         }
     }
@@ -1621,6 +1655,8 @@ class FilesPageController internal constructor(context: Context,
         events.record("operation.started", label, operationId = operationId)
         worker.execute {
             val outcome = runCatching {
+                operationLifetime.awaitReady(operationId, Cancellation { cancel.get() })
+                operationReady(operationId)
                 task(Cancellation { cancel.get() }, Progress { done, total, name ->
                     // Repository mutations hold their own lock here. Never take the
                     // page lock: a page read can be waiting for that repository lock.
@@ -1651,12 +1687,12 @@ class FilesPageController internal constructor(context: Context,
         }
     }
 
-    private fun requestOperationCancel() {
+    private fun requestOperationCancel(reason: String = "user") {
         activeJobCancel?.set(true)
         cleanScanCancel?.set(true)
         updateOperation("Cancel requested; finishing the current safe step")
         events.record("operation.cancel_requested", if (cleanScanCancel != null) "Cleanup scan" else jobLabel,
-            operationId = activeJobId ?: "clean:$cleanScanId")
+            operationId = activeJobId ?: "clean:$cleanScanId", details = "Requested by $reason")
     }
 
     private fun logOperationResult(kind: String, result: io.github.alexanderwilhelmsenberg.modular.addon.files.storage.OperationResult) {
@@ -2143,6 +2179,7 @@ class FilesPageController internal constructor(context: Context,
         }
         action(actions, "Refresh", "refresh") { }
         action(actions, "Download JSON", "downloadEventLog", hostAction = "exportEventLog") { }
+        action(actions, "Share JSON", "shareEventLog", hostAction = "shareEventLog") { }
         action(actions, "Clear log", "clearEventLog") { events.clear(); eventDetailId = null; view = "eventLog" }
         if (view == "eventDetail") {
             records.firstOrNull { it.optString("id") == eventDetailId }?.let { page.put("eventDetail", it) }

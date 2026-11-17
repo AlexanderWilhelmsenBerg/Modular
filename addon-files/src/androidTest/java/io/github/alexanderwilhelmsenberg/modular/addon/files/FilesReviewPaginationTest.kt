@@ -38,6 +38,35 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun blockedBackgroundStartHandsOffAndWaitsBeforeReadingStorage() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 1)
+        val waiting = CountDownLatch(1)
+        val ready = CountDownLatch(1)
+        val controller = FilesPageController(context, repository, object : FilesOperationLifetime {
+            override fun begin(id: String, label: String) = "Android requires a visible Activity"
+            override fun awaitReady(id: String, cancel: Cancellation) {
+                waiting.countDown(); check(ready.await(5, TimeUnit.SECONDS))
+            }
+        })
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            val starting = action(controller, setup, "Start scan")
+            assertTrue(waiting.await(5, TimeUnit.SECONDS))
+            assertEquals(0, repository.scanCalls)
+            val launch = starting.getJSONObject("hostLaunch")
+            assertEquals("startOperation", launch.getString("kind"))
+            val handoff = controller.consumeHostHandoff(launch.getString("nonce"))!!
+            assertEquals("startOperation", handoff.kind)
+            assertEquals(starting.getJSONObject("activeOperation").getString("id"), handoff.documentId)
+            ready.countDown()
+            awaitView(controller, "clean")
+            assertTrue(repository.scanCalls > 0)
+        } finally { ready.countDown(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
     @Test fun queuedScanContinuesWhileAnotherScreenIsOpenAndReleasesItsLifetime() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()

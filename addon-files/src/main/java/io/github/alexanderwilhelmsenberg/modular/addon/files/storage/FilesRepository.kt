@@ -27,6 +27,9 @@ interface FilesRepository {
     fun commitStagedWrite(token: String): FileEntry
     fun cancelStagedWrite(token: String)
     fun fingerprint(id: String): String
+    /** Delete/trash reviews check identity and metadata, not file-content equality. */
+    fun identityFingerprint(id: String, cancel: Cancellation, progress: Progress): String =
+        fingerprint(id, cancel, progress)
     fun fingerprint(id: String, cancel: Cancellation, progress: Progress): String {
         check(!cancel.isCanceled()) { "Verification canceled" }
         return fingerprint(id).also { check(!cancel.isCanceled()) { "Verification canceled" } }
@@ -35,6 +38,10 @@ interface FilesRepository {
     fun createDirectory(parentId: String, name: String): FileEntry
     fun createFile(parentId: String, name: String, mimeType: String): FileEntry
     fun rename(id: String, newName: String): FileEntry
+    fun renameReviewed(id: String, newName: String, expectedIdentity: String): FileEntry {
+        check(identityFingerprint(id, Cancellation { false }, Progress { _, _, _ -> }) == expectedIdentity) { "File changed" }
+        return rename(id, newName)
+    }
     fun copyOrMove(ids: List<String>, destinationId: String, move: Boolean, collision: CollisionChoice, cancel: Cancellation = Cancellation { false }, progress: Progress = Progress { _, _, _ -> }, replacementPlans: Map<String, DeletionPlan> = emptyMap()): OperationResult
     fun prepareDeletion(ids: List<String>, cancel: Cancellation = Cancellation { false }): DeletionPlan
     fun prepareDeletion(ids: List<String>, cancel: Cancellation, progress: Progress): DeletionPlan = prepareDeletion(ids, cancel)

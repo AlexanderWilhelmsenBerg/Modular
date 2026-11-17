@@ -23,6 +23,7 @@ class FilesOperationServiceTest {
         ActivityScenario.launch(FilesActivity::class.java).use { scenario ->
             try {
                 scenario.onActivity { assertNull(lifetime.begin(id, "Test storage operation")) }
+                lifetime.awaitReady(id, io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Cancellation { false })
                 await { foreground() }
                 UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).pressHome()
                 lifetime.update(id, "Verifying item 2/4", 5, 10)

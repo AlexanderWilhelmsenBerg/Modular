@@ -57,10 +57,12 @@ class FilesEventLogUiTest {
         rule.runOnIdle {
             state.value = JSONObject().put("version", 1).put("kind", "files").put("view", "eventLog")
                 .put("items", JSONArray()).put("actions", JSONArray().put(JSONObject().put("id", "download")
-                    .put("kind", "downloadEventLog").put("label", "Download JSON"))).toString()
+                    .put("kind", "downloadEventLog").put("label", "Download JSON")).put(JSONObject().put("id", "share")
+                    .put("kind", "shareEventLog").put("label", "Share JSON"))).toString()
         }
         rule.onNodeWithTag("files.events.download").performClick()
-        rule.runOnIdle { assertEquals(listOf("download"), requests) }
+        rule.onNodeWithTag("files.events.share").performClick()
+        rule.runOnIdle { assertEquals(listOf("download", "share"), requests) }
     }
 
     @Test fun keeperChoiceShowsDatesAndCanBeSelectedDirectly() {

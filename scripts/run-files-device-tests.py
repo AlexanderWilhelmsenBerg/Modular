@@ -12,6 +12,7 @@ BASE_CLASS = "io.github.alexanderwilhelmsenberg.modular.addon.files."
 REPORT_DIR = Path("build/reports/device")
 BROAD_TESTS = (
     "FilesOperationServiceTest",
+    "FilesLogExportTest",
     "DirectStorageSafetyTest",
     "MarkdownRealDocumentTest",
     "PdfRealDocumentTest",
@@ -25,7 +26,7 @@ BROAD_TESTS = (
     "FilesHandoffNonceTest",
     "ArchiveRealStorageTest",
 )
-EXPECTED_COUNTS = {"FilesReviewPaginationTest": 21, "DirectStorageSafetyTest": 4, "FilesPageVisualFixtureTest": 2, "FilesEventLogUiTest": 5, "FilesNativeDocumentUiTest": 2}
+EXPECTED_COUNTS = {"FilesReviewPaginationTest": 22, "DirectStorageSafetyTest": 5, "FilesLogExportTest": 2, "FilesPageVisualFixtureTest": 2, "FilesEventLogUiTest": 5, "FilesNativeDocumentUiTest": 2}
 
 
 def adb(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:

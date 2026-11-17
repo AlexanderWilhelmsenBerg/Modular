@@ -274,7 +274,7 @@ fun FilesPage(
                         overflow = TextOverflow.Ellipsis)
                     actions.firstOrNull { it.kind == "cancelOperation" || it.kind == "cancel" }?.let { action ->
                         if (page.optJSONObject("activeOperation")?.optBoolean("cancelRequested") != true)
-                            FilesCleanIcon("close", "Cancel operation", "files.clean.cancel") { send(action, null) }
+                            TextButton(onClick = { send(action, null) }, modifier = Modifier.testTag("files.clean.cancel")) { Text("Stop") }
                     }
                 }
                 HorizontalDivider()
@@ -890,7 +890,7 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (scanning) actions.firstOrNull { it.kind == "cancel" }?.let { action ->
-                    FilesCleanIcon("close", "Cancel scan", "files.clean.cancel") { send(action, null) }
+                    TextButton(onClick = { send(action, null) }, modifier = Modifier.testTag("files.clean.cancel")) { Text("Stop") }
                 }
                 val menuActions = actions.filter {
                     it.kind in setOf("scan", "configureClean", "settings", "eventLog")

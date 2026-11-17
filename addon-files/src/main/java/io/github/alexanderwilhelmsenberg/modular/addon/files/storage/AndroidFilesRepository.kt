@@ -28,7 +28,8 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /** Real filesystem and DocumentsProvider implementation. IDs encode a grant key and a verified ancestry chain. */
-class AndroidFilesRepository(private val context: Context) : FilesRepository {
+class AndroidFilesRepository(private val context: Context,
+    private val contentReadObserver: (String) -> Unit = {}) : FilesRepository {
     private val resolver = context.contentResolver
     private val prefs = context.getSharedPreferences("files_storage_v1", Context.MODE_PRIVATE)
     private val totals = ConcurrentHashMap<String, DirectoryTotal>()
@@ -302,6 +303,13 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     override fun fingerprint(id: String, cancel: Cancellation, progress: Progress): String =
         fingerprint(resolve(id), cancel, progress)
 
+    override fun identityFingerprint(id: String, cancel: Cancellation, progress: Progress): String {
+        check(!cancel.isCanceled()) { "Operation canceled" }
+        val node = resolve(id)
+        progress.onProgress(0, null, "Checking ${node.name}")
+        return identityFingerprint(node)
+    }
+
     override fun scopedContent(id: String): ScopedContent {
         val node = resolve(id)
         require(!node.directory)
@@ -320,11 +328,17 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         create(parent, name, mimeType).entry()
     }
 
-    override fun rename(id: String, newName: String): FileEntry {
+    override fun rename(id: String, newName: String): FileEntry = renameWithReview(id, newName, null)
+
+    override fun renameReviewed(id: String, newName: String, expectedIdentity: String): FileEntry =
+        renameWithReview(id, newName, expectedIdentity)
+
+    private fun renameWithReview(id: String, newName: String, expectedIdentity: String?): FileEntry {
         mutationLock.lock()
         try {
         validName(newName)
         val node = resolve(id)
+        if (expectedIdentity != null) require(matchesRevision(node, expectedIdentity)) { "File changed before rename" }
         require(node.parentId != null && node.writable) { "Cannot rename this location" }
         val parent = resolve(node.parentId)
         require(children(parent).none { it.name == newName }) { "A file with that name exists" }
@@ -339,7 +353,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
             val docId = DocumentsContract.getDocumentId(newUri)
             resolve(safChildId(parent.id, docId)).entry()
         }
-        recordOperation(operation, "rename", listOf(FileOutcome(id, FileOutcome.Status.SUCCESS, node.name, renamed.id, resultFingerprint = fingerprint(renamed.id))))
+        recordOperation(operation, "rename", listOf(FileOutcome(id, FileOutcome.Status.SUCCESS, node.name, renamed.id,
+            resultFingerprint = if (expectedIdentity == null) fingerprint(renamed.id) else identityFingerprint(resolve(renamed.id)))))
         finishJournal(operation)
         return renamed
         } finally { mutationLock.unlock() }
@@ -412,7 +427,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                 errors.add("${node.relative}: provider cannot safely delete a folder if a child is added after review")
             }
             try {
-                val fp = fingerprint(node, cancel, progress)
+                progress.onProgress(0, null, "Reviewing ${manifest.size + 1} items · ${node.name}")
+                val fp = identityFingerprint(node)
                 manifest[node.id] = node.entry()
                 fingerprints[node.id] = fp
                 if (node.directory) {
@@ -451,7 +467,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                     val changed = remainingChildrenChanged(group, item.id, plan.directoryChildren, removedIds)
                     require(changed == null) { changed ?: "Folder changed" }
                     val current = resolve(item.id)
-                    require(fingerprint(current, cancel, progress) == plan.fingerprints[item.id]) { "File changed" }
+                    require(matchesRevision(current, plan.fingerprints[item.id], cancel, progress)) { "File changed" }
                     val record = trashOne(current, cancel) { n -> movedBytes += n; progress.onProgress(movedBytes, progressTotal, item.name) }
                     if (current.file != null) movedBytes += item.sizeBytes ?: 0L
                     progress.onProgress(movedBytes, progressTotal, "Moved ${item.name} to trash")
@@ -465,6 +481,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                     val changed = remainingChildrenChanged(group, item.id, plan.directoryChildren, removedIds)
                     require(changed == null) { changed ?: "Folder changed" }
                     val current = resolve(item.id)
+                    require(matchesRevision(current, plan.fingerprints[item.id], cancel, progress,
+                        directoryChildrenRemoved = true)) { "Folder identity changed" }
                     require(children(current).isEmpty()) { "Folder has new or unreviewed children" }
                     val record = trashEmptyFolder(current)
                     outcomes.add(FileOutcome(item.id, FileOutcome.Status.SUCCESS, resultingId = record.id))
@@ -583,9 +601,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                     check(!cancel.isCanceled()) { "Trash review canceled" }
                     require(seen.add(nodeIdentity(node))) { "Cyclic or repeated trash item" }
                     manifest.add(node.entry())
-                    fingerprints[node.id] = fingerprint(node, cancel, Progress { done, total, _ ->
-                        progress.onProgress(done, total, "Verifying trash ${index + 1}/${selected.size} · ${item.originalName}")
-                    })
+                    progress.onProgress(0, null, "Reviewing trash ${index + 1}/${selected.size} · ${item.originalName}")
+                    fingerprints[node.id] = identityFingerprint(node)
                     if (node.directory) children(node).forEach(::visit)
                 }
                 visit(payload)
@@ -675,7 +692,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
             "rename" -> original.outcomes.filter { it.status == FileOutcome.Status.SUCCESS }.forEach { outcome ->
                 try {
                     val current = requireNotNull(outcome.resultingId)
-                    require(fingerprint(current) == outcome.resultFingerprint) { "Renamed item changed" }
+                    require(matchesRevision(resolve(current), outcome.resultFingerprint)) { "Renamed item changed" }
                     val restored = rename(current, requireNotNull(outcome.message))
                     results.add(FileOutcome(outcome.id, FileOutcome.Status.SUCCESS, resultingId = restored.id))
                 } catch (e: Exception) { results.add(FileOutcome(outcome.id, FileOutcome.Status.FAILED, e.message)) }
@@ -927,7 +944,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
             for (item in group) {
                 check(!cancel.isCanceled()) { "Operation canceled" }
                 val node = resolveInternal(item.id)
-                if (fingerprint(node, cancel, progress) != fingerprints[item.id]) return "File or folder changed; review again"
+                if (!matchesRevision(node, fingerprints[item.id], cancel, progress)) return "File or folder changed; review again"
                 if (node.directory) actualChildren[node.id] = children(node).map { it.id }.toSet()
             }
             if (!StorageSafety.reviewedChildrenUnchanged(dirChildren.filterKeys { it in actualChildren.keys }, actualChildren)) return "Folder children changed; review again"
@@ -943,6 +960,27 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
             }
             null
         } catch (e: Exception) { e.message ?: "Folder unavailable" }
+    }
+
+    /** No file stream is opened. Local ctime also catches edits that restore mtime/size. */
+    private fun identityFingerprint(node: Node): String {
+        val stat = node.file?.let { Os.lstat(it.path) }
+        require(stat == null || !android.system.OsConstants.S_ISLNK(stat.st_mode)) { "Symbolic links cannot be deleted through a reviewed path" }
+        val objectKey = "${node.id}|${node.directory}|${stat?.st_dev}|${stat?.st_ino}|${stat?.st_mode}"
+        val metadata = if (stat == null) "${node.name}|${node.size}|${node.modified}|${node.mime}"
+            else "${stat.st_size}|${stat.st_mtim.tv_sec}:${stat.st_mtim.tv_nsec}|${stat.st_ctim.tv_sec}:${stat.st_ctim.tv_nsec}"
+        return "identity-v1:${digest(objectKey.toByteArray())}:${digest(metadata.toByteArray())}"
+    }
+
+    private fun matchesRevision(node: Node, expected: String?, cancel: Cancellation = Cancellation { false },
+        progress: Progress = Progress { _, _, _ -> }, directoryChildrenRemoved: Boolean = false): Boolean {
+        check(!cancel.isCanceled()) { "Operation canceled" }
+        if (expected == null) return false
+        if (!expected.startsWith("identity-v1:")) return fingerprint(node, cancel, progress) == expected
+        progress.onProgress(0, null, "Checking ${node.name}")
+        val actual = identityFingerprint(node)
+        return if (node.directory && directoryChildrenRemoved)
+            actual.substringBeforeLast(':') == expected.substringBeforeLast(':') else actual == expected
     }
 
     private fun fingerprint(node: Node, cancel: Cancellation = Cancellation { false },
@@ -1092,7 +1130,11 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         else require(DocumentsContract.deleteDocument(resolver, requireNotNull(node.uri))) { "Provider rejected deletion" }
     }
 
-    private fun input(node: Node): InputStream = if (node.file != null) FileInputStream(node.file) else resolver.openInputStream(requireNotNull(node.uri)) ?: error("Read unsupported")
+    private fun input(node: Node): InputStream {
+        contentReadObserver(node.name)
+        return if (node.file != null) FileInputStream(node.file)
+            else resolver.openInputStream(requireNotNull(node.uri)) ?: error("Read unsupported")
+    }
     private fun output(node: Node): OutputStream = if (node.file != null) FileOutputStream(node.file) else resolver.openOutputStream(requireNotNull(node.uri), "wt") ?: error("Write unsupported")
     private fun uniqueName(parent: Node, name: String): String {
         val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length

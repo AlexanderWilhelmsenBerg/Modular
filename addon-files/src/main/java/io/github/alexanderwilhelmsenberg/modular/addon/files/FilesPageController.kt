@@ -32,7 +32,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Module-owned page state and command router. All calls are blocking and belong on an I/O thread. */
-class FilesPageController(context: Context, private val repository: FilesRepository = createFilesRepository(context)) {
+class FilesPageController internal constructor(context: Context,
+    private val repository: FilesRepository = createFilesRepository(context),
+    private val operationLifetime: FilesOperationLifetime = FilesOperationLifetime.NONE) {
     private val app = context.applicationContext
     private val preferences = app.getSharedPreferences("files-page", Context.MODE_PRIVATE)
     private val eventPreferences = app.getSharedPreferences("files-events", Context.MODE_PRIVATE)
@@ -110,6 +112,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private val stagedDocumentWrites = mutableMapOf<String, String>()
     private val pendingSafWrites = mutableSetOf<String>()
     private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "files-worker").apply { isDaemon = true } }
+    private val commandWorker = Executors.newSingleThreadExecutor { task -> Thread(task, "files-commands").apply { isDaemon = true } }
     private val sizeWorker = Executors.newSingleThreadExecutor { task -> Thread(task, "files-size-worker").apply { isDaemon = true } }
     private val pendingTotals = mutableSetOf<String>()
     private val sizeScanRequested = mutableSetOf<String>()
@@ -117,8 +120,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private val canceledTotals = mutableSetOf<String>()
     private val computedTotals = mutableMapOf<String, DirectoryTotal>()
     private val totalErrors = mutableMapOf<String, String>()
-    private var activeJobCancel: AtomicBoolean? = null
-    private var cleanScanCancel: AtomicBoolean? = null
+    @Volatile private var activeJobCancel: AtomicBoolean? = null
+    @Volatile private var cleanScanCancel: AtomicBoolean? = null
     private var cleanScanKey: String? = null
     private var cleanScanFolderId: String? = null
     private var cleanScanFolderName: String? = null
@@ -134,6 +137,11 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private var cleanProgressFolders = 0
     private var cleanProgressFiles = 0
     @Volatile private var jobStatus = ""
+    private data class OperationDisplay(val id: String, val label: String, val startedAt: Long,
+        val status: String, val done: Long = 0, val total: Long? = null,
+        val backgroundWarning: String? = null)
+    @Volatile private var operationDisplay: OperationDisplay? = null
+    private var lastProgressEventAt = 0L
     private var activeJobId: String? = null
     private var jobLabel = ""
     private var jobBackView = "browser"
@@ -167,7 +175,61 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     }?.toMutableSet() ?: mutableSetOf(CleanerEngine.Category.NUMBERED_COPY))
     private val cleanerExcludedIds = (preferences.getStringSet("cleanExcludedIds", emptySet()) ?: emptySet()).toMutableSet()
 
-    init { events.record("files.started", "Files ${BuildConfig.VERSION_NAME} · Android ${android.os.Build.VERSION.SDK_INT}") }
+    init {
+        events.record("files.started", "Files ${BuildConfig.VERSION_NAME} · Android ${android.os.Build.VERSION.SDK_INT}")
+        preferences.getString("runningOperationId", null)?.let { id ->
+            val label = preferences.getString("runningOperationLabel", "File operation")
+            message = "$label was interrupted when the Files process stopped. Review storage before retrying."
+            events.record("operation.interrupted", message!!, "WARN", id)
+            preferences.edit().remove("runningOperationId").remove("runningOperationLabel").apply()
+        }
+    }
+
+    private fun beginOperation(id: String, label: String) {
+        message = null
+        jobStatus = label
+        lastProgressEventAt = 0
+        preferences.edit().putString("runningOperationId", id).putString("runningOperationLabel", label).commit()
+        val warning = operationLifetime.begin(id, label)
+        operationDisplay = OperationDisplay(id, label, System.currentTimeMillis(), label,
+            backgroundWarning = warning)
+        if (warning != null) events.record("operation.background_unavailable", warning, "WARN", id)
+    }
+
+    /** Progress is published without taking the page lock while storage owns its mutation lock. */
+    private fun updateOperation(status: String, done: Long = 0, total: Long? = null) {
+        val old = operationDisplay ?: return
+        operationDisplay = old.copy(status = status, done = done, total = total)
+        jobStatus = status
+        operationLifetime.update(old.id, status, done, total)
+        val now = System.currentTimeMillis()
+        if (now - lastProgressEventAt >= 5_000) {
+            lastProgressEventAt = now
+            events.record("operation.progress", status, operationId = old.id,
+                details = "bytesDone=$done; bytesTotal=${total ?: "unknown"}; elapsedMs=${now - old.startedAt}")
+        }
+    }
+
+    private fun finishOperation(id: String) {
+        if (operationDisplay?.id != id) return
+        operationLifetime.finish(id)
+        operationDisplay = null
+        preferences.edit().remove("runningOperationId").remove("runningOperationLabel").apply()
+    }
+
+    private fun operationJson(): JSONObject? = operationDisplay?.let {
+        JSONObject().put("id", it.id).put("label", it.label).put("status", it.status)
+            .put("doneBytes", it.done).put("totalBytes", it.total ?: JSONObject.NULL)
+            .put("elapsedMillis", (System.currentTimeMillis() - it.startedAt).coerceAtLeast(0))
+            .put("backgroundWarning", it.backgroundWarning)
+            .put("cancelRequested", activeJobCancel?.get() == true || cleanScanCancel?.get() == true)
+    }
+
+    internal fun cancelCurrentOperation() { requestOperationCancel() }
+
+    fun exportEventLogJson(): String = JSONObject(events.exportJson())
+        .put("appVersion", BuildConfig.VERSION_NAME).put("androidApi", android.os.Build.VERSION.SDK_INT)
+        .put("activeOperation", operationJson()).toString(2)
 
     private fun cleanKey(folder: String): String = listOf(folder, cleanerIncludeSubfolders,
         cleanerLargeMiB, cleanerOldDays, cleanerExcludedIds.sorted().joinToString("|"),
@@ -231,6 +293,19 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         events.record("ui.failed", operation, "ERROR", error = failure)
     }
 
+    /** Accept the click before its surface can be disposed; only result delivery belongs to UI. */
+    internal fun enqueueAction(request: String, position: Triple<String, Int, Int>?,
+        completed: (Result<String>) -> Unit) {
+        commandWorker.execute {
+            val result = runCatching {
+                position?.let { recordScrollPosition(it.first, it.second, it.third) }
+                performAction(request)
+            }
+            result.exceptionOrNull()?.let { recordUiFailure("Perform Files action", it) }
+            completed(result)
+        }
+    }
+
     /** Saves position without replacing page actions or triggering a page render. */
     fun recordScrollPosition(key: String, anchor: Int, offset: Int): Unit = synchronized(lock) {
         if ((view == "browser" || view == "search") && key == scrollKey()) {
@@ -275,6 +350,11 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         }
         if (command.revision != revision) {
             message = "Files changed. Review the latest page."
+            return@synchronized render(currentOffset, 100)
+        }
+        if (activeJobCancel != null && (command.destructive || command.kind in
+                setOf("create", "createFile", "rename", "paste", "move", "review", "restore", "undo"))) {
+            message = "$jobLabel is still running. Open Current operation to view progress or cancel it."
             return@synchronized render(currentOffset, 100)
         }
         if (cleanScanCancel != null && (command.destructive || command.kind in
@@ -436,14 +516,16 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             eventLogReturnView = view; view = "eventLog"
         }
         if (activeJobCancel != null || cleanScanCancel != null) {
-            page.put("activeOperation", JSONObject().put("id", activeJobId ?: "clean:$cleanScanId")
-                .put("label", if (cleanScanCancel != null) "Scanning folder" else jobLabel)
-                .put("status", jobStatus).put("cancelRequested",
-                    activeJobCancel?.get() == true || cleanScanCancel?.get() == true))
+            page.put("activeOperation", operationJson())
             if (view != "progress") action(actions, "Current operation", "showOperation") { view = "progress" }
             action(actions, "Cancel current operation", "cancelOperation") { requestOperationCancel() }
         }
-        val trash = runCatching { repository.trashSummary() }.getOrNull()
+        // Rendering progress/keeper controls must not rescan every trash sidecar on disk.
+        val trash = runCatching { repository.cachedTrashEntries()?.let { entries ->
+            io.github.alexanderwilhelmsenberg.modular.addon.files.storage.TrashSummary(
+                entries.count { !it.isDirectory }.toLong(), entries.count { it.isDirectory }.toLong(),
+                entries.sumOf { it.sizeBytes ?: 0L }, entries.count { !it.available }.toLong())
+        } ?: repository.trashSummary() }.getOrNull()
         if (trash != null) page.put("trash", JSONObject().put("fileCount", trash.fileCount)
             .put("emptyFolderCount", trash.emptyFolderCount).put("knownBytes", trash.knownBytes))
         if (view != "trash" && view != "clean" && view != "progress")
@@ -619,7 +701,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         action(actions, "Settings", "settings") { view = "settings" }
         action(actions, "History", "history") { view = "history" }
         action(actions, "Refresh", "refresh") {
-            if (cleanScanCancel == null) {
+            if (cleanScanCancel == null && activeJobCancel == null) {
                 computedTotals.remove(folder); totalErrors.remove(folder)
                 sizeScanRequested.remove(folder); canceledTotals.remove(folder)
                 repository.invalidateListing(folder)
@@ -652,7 +734,10 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         }
         val result = if (view == "search") repository.searchPage(searchRoots(folder), searchFilter(), offset, limit) else null
         val listing = if (result == null) repository.cachedListing(folder, offset, limit, sort, showHidden)
-            ?: repository.list(folder, offset, limit, sort, showHidden) else null
+            ?: if (activeJobCancel != null) {
+                page.put("summary", "Folder listing will refresh when the current operation finishes")
+                io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FilePage(emptyList(), null, 0, false)
+            } else repository.list(folder, offset, limit, sort, showHidden) else null
         val entries = result?.entries ?: listing!!.entries
         if (result != null) page.put("summary", "Search in ${if (allLocations) "all connected locations" else location.title}: ${result.totalCount ?: "many"} matches")
         if (view == "browser" && grid && entries.any { it.isDirectory &&
@@ -752,7 +837,11 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private fun renderTrash(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
         val all = if (activeJobCancel != null || cleanScanCancel != null)
             repository.cachedTrashEntries() ?: repository.trashEntries() else repository.trashEntries()
-        val summary = repository.trashSummary()
+        val summary = io.github.alexanderwilhelmsenberg.modular.addon.files.storage.TrashSummary(
+            all.count { !it.isDirectory }.toLong(), all.count { it.isDirectory }.toLong(),
+            all.sumOf { it.sizeBytes ?: 0L }, all.count { !it.available }.toLong())
+        page.put("trash", JSONObject().put("fileCount", summary.fileCount)
+            .put("emptyFolderCount", summary.emptyFolderCount).put("knownBytes", summary.knownBytes))
         page.put("summary", "${summary.fileCount} files · ${formatBytes(summary.knownBytes)} in trash")
         action(actions, "Back", "back") { view = if (folderId == null) "overview" else "browser"; selected.clear() }
         if (all.isNotEmpty()) {
@@ -761,8 +850,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                 val online = all.filter { it.available }
                 offlineTrashPending = all.size - online.size
                 if (online.isEmpty()) message = "Trash is on unavailable storage; reconnect before emptying"
-                else startJob("Preparing permanent trash review", "emptyTrashReview") { cancel, _ ->
-                    val plan = repository.prepareEmptyTrash(online.map { it.id }, cancel)
+                else startJob("Preparing permanent trash review", "emptyTrashReview") { cancel, progress ->
+                    val plan = repository.prepareEmptyTrash(online.map { it.id }, cancel, progress)
                     if (!plan.complete || plan.errors.isNotEmpty()) events.record("trash.review_incomplete",
                         "${plan.errors.size} errors prevent permanent deletion", "WARN", activeJobId,
                         details = plan.errors.take(40).joinToString("\n"))
@@ -919,8 +1008,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         action(actions, "Cancel", "cancel") { emptyTrashReview = null; view = "trash" }
         action(actions, "Back", "back") { emptyTrashReview = null; view = "trash" }
         if (plan.complete && plan.errors.isEmpty()) action(actions, "Empty permanently", "confirm", destructive = true) {
-            startJob("Emptying reviewed trash", "trash") { cancel, _ ->
-                val result = repository.emptyTrash(plan, cancel)
+            startJob("Emptying reviewed trash", "trash") { cancel, progress ->
+                val result = repository.emptyTrash(plan, cancel, progress)
                 logOperationResult("trash.empty", result)
                 synchronized(lock) { emptyTrashReview = null }
                 "Permanently removed ${result.outcomes.count { it.status.name == "SUCCESS" }} entries; ${result.outcomes.count { it.status.name != "SUCCESS" }} retained for retry"
@@ -1307,16 +1396,19 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         cleanerPlan = null
         jobReturnView = "cleanReview"
         jobStatus = "Preparing review of selected files"
+        beginOperation(operationId, jobLabel)
         cleanSetup = false
         view = "progress"
         worker.execute {
             val outcome = runCatching {
-                cleaner.prepareReview(analysis, keepers, groups, suggestions, Cancellation { cancel.get() })
+                cleaner.prepareReview(analysis, keepers, groups, suggestions, Cancellation { cancel.get() },
+                    Progress { done, total, name -> updateOperation(name, done, total) })
             }
             synchronized(lock) {
                 if (activeJobCancel !== cancel) return@synchronized
                 activeJobCancel = null
                 activeJobId = null
+                finishOperation(operationId)
                 if (!cancel.get() && outcome.isSuccess) {
                     val plan = outcome.getOrThrow()
                     if (plan.readyForReview()) cleanerPlan = plan else recordBlockedReview(plan)
@@ -1387,6 +1479,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         jobReturnView = "clean"
         jobResultView = "clean"
         jobStatus = "Scanning cleanup candidates"
+        beginOperation("clean:$scanId", "Scanning folder")
         view = "progress"
         worker.execute {
             val outcome = runCatching {
@@ -1400,7 +1493,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                                 cleanProgressWarnings.addAll(batch.coverageWarnings())
                                 cleanProgressFolders = batch.foldersScanned()
                                 cleanProgressFiles = batch.filesScanned()
-                                jobStatus = "Scanning cleanup candidates · ${batch.foldersScanned()} folders · ${batch.filesScanned()} files"
+                                updateOperation("Scanning · ${batch.foldersScanned()} folders · ${batch.filesScanned()} files")
                             }
                         }
                     })
@@ -1410,6 +1503,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
             synchronized(lock) {
                 if (cleanScanId != scanId) return@synchronized
                 cleanScanCancel = null
+                finishOperation("clean:$scanId")
                 cleanProgressEntries.clear()
                 cleanProgressGroups.clear()
                 cleanProgressSuggestions.clear()
@@ -1495,8 +1589,8 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         action(actions, "Cancel", "cancel") { cleanerPlan = null; view = "clean" }
         action(actions, "Back", "back") { cleanerPlan = null; view = "clean" }
         if (plan.readyForReview()) action(actions, "Delete", "confirm", destructive = true) {
-            startJob("Moving reviewed cleanup files to trash", "browser") { cancel, _ ->
-                val result = cleaner.executeReviewed(plan, cancel)
+            startJob("Moving reviewed cleanup files to trash", "browser") { cancel, progress ->
+                val result = cleaner.executeReviewed(plan, cancel, progress)
                 synchronized(lock) { cleanerPlan = null }
                 if (result.errors.isNotEmpty()) result.errors.joinToString("; ")
                 else "Moved ${result.trash?.outcomes?.count { it.status.name == "SUCCESS" } ?: 0} to trash; ${result.renames.count { it.status.name == "SUCCESS" }} renamed"
@@ -1522,6 +1616,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
         jobResultView = backView
         jobReturnView = returnView
         jobStatus = label
+        beginOperation(operationId, label)
         view = "progress"
         events.record("operation.started", label, operationId = operationId)
         worker.execute {
@@ -1529,13 +1624,14 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                 task(Cancellation { cancel.get() }, Progress { done, total, name ->
                     // Repository mutations hold their own lock here. Never take the
                     // page lock: a page read can be waiting for that repository lock.
-                    jobStatus = "$label · $name · ${formatBytes(done)}${total?.let { " / ${formatBytes(it)}" } ?: ""}"
+                    updateOperation(name, done, total)
                 })
             }
             synchronized(lock) {
                 if (activeJobCancel !== cancel) return@synchronized
                 activeJobCancel = null
                 activeJobId = null
+                finishOperation(operationId)
                 // Completing an old job cannot dismiss a screen opened after it.
                 jobResultView = if (outcome.isSuccess && !cancel.get()) returnView else backView
                 if (view == "progress") view = jobResultView
@@ -1558,7 +1654,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
     private fun requestOperationCancel() {
         activeJobCancel?.set(true)
         cleanScanCancel?.set(true)
-        jobStatus = "Cancel requested; finishing the current safe step"
+        updateOperation("Cancel requested; finishing the current safe step")
         events.record("operation.cancel_requested", if (cleanScanCancel != null) "Cleanup scan" else jobLabel,
             operationId = activeJobId ?: "clean:$cleanScanId")
     }
@@ -2046,6 +2142,7 @@ class FilesPageController(context: Context, private val repository: FilesReposit
                 jobResultView else eventLogReturnView
         }
         action(actions, "Refresh", "refresh") { }
+        action(actions, "Download JSON", "downloadEventLog", hostAction = "exportEventLog") { }
         action(actions, "Clear log", "clearEventLog") { events.clear(); eventDetailId = null; view = "eventLog" }
         if (view == "eventDetail") {
             records.firstOrNull { it.optString("id") == eventDetailId }?.let { page.put("eventDetail", it) }

@@ -144,10 +144,6 @@ fun FilesPage(
         if (args != null) request.put("args", args)
         onAction(request.toString())
     }
-    if (view == "eventLog" || view == "eventDetail") {
-        FilesEventLogPage(page, { send(PageAction(it), null) }, modifier)
-        return
-    }
     val openFolder: (JSONObject, PageAction, Rect) -> Unit = { item, action, bounds ->
         if (flyingFolder == null) {
             flyingFolder = FolderFlight(item.optString("id"), item.optString("name"), item.optString("subtitle"),
@@ -196,17 +192,22 @@ fun FilesPage(
                 .collect { (anchor, offset) -> latestOnScrollState(scrollKey, anchor, offset) }
         }
     }
-    LaunchedEffect(view, pageJson) {
-        if (view == "progress" || page.optBoolean("sizesCalculating")) {
-            val refresh = actions.firstOrNull {
-                it.kind == if (view == "progress") "refresh" else "sizeProgress"
-            }
-            while (refresh != null) {
+    val latestActions by rememberUpdatedState(actions)
+    val operationId = page.optJSONObject("activeOperation")?.optString("id")
+    LaunchedEffect(view, operationId, page.optBoolean("sizesCalculating")) {
+        if (view == "progress" || operationId != null || page.optBoolean("sizesCalculating")) {
+            while (true) {
                 delay(900)
                 val reload = latestOnRefresh
-                if (reload != null) reload() else send(refresh, null)
+                if (reload != null) reload() else latestActions.firstOrNull {
+                    it.kind == if (view == "browser") "sizeProgress" else "refresh"
+                }?.let { send(it, null) }
             }
         }
+    }
+    if (view == "eventLog" || view == "eventDetail") {
+        FilesEventLogPage(page, { send(PageAction(it), null) }, modifier)
+        return
     }
     if (view == "map") {
         Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -259,26 +260,30 @@ fun FilesPage(
         }
         return
     }
-    if (view == "progress" && page.optString("progressFor") == "cleanReview") {
+    if (view == "progress" && page.optString("progressFor") != "clean") {
         val back = actions.firstOrNull { it.kind == "back" }
         BackHandler(enabled = back != null) { back?.let { send(it, null) } }
-        Surface(modifier.fillMaxSize().testTag("files.clean.preparing"),
+        Surface(modifier.fillMaxSize().testTag(if (page.optString("progressFor") == "cleanReview")
+            "files.clean.preparing" else "files.operation.page"),
             color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
                 Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
                     back?.let { action -> FilesCleanIcon("back", "Back to findings", "files.clean.close") { send(action, null) } }
-                    Text("Preparing review", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    actions.firstOrNull { it.kind == "cancel" }?.let { action ->
-                        FilesCleanIcon("close", "Cancel preparation", "files.clean.cancel") { send(action, null) }
+                    Text(page.optJSONObject("activeOperation")?.optString("label") ?: page.optString("title", "Files"),
+                        Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, maxLines = 2,
+                        overflow = TextOverflow.Ellipsis)
+                    actions.firstOrNull { it.kind == "cancelOperation" || it.kind == "cancel" }?.let { action ->
+                        if (page.optJSONObject("activeOperation")?.optBoolean("cancelRequested") != true)
+                            FilesCleanIcon("close", "Cancel operation", "files.clean.cancel") { send(action, null) }
                     }
                 }
                 HorizontalDivider()
-                Row(Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(24.dp))
-                    Text("Verifying selected files before review…", Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium)
+                FilesOperationDetails(page.optJSONObject("activeOperation") ?: JSONObject()
+                    .put("status", page.optString("jobStatus")), Modifier.padding(vertical = 16.dp))
+                Text("You can leave this screen. The operation continues until it finishes or you cancel it.",
+                    style = MaterialTheme.typography.bodySmall)
+                actions.firstOrNull { it.kind == "eventLog" }?.let { action ->
+                    TextButton(onClick = { send(action, null) }) { Text("Event log") }
                 }
             }
         }
@@ -842,6 +847,34 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
     var sortMenuExpanded by remember(page.optString("folderId"), page.optString("view")) { mutableStateOf(false) }
     val back = actions.firstOrNull { it.kind == "back" }
     BackHandler(enabled = back != null) { back?.let { send(it, null) } }
+    if (issuesOpen && cleanIssues.isNotEmpty()) {
+        BackHandler { issuesOpen = false }
+        Surface(modifier.fillMaxSize().testTag("files.clean.issues.dialog"),
+            color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FilesCleanIcon("back", "Back to findings", "files.clean.issues.close") { issuesOpen = false }
+                    Text("Review issues", style = MaterialTheme.typography.titleLarge)
+                }
+                HorizontalDivider()
+                LazyColumn(Modifier.weight(1f)) {
+                    items(cleanIssues) { issue ->
+                        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                            Text(issue.optString("message"), style = MaterialTheme.typography.bodyMedium)
+                            FlowRow {
+                                issue.optJSONArray("actions").objects().map(::PageAction).forEach { action ->
+                                    TextButton(onClick = { issuesOpen = false; send(action, null) },
+                                        modifier = Modifier.testTag("files.clean.issue.${action.kind}")) { Text(action.label) }
+                                }
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
+        }
+        return
+    }
     Surface(modifier.fillMaxSize().testTag("files.clean.page"), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp),
@@ -1118,34 +1151,6 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                 }
             }
         }
-    }
-    if (issuesOpen && cleanIssues.isNotEmpty()) {
-        AlertDialog(onDismissRequest = { issuesOpen = false }, shape = RectangleShape,
-            properties = filesDialogProperties(),
-            modifier = Modifier.testTag("files.clean.issues.dialog"),
-            title = { Text("Review issues") },
-            text = {
-                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    cleanIssues.forEach { issue ->
-                        Text(issue.optString("message"), style = MaterialTheme.typography.bodyMedium)
-                        Row {
-                            issue.optJSONArray("actions").objects().map(::PageAction).forEach { action ->
-                                TextButton(onClick = { issuesOpen = false; send(action, null) },
-                                    modifier = Modifier.testTag("files.clean.issue.${action.kind}")) { Text(action.label) }
-                            }
-                        }
-                    }
-                    if (cleanIssueCount > cleanIssues.size) {
-                        Text("Review a smaller selection to see remaining issues.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }, confirmButton = {
-                TextButton(onClick = { issuesOpen = false },
-                    modifier = Modifier.testTag("files.clean.issues.close")) { Text("Close") }
-            })
     }
 }
 

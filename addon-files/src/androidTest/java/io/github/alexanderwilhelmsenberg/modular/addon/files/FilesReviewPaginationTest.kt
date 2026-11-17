@@ -38,13 +38,54 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun queuedScanContinuesWhileAnotherScreenIsOpenAndReleasesItsLifetime() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 105)
+        val release = CountDownLatch(1)
+        repository.scanRelease = release
+        val began = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        val lifetime = object : FilesOperationLifetime {
+            override fun begin(id: String, label: String): String? { began.countDown(); return null }
+            override fun finish(id: String) { finished.countDown() }
+        }
+        val controller = FilesPageController(context, repository, lifetime)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            val commands = setup.getJSONArray("actions")
+            val scan = (0 until commands.length()).map { commands.getJSONObject(it) }.single { it.getString("kind") == "scan" }
+            val delivered = CountDownLatch(1)
+            controller.enqueueAction(JSONObject().put("version", 1).put("actionId", scan.getString("id"))
+                .put("operationToken", UUID.randomUUID().toString()).toString(), null) {
+                assertTrue(it.isSuccess); delivered.countDown()
+            }
+            assertTrue(delivered.await(5, TimeUnit.SECONDS))
+            assertTrue(began.await(5, TimeUnit.SECONDS))
+            assertTrue(repository.scanSecondPage.await(5, TimeUnit.SECONDS))
+            val progress = page(controller)
+            assertTrue(progress.getInt("filesScanned") >= 100)
+            assertTrue(progress.has("activeOperation"))
+            val log = action(controller, progress, "Event log")
+            assertEquals("eventLog", log.getString("view"))
+            assertTrue(log.has("activeOperation"))
+            release.countDown()
+            assertTrue(finished.await(5, TimeUnit.SECONDS))
+            val completed = page(controller)
+            assertEquals("eventLog", completed.getString("view"))
+            assertFalse(completed.has("activeOperation"))
+            assertFalse(context.getSharedPreferences("files-page", 0).contains("runningOperationId"))
+        } finally { release.countDown(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
     @Test fun reviewSelectedResolvesEveryKeeperWithoutDroppingOtherSelections() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
         val repository = ReviewFixtureRepository(itemCount = 0)
         for (name in listOf("alpha", "beta", "gamma")) {
             repository.files.add(FileEntry("$name-base", "test-volume", "root", "$name.txt", "$name.txt",
-                false, "text/plain", 12, 1, null, true, true))
+                false, "text/plain", 12, if (name == "gamma") 1 else 2, null, true, true))
             repository.files.add(FileEntry("$name-copy", "test-volume", "root", "$name (1).txt", "$name (1).txt",
                 false, "text/plain", 12, if (name == "gamma") 2 else 1, null, true, true))
         }
@@ -87,7 +128,7 @@ class FilesReviewPaginationTest {
         val repository = ReviewFixtureRepository(itemCount = 0)
         for (name in listOf("alpha", "beta")) for ((suffix, label) in listOf("base" to "$name.txt", "copy" to "$name (1).txt")) {
             repository.files.add(FileEntry("$name-$suffix", "test-volume", "root", label, label,
-                false, "text/plain", 12, 1, null, true, true))
+                false, "text/plain", 12, if (suffix == "base") 2 else 1, null, true, true))
         }
         val controller = FilesPageController(context, repository)
         controller.addedLocation("test-volume")
@@ -253,7 +294,15 @@ class FilesReviewPaginationTest {
             assertEquals(0, repository.fingerprintCalls)
             assertEquals(0, repository.moveCalls)
 
-            val cleared = action(controller, blocked, "Clear selection")
+            val issue = blocked.getJSONArray("cleanIssues").getJSONObject(0)
+            val choose = rowAction(controller, issue, "Choose keeper")
+            assertEquals("keeper", choose.getString("view"))
+            assertEquals(0, repository.fingerprintCalls)
+            val returned = action(controller, choose, "Back to Clean")
+            val exclude = rowAction(controller, returned.getJSONArray("cleanIssues").getJSONObject(0), "Exclude group")
+            assertEquals(1, exclude.getInt("cleanSelectionCount"))
+            assertEquals(0, repository.fingerprintCalls)
+            val cleared = action(controller, exclude, "Clear selection")
             assertEquals(0, cleared.getInt("cleanSelectionCount"))
             val safeOnly = (0 until cleared.getJSONArray("items").length())
                 .map { cleared.getJSONArray("items").getJSONObject(it) }
@@ -280,7 +329,7 @@ class FilesReviewPaginationTest {
         val repository = ReviewFixtureRepository(itemCount = 0)
         fun fixture(id: String, parent: String, name: String, directory: Boolean) = FileEntry(
             id, "test-volume", parent, name, "$parent/$name", directory,
-            if (directory) null else "text/plain", null, 1, null, true, true)
+            if (directory) null else "text/plain", null, if (id == "kept") 2 else 1, null, true, true)
         repository.files.add(fixture("kept", "root", "archive", true))
         repository.files.add(fixture("removed", "root", "archive (1)", true))
         repository.files.add(fixture("kept-file", "kept", "notes.txt", false))

@@ -5,5 +5,6 @@ import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.createFiles
 
 class FilesApplication : Application() {
     val repository by lazy { createFilesRepository(this) }
-    val pageController by lazy { FilesPageController(this, repository) }
+    internal val operationLifetime by lazy { AndroidFilesOperationLifetime(this) }
+    val pageController by lazy { FilesPageController(this, repository, operationLifetime) }
 }

@@ -23,6 +23,53 @@ import org.junit.runner.RunWith
 /** Real direct-storage operations, scoped to a unique folder created by this test. */
 @RunWith(AndroidJUnit4::class)
 class DirectStorageSafetyTest {
+    @Test fun cleanerShowsCancellableProgressAndSafelyKeepsTheHighestCopyWithAYearInItsName() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "ModularFilesCleaner-${UUID.randomUUID()}"
+        val fixture = File(Environment.getExternalStorageDirectory(), name)
+        val repository = createFilesRepository(context)
+        try {
+            val root = repository.locations().single { it.kind == StorageLocation.Kind.PHONE }
+            val directory = repository.createDirectory(root.rootId, name)
+            val labels = listOf("guide (2017).txt", "guide (2017)(3).txt", "guide (2017)(18).txt")
+            val entries = labels.map { repository.createFile(directory.id, it, "text/plain") }
+            labels.forEachIndexed { index, label ->
+                File(fixture, label).apply {
+                    writeBytes(ByteArray(256 * 1024) { (index + 1).toByte() })
+                    assertTrue(setLastModified(1_700_000_000_000L + index * 10_000L))
+                }
+            }
+            val canceled = java.util.concurrent.atomic.AtomicBoolean(false)
+            var observed = 0L
+            assertTrue(runCatching { repository.fingerprint(entries.last().id, Cancellation { canceled.get() },
+                Progress { done, _, _ -> observed = done; if (done > 0) canceled.set(true) }) }.isFailure)
+            assertTrue(observed > 0)
+            assertTrue(File(fixture, labels.last()).exists())
+            val options = io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerEngine.Options(
+                directory.id, true, emptySet(), emptySet(), 512L * 1024 * 1024, 90,
+                java.time.Instant.now(), setOf(io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerEngine.Category.NUMBERED_COPY))
+            val adapter = io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerRepositoryAdapter(repository, context)
+            val analysis = adapter.analyze(adapter.snapshot(directory.id, progressiveOptions = options), options)
+            val group = analysis.groups().single()
+            assertFalse(group.requiresKeeperChoice())
+            assertEquals(entries.last().id, group.suggestedKeeperId())
+            var progressCalls = 0
+            val progress = Progress { _, _, _ -> progressCalls++ }
+            val plan = adapter.prepareReview(analysis, emptyMap(), setOf(group.id()), emptySet(),
+                Cancellation { false }, progress)
+            assertTrue(plan.blockers().toString(), plan.readyForReview())
+            val result = adapter.executeReviewed(plan, Cancellation { false }, progress)
+            assertTrue(result.errors.toString(), result.errors.isEmpty())
+            assertTrue(progressCalls > 0)
+            assertEquals(setOf("guide (2017).txt"), fixture.listFiles()!!.map { it.name }.toSet())
+            assertEquals(3.toByte(), File(fixture, "guide (2017).txt").readBytes()[0])
+        } finally {
+            val own = repository.trashEntries().filter { it.originalPath.startsWith("$name/") }
+            if (own.isNotEmpty()) repository.emptyTrash(repository.prepareEmptyTrash(own.map { it.id }))
+            fixture.deleteRecursively()
+        }
+    }
+
     @Test fun emptyTrashRemovesReviewedNestedFolderAndKeepsUnreviewedFiles() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "ModularFilesEmpty-${UUID.randomUUID()}"

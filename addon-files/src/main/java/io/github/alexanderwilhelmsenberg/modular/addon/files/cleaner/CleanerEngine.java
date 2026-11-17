@@ -437,24 +437,40 @@ public final class CleanerEngine {
     }
     private static void detectNumbered(Collection<Entry> entries, List<Group> groups) {
         Map<String, List<Entry>> siblings = new LinkedHashMap<>();
+        Map<String, String> baseNames = new HashMap<>();
         for (Entry entry : entries) {
             CopyName copy = copyName(entry);
-            siblings.computeIfAbsent(entry.volumeId() + "|" + entry.parentId() + "|" + entry.kind() + "|" + copy.base(), ignored -> new ArrayList<>()).add(entry);
+            String key = entry.volumeId() + "|" + entry.parentId() + "|" + entry.kind() + "|" + copy.base();
+            siblings.computeIfAbsent(key, ignored -> new ArrayList<>()).add(entry);
+            baseNames.put(key, copy.base());
         }
-        for (List<Entry> members : siblings.values()) {
-            if (members.size() < 2 || members.stream().noneMatch(e -> copyName(e).number().signum() > 0)) continue;
-            Entry highest = members.stream().max(Comparator.comparing(e -> copyName(e).number())).orElseThrow();
-            BigInteger max = copyName(highest).number();
-            boolean uniqueHighest = members.stream().filter(e -> copyName(e).number().equals(max)).count() == 1;
-            boolean allDates = members.stream().allMatch(e -> e.modified() != null);
-            Entry newest = allDates ? members.stream().max(Comparator.comparing(Entry::modified)).orElseThrow() : null;
-            boolean uniqueNewest = allDates && members.stream().filter(e -> e.modified().equals(newest.modified())).count() == 1;
-            boolean agrees = uniqueHighest && uniqueNewest && highest.id().equals(newest.id());
-            String evidence = agrees ? "Highest numeric copy and uniquely newest modification time agree"
-                    : "Copy number and modification evidence conflict, tie, or are unavailable; choose which to keep";
+        // A literal base filename may itself end in a number (a book's publication year,
+        // for example). Include it in the family of its numbered downloads as well.
+        Map<String, Entry> byLiteralName = new HashMap<>();
+        for (Entry entry : entries) byLiteralName.put(entry.volumeId() + "|" + entry.parentId()
+                + "|" + entry.kind() + "|" + entry.name(), entry);
+        for (Map.Entry<String, List<Entry>> family : siblings.entrySet()) {
+            Entry literal = byLiteralName.get(family.getKey());
+            if (literal != null && family.getValue().stream().noneMatch(e -> e.id().equals(literal.id())))
+                family.getValue().add(literal);
+        }
+        for (Map.Entry<String, List<Entry>> family : siblings.entrySet()) {
+            List<Entry> members = family.getValue();
+            String base = baseNames.get(family.getKey());
+            java.util.function.Function<Entry, BigInteger> number = e -> e.name().equals(base)
+                    ? BigInteger.ZERO : copyName(e).number();
+            if (members.size() < 2 || members.stream().noneMatch(e -> number.apply(e).signum() > 0)) continue;
+            Entry highest = members.stream().max(Comparator.comparing(number)).orElseThrow();
+            BigInteger max = number.apply(highest);
+            boolean uniqueHighest = members.stream().filter(e -> number.apply(e).equals(max)).count() == 1;
+            boolean lowerCopyIsNewer = highest.modified() != null && members.stream().anyMatch(e ->
+                    e.modified() != null && e.modified().isAfter(highest.modified()));
+            boolean agrees = uniqueHighest && !lowerCopyIsNewer;
+            String evidence = agrees ? "Keep highest numbered copy; no newer lower-numbered copy found"
+                    : "A lower-numbered copy is newer, or the highest copy number is ambiguous; choose which to keep";
             groups.add(new Group(groupId(Category.NUMBERED_COPY, members), Category.NUMBERED_COPY,
                     members.stream().map(Entry::id).collect(Collectors.toList()), agrees ? highest.id() : null,
-                    !agrees, copyName(highest).base(), evidence));
+                    !agrees, base, evidence));
         }
     }
     private record VersionName(String product, String extension, String variant, Version version) {}

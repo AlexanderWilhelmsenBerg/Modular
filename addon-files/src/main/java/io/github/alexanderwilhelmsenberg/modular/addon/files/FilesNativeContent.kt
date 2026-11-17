@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -58,6 +59,12 @@ internal fun FilesNativeContent(
     val ioMutex = remember { Mutex() }
     var page by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var pendingActions by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var showPendingAction by remember { mutableStateOf(false) }
+    LaunchedEffect(pendingActions > 0) {
+        showPendingAction = false
+        if (pendingActions > 0) { delay(200); showPendingAction = true }
+    }
     val scroll = remember { ScrollSaveState() }
     val reloadRunning = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     val pageUpdates = remember { FilesPageRequestGate() }
@@ -93,24 +100,19 @@ internal fun FilesNativeContent(
 
     fun performAction(request: String) {
         val ticket = pageUpdates.beginAction()
+        pendingActions++
         scroll.job?.cancel()
         val position = scroll.pending
-        scope.launch {
-            try {
-            val result = withContext(Dispatchers.IO) {
-                ioMutex.withLock {
-                    runCatching {
-                        position?.let { controller.recordScrollPosition(it.first, it.second, it.third) }
-                        controller.performAction(request)
-                    }
-                }
-            }
+        controller.enqueueAction(request, position) { result ->
+            pageUpdates.endAction()
+            scope.launch {
+            pendingActions = (pendingActions - 1).coerceAtLeast(0)
             result.onSuccess { response ->
                 if (pageUpdates.mayApply(ticket)) { page = response; error = null }
                 JSONObject(response).optJSONObject("hostLaunch")?.optString("nonce")
                     ?.takeIf { it.isNotBlank() }?.let(onHostLaunch)
-            }.onFailure { reportFailure("Perform Files action", it, "Files action failed", pageUpdates.mayApply(ticket)) }
-            } finally { pageUpdates.endAction() }
+            }.onFailure { if (pageUpdates.mayApply(ticket)) error = it.message ?: "Files action failed" }
+            }
         }
     }
 
@@ -229,6 +231,7 @@ internal fun FilesNativeContent(
                     Button(onClick = ::load) { Text("Refresh Files") }
                 }
             }
+            if (showPendingAction) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
     }
 }

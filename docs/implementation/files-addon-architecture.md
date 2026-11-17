@@ -42,6 +42,35 @@ Long scans run away from Compose and Binder response paths. Progress and explici
 cancellation keep navigation responsive. Cached folder analysis is separate from
 manual cleanup and cannot imply that cleanup candidates were selected.
 
+Files 0.1.3 accepts commands on a controller-owned queue, so disposing a Compose
+surface does not cancel an accepted click. Scans, review preparation, and storage
+jobs hold a `dataSync` foreground service with an ongoing progress/cancel
+notification and a bounded wake lock. Screen navigation never requests operation
+cancellation. Android foreground-start failures are logged and displayed; OS
+timeouts request cancellation. Process death is reported from a persisted running
+marker on restart and never replays destructive work automatically.
+
+Progress publishes the current verification/mutation step, byte count when known,
+and elapsed time, without taking the page lock from a repository callback. Page
+rendering uses cached trash metadata; active mutations use display-only folder
+snapshots. Reviewed execution validates only its manifest, reviewed directory
+children, and rename destinations, then reuses that verified manifest for trash
+instead of walking unrelated subtrees and hashing a second deletion plan. The
+repository still checks fingerprints and directory children before mutation.
+
+Numbered-copy suggestions prefer the highest number unless a known modification
+date shows a lower-numbered entry is newer, or the highest number is ambiguous.
+Equal or absent dates do not force a choice. Literal base names containing a year,
+such as `guide (2017).pdf`, remain members of their numbered-copy family and keep
+their year when renamed. Suggestions still require reviewed confirmation.
+
+The Event log's Download JSON action opens Android's save-document picker and
+exports every retained entry and detail, plus app/Android version and current
+operation progress. The clipboard/share preview remains capped at 32,000
+characters; JSON has no preview truncation. The bounded log retains at most 200
+events / 192,000 encoded bytes. Neither export includes file contents or action
+tokens.
+
 ## Delivery and verification
 
 Root coordinates serial unit, Android compilation, lint, and APK assembly checks.

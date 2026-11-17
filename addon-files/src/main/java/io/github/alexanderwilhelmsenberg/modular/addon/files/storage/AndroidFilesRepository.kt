@@ -110,13 +110,14 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         pageFor(all, offset, limit, sort, showHidden)
     }
 
-    override fun cachedListing(folderId: String, offset: Int, limit: Int, sort: FileSort, showHidden: Boolean): FilePage? = mutationLock.withLock {
+    override fun cachedListing(folderId: String, offset: Int, limit: Int, sort: FileSort, showHidden: Boolean): FilePage? {
         require(offset >= 0 && limit in 1..maxPage)
         // The original location and folder must still be accessible before showing saved entries.
-        val node = runCatching { resolve(folderId) }.getOrNull() ?: return@withLock null
-        if (!node.directory) return@withLock null
-        val snapshot = listingCache.read(folderId, System.currentTimeMillis(), cachedListingAgeMillis) ?: return@withLock null
-        pageFor(snapshot.entries, offset, limit, sort, showHidden)
+        val node = runCatching { resolve(folderId) }.getOrNull() ?: return null
+        if (!node.directory) return null
+        val snapshot = listingCache.read(folderId, System.currentTimeMillis(),
+            if (mutationLock.isLocked) Long.MAX_VALUE else cachedListingAgeMillis) ?: return null
+        return pageFor(snapshot.entries, offset, limit, sort, showHidden)
     }
 
     override fun invalidateListing(folderId: String) = mutationLock.withLock {
@@ -298,6 +299,9 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         return fingerprint(node)
     }
 
+    override fun fingerprint(id: String, cancel: Cancellation, progress: Progress): String =
+        fingerprint(resolve(id), cancel, progress)
+
     override fun scopedContent(id: String): ScopedContent {
         val node = resolve(id)
         require(!node.directory)
@@ -387,7 +391,10 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         } finally { mutationLock.unlock() }
     }
 
-    override fun prepareDeletion(ids: List<String>, cancel: Cancellation): DeletionPlan {
+    override fun prepareDeletion(ids: List<String>, cancel: Cancellation): DeletionPlan =
+        prepareDeletion(ids, cancel, Progress { _, _, _ -> })
+
+    override fun prepareDeletion(ids: List<String>, cancel: Cancellation, progress: Progress): DeletionPlan {
         val roots = ArrayList<FileEntry>()
         val manifest = LinkedHashMap<String, FileEntry>()
         val fingerprints = LinkedHashMap<String, String>()
@@ -405,7 +412,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                 errors.add("${node.relative}: provider cannot safely delete a folder if a child is added after review")
             }
             try {
-                val fp = fingerprint(node)
+                val fp = fingerprint(node, cancel, progress)
                 manifest[node.id] = node.entry()
                 fingerprints[node.id] = fp
                 if (node.directory) {
@@ -431,7 +438,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         val progressTotal = plan.totalKnownBytes.takeIf { plan.descendants.all { it.isDirectory || it.sizeBytes != null } }
         for (group in groups) {
             if (cancel.isCanceled()) { group.forEach { outcomes.add(FileOutcome(it.id, FileOutcome.Status.CANCELED)) }; continue }
-            val error = validateGroup(group, plan.fingerprints, plan.directoryChildren)
+            progress.onProgress(0, null, "Verifying ${group.firstOrNull()?.name ?: "reviewed files"}")
+            val error = validateGroup(group, plan.fingerprints, plan.directoryChildren, cancel, progress)
             if (error != null) { group.forEach { outcomes.add(FileOutcome(it.id, FileOutcome.Status.CHANGED, error)) }; continue }
             val files = group.filter { !it.isDirectory }.sortedByDescending { it.relativePath.length }
             var failed = false
@@ -443,8 +451,10 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                     val changed = remainingChildrenChanged(group, item.id, plan.directoryChildren, removedIds)
                     require(changed == null) { changed ?: "Folder changed" }
                     val current = resolve(item.id)
-                    require(fingerprint(current) == plan.fingerprints[item.id]) { "File changed" }
+                    require(fingerprint(current, cancel, progress) == plan.fingerprints[item.id]) { "File changed" }
                     val record = trashOne(current, cancel) { n -> movedBytes += n; progress.onProgress(movedBytes, progressTotal, item.name) }
+                    if (current.file != null) movedBytes += item.sizeBytes ?: 0L
+                    progress.onProgress(movedBytes, progressTotal, "Moved ${item.name} to trash")
                     outcomes.add(FileOutcome(item.id, FileOutcome.Status.SUCCESS, resultingId = record.id))
                     removedIds.add(item.id)
                 } catch (e: Exception) { failed = true; outcomes.add(FileOutcome(item.id, FileOutcome.Status.FAILED, e.message)) }
@@ -553,13 +563,17 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     override fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan = prepareEmptyTrash(ids, Cancellation { false })
 
     override fun prepareEmptyTrash(ids: List<String>, cancel: Cancellation): EmptyTrashPlan {
+        return prepareEmptyTrash(ids, cancel, Progress { _, _, _ -> })
+    }
+
+    override fun prepareEmptyTrash(ids: List<String>, cancel: Cancellation, progress: Progress): EmptyTrashPlan {
         check(!cancel.isCanceled()) { "Trash review canceled" }
         val selected = trashEntries().filter { it.id in ids.toSet() }
         val errors = selected.filter { !it.available }.map { "${it.originalPath}: storage unavailable" }.toMutableList()
         ids.distinct().filter { wanted -> selected.none { it.id == wanted } }.forEach { errors.add("$it: trash entry missing") }
         val manifest = ArrayList<FileEntry>()
         val fingerprints = LinkedHashMap<String, String>()
-        selected.filter { it.available }.forEach { item ->
+        selected.filter { it.available }.forEachIndexed { index, item ->
             check(!cancel.isCanceled()) { "Trash review canceled" }
             try {
                 val payload = locatePayload(item) ?: error("Payload missing")
@@ -569,7 +583,9 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                     check(!cancel.isCanceled()) { "Trash review canceled" }
                     require(seen.add(nodeIdentity(node))) { "Cyclic or repeated trash item" }
                     manifest.add(node.entry())
-                    fingerprints[node.id] = fingerprint(node, cancel)
+                    fingerprints[node.id] = fingerprint(node, cancel, Progress { done, total, _ ->
+                        progress.onProgress(done, total, "Verifying trash ${index + 1}/${selected.size} · ${item.originalName}")
+                    })
                     if (node.directory) children(node).forEach(::visit)
                 }
                 visit(payload)
@@ -579,18 +595,23 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     }
 
     override fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation): OperationResult {
+        return emptyTrash(plan, cancel, Progress { _, _, _ -> })
+    }
+
+    override fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation, progress: Progress): OperationResult {
         mutationLock.lock()
         try {
         require(plan.complete) { "Incomplete trash review" }
         val operation = UUID.randomUUID().toString()
         startJournal(operation, "emptyTrash", plan.entries.map { it.id }, null)
         val outcomes = ArrayList<FileOutcome>()
-        for (record in plan.entries) {
+        for ((index, record) in plan.entries.withIndex()) {
+            progress.onProgress(0, null, "Emptying trash ${index + 1}/${plan.entries.size} · ${record.originalName}")
             if (cancel.isCanceled()) { outcomes.add(FileOutcome(record.id, FileOutcome.Status.CANCELED)); continue }
             try {
                 val payload = locatePayload(record) ?: error("Storage unavailable")
                 val covered = plan.descendants.filter { it.id == payload.id || it.relativePath.startsWith(payload.relative.trimEnd('/') + "/") }
-                val error = validateGroup(covered, plan.fingerprints, covered.filter { it.isDirectory }.associate { folder -> folder.id to covered.filter { it.parentId == folder.id }.map { it.id }.toSet() }, cancel)
+                val error = validateGroup(covered, plan.fingerprints, covered.filter { it.isDirectory }.associate { folder -> folder.id to covered.filter { it.parentId == folder.id }.map { it.id }.toSet() }, cancel, progress)
                 require(error == null) { error ?: "Changed" }
                 covered.sortedWith(compareBy<FileEntry> { it.isDirectory }.thenByDescending { it.relativePath.length }).forEach { item ->
                     check(!cancel.isCanceled()) { "Empty trash canceled; remaining entries retained" }
@@ -900,13 +921,13 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     }
 
     private fun validateGroup(group: List<FileEntry>, fingerprints: Map<String, String>, dirChildren: Map<String, Set<String>>,
-        cancel: Cancellation = Cancellation { false }): String? {
+        cancel: Cancellation = Cancellation { false }, progress: Progress = Progress { _, _, _ -> }): String? {
         return try {
             val actualChildren = LinkedHashMap<String, Set<String>>()
             for (item in group) {
                 check(!cancel.isCanceled()) { "Operation canceled" }
                 val node = resolveInternal(item.id)
-                if (fingerprint(node, cancel) != fingerprints[item.id]) return "File or folder changed; review again"
+                if (fingerprint(node, cancel, progress) != fingerprints[item.id]) return "File or folder changed; review again"
                 if (node.directory) actualChildren[node.id] = children(node).map { it.id }.toSet()
             }
             if (!StorageSafety.reviewedChildrenUnchanged(dirChildren.filterKeys { it in actualChildren.keys }, actualChildren)) return "Folder children changed; review again"
@@ -924,17 +945,21 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         } catch (e: Exception) { e.message ?: "Folder unavailable" }
     }
 
-    private fun fingerprint(node: Node, cancel: Cancellation = Cancellation { false }): String {
+    private fun fingerprint(node: Node, cancel: Cancellation = Cancellation { false },
+        progress: Progress = Progress { _, _, _ -> }): String {
         val identity = node.file?.let { file -> runCatching { val stat = Os.stat(file.path); "${stat.st_dev}:${stat.st_ino}" }.getOrNull() }
         val metadata = "${node.id}|${node.name}|${node.directory}|${node.size}|${node.modified}|${node.mime}|$identity"
-        return digest(metadata.toByteArray() + if (node.directory) byteArrayOf() else digest(input(node), cancel).toByteArray())
+        progress.onProgress(0, if (node.directory) null else node.size, "Verifying ${node.name}")
+        return digest(metadata.toByteArray() + if (node.directory) byteArrayOf() else digest(input(node), cancel) { done ->
+            progress.onProgress(done, node.size, "Verifying ${node.name}")
+        }.toByteArray())
     }
 
     private fun trashOne(node: Node, cancel: Cancellation, progress: (Long) -> Unit): TrashEntry {
         val folder = ensureTrash(node.root)
         val uuid = UUID.randomUUID().toString()
         val payloadName = "$uuid.payload"
-        val expectedFingerprint = if (node.file == null) fingerprint(node) else null
+        val expectedFingerprint = if (node.file == null) fingerprint(node, cancel) else null
         val record = trashJson(uuid, node, payloadName)
         writeMeta(folder, uuid, record) // Recovery identity is on the same storage before any source removal.
         var payload: Node? = null
@@ -947,12 +972,12 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                 resolveInternal(directChildId(folder.id, payloadName))
             } else {
                 val copy = copyNode(node, folder, CollisionChoice.SKIP, cancel, progress, payloadName) ?: error("Trash collision")
-                require(fingerprint(node) == expectedFingerprint) { "Source changed during trash copy" }
+                require(fingerprint(node, cancel) == expectedFingerprint) { "Source changed during trash copy" }
                 copy
             }
             if (node.file == null) {
                 // The copied payload has been verified, metadata is durable, and source still exists.
-                require(fingerprint(node) == expectedFingerprint) { "Source changed before trash removal" }
+                require(fingerprint(node, cancel) == expectedFingerprint) { "Source changed before trash removal" }
                 deleteExact(node)
                 sourceDeleted = true
             }
@@ -1085,12 +1110,16 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     private fun encode(value: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray(Charsets.UTF_8))
     private fun decode(value: String): String = String(Base64.getUrlDecoder().decode(value), Charsets.UTF_8)
     private fun digest(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
-    private fun digest(input: InputStream, cancel: Cancellation = Cancellation { false }): String = input.use { stream ->
+    private fun digest(input: InputStream, cancel: Cancellation = Cancellation { false },
+        progress: (Long) -> Unit = {}): String = input.use { stream ->
         val md = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(128 * 1024)
+        var done = 0L
         while (true) {
             check(!cancel.isCanceled()) { "Operation canceled" }
             val count = stream.read(buffer); if (count < 0) break; md.update(buffer, 0, count)
+            done += count
+            progress(done)
         }
         md.digest().toHex()
     }

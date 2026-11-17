@@ -33,7 +33,9 @@ internal fun FilesEventLogPage(page: JSONObject, send: (JSONObject) -> Unit, mod
             }
             Text("Stored on this device. Logs may contain filenames; review before sharing.",
                 style = MaterialTheme.typography.bodySmall)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                action("downloadEventLog")?.let { TextButton(onClick = { send(it) },
+                    modifier = Modifier.testTag("files.events.download")) { Text("Download JSON") } }
                 TextButton(onClick = {
                     context.getSystemService(ClipboardManager::class.java)
                         ?.setPrimaryClip(ClipData.newPlainText("Modular Files event log", page.optString("eventLogText")))
@@ -86,7 +88,8 @@ internal fun FilesActiveOperation(page: JSONObject, send: (JSONObject) -> Unit) 
     val operation = page.optJSONObject("activeOperation") ?: return
     val actions = page.optJSONArray("actions")
     Column(Modifier.fillMaxWidth().testTag("files.operation.active")) {
-        Text(operation.optString("status"), style = MaterialTheme.typography.bodySmall)
+        Text(operation.optString("label"), style = MaterialTheme.typography.titleSmall)
+        FilesOperationDetails(operation)
         Row {
             for (index in 0 until (actions?.length() ?: 0)) {
                 val action = actions?.optJSONObject(index) ?: continue
@@ -95,6 +98,30 @@ internal fun FilesActiveOperation(page: JSONObject, send: (JSONObject) -> Unit) 
                         !operation.optBoolean("cancelRequested")) { Text(action.optString("label")) }
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun FilesOperationDetails(operation: JSONObject, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val status = operation.optString("status")
+        if (status.isNotBlank() && status != operation.optString("label"))
+            Text(status, style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.testTag("files.operation.status"))
+        val done = operation.optLong("doneBytes").coerceAtLeast(0)
+        val total = operation.optLong("totalBytes", -1).takeIf { !operation.isNull("totalBytes") && it > 0 }
+        if (total != null) LinearProgressIndicator(progress = { (done.toDouble() / total).toFloat().coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth().testTag("files.operation.progress"))
+        else LinearProgressIndicator(Modifier.fillMaxWidth().testTag("files.operation.progress"))
+        val context = LocalContext.current
+        val elapsed = operation.optLong("elapsedMillis") / 1_000
+        val bytes = if (total != null) "${android.text.format.Formatter.formatShortFileSize(context, done)} / " +
+            android.text.format.Formatter.formatShortFileSize(context, total) + " · ${(done.toDouble() / total * 100).toInt().coerceIn(0, 100)}%"
+            else if (done > 0) android.text.format.Formatter.formatShortFileSize(context, done) else "Working"
+        Text("$bytes · ${elapsed / 60}m ${elapsed % 60}s", style = MaterialTheme.typography.bodySmall)
+        operation.optString("backgroundWarning").takeIf { it.isNotBlank() }?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

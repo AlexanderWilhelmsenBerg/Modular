@@ -27,12 +27,17 @@ interface FilesRepository {
     fun commitStagedWrite(token: String): FileEntry
     fun cancelStagedWrite(token: String)
     fun fingerprint(id: String): String
+    fun fingerprint(id: String, cancel: Cancellation, progress: Progress): String {
+        check(!cancel.isCanceled()) { "Verification canceled" }
+        return fingerprint(id).also { check(!cancel.isCanceled()) { "Verification canceled" } }
+    }
     fun scopedContent(id: String): ScopedContent
     fun createDirectory(parentId: String, name: String): FileEntry
     fun createFile(parentId: String, name: String, mimeType: String): FileEntry
     fun rename(id: String, newName: String): FileEntry
     fun copyOrMove(ids: List<String>, destinationId: String, move: Boolean, collision: CollisionChoice, cancel: Cancellation = Cancellation { false }, progress: Progress = Progress { _, _, _ -> }, replacementPlans: Map<String, DeletionPlan> = emptyMap()): OperationResult
     fun prepareDeletion(ids: List<String>, cancel: Cancellation = Cancellation { false }): DeletionPlan
+    fun prepareDeletion(ids: List<String>, cancel: Cancellation, progress: Progress): DeletionPlan = prepareDeletion(ids, cancel)
     /** Refuses incomplete or changed plans. Never falls back to permanent deletion. */
     fun moveToTrash(plan: DeletionPlan, cancel: Cancellation = Cancellation { false }, progress: Progress = Progress { _, _, _ -> }): OperationResult
     fun trashEntries(): List<TrashEntry>
@@ -45,7 +50,9 @@ interface FilesRepository {
         check(!cancel.isCanceled()) { "Trash review canceled" }
         return prepareEmptyTrash(ids).also { check(!cancel.isCanceled()) { "Trash review canceled" } }
     }
+    fun prepareEmptyTrash(ids: List<String>, cancel: Cancellation, progress: Progress): EmptyTrashPlan = prepareEmptyTrash(ids, cancel)
     fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation = Cancellation { false }): OperationResult
+    fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation, progress: Progress): OperationResult = emptyTrash(plan, cancel)
     fun history(): List<OperationHistoryEntry>
     fun clearHistory()
     /** Revalidates both sides; supports the latest successful rename, move, or trash action. */

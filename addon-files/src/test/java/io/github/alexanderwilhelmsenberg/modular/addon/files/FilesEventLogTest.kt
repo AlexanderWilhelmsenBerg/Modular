@@ -35,4 +35,14 @@ class FilesEventLogTest {
         assertEquals(1, log.snapshot().size)
         assertNotNull(log.storageError)
     }
+
+    @Test fun jsonDownloadContainsEveryRetainedEntryAndFullDetailsBeyondClipboardLimit() {
+        val log = FilesEventLog({ null }, { true }, { 123L })
+        repeat(20) { log.record("operation.progress", "file $it", operationId = "job", details = "x".repeat(3000)) }
+        val json = org.json.JSONObject(log.exportJson())
+        assertEquals(1, json.getInt("schemaVersion"))
+        assertEquals(20, json.getJSONArray("entries").length())
+        assertEquals(3000, json.getJSONArray("entries").getJSONObject(0).getString("details").length)
+        assertTrue(log.exportJson().length > 32_000)
+    }
 }

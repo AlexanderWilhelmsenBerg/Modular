@@ -17,6 +17,52 @@ import org.junit.Test
 class FilesEventLogUiTest {
     @get:Rule val rule = createComposeRule()
 
+    @Test fun reviewIssueActionsUseTheFullScreenAndDispatchImmediately() {
+        val requests = mutableListOf<String>()
+        val issue = JSONObject().put("message", "A file already occupies the rename destination")
+            .put("actions", JSONArray().put(JSONObject().put("id", "choose").put("kind", "resolveKeeper")
+                .put("label", "Choose keeper")).put(JSONObject().put("id", "exclude")
+                .put("kind", "excludeGroup").put("label", "Exclude group")))
+        val page = JSONObject().put("version", 1).put("kind", "files").put("view", "clean")
+            .put("cleanIssues", JSONArray().put(issue)).put("cleanIssueCount", 1)
+            .put("items", JSONArray()).put("actions", JSONArray())
+        rule.setContent { MaterialTheme { FilesPage(page.toString(), onAction = {
+            requests.add(JSONObject(it).getString("actionId"))
+        }, onOpenDocument = { _, _ -> }) } }
+        for ((kind, id) in listOf("resolveKeeper" to "choose", "excludeGroup" to "exclude")) {
+            rule.onNodeWithTag("files.clean.showIssues").performClick()
+            rule.onNodeWithTag("files.clean.issues.dialog").assertIsDisplayed()
+            rule.onNodeWithTag("files.clean.issue.$kind").performClick()
+            rule.runOnIdle { assertEquals(id, requests.last()) }
+            rule.onNodeWithTag("files.clean.issues.dialog").assertDoesNotExist()
+        }
+    }
+
+    @Test fun operationShowsOneTitleAndLiveProgressAndLogHasDownload() {
+        val label = "Moving reviewed cleanup files to trash"
+        val progress = JSONObject().put("version", 1).put("kind", "files").put("view", "progress")
+            .put("summary", label).put("title", "Files").put("state", "loading")
+            .put("activeOperation", JSONObject().put("id", "job").put("label", label).put("status", label)
+                .put("doneBytes", 5).put("totalBytes", 10).put("elapsedMillis", 2_000))
+            .put("items", JSONArray()).put("actions", JSONArray())
+        val state = mutableStateOf(progress.toString())
+        val requests = mutableListOf<String>()
+        rule.setContent { MaterialTheme { FilesPage(state.value, onAction = {
+            requests.add(JSONObject(it).getString("actionId"))
+        }, onOpenDocument = { _, _ -> }) } }
+        rule.onAllNodesWithText(label).assertCountEquals(1)
+        rule.onNodeWithTag("files.operation.progress").assertIsDisplayed()
+        rule.onNodeWithText("50%", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Loading…").assertDoesNotExist()
+        rule.runOnIdle {
+            state.value = JSONObject().put("version", 1).put("kind", "files").put("view", "eventLog")
+                .put("items", JSONArray()).put("actions", JSONArray().put(JSONObject().put("id", "download")
+                    .put("kind", "downloadEventLog").put("label", "Download JSON"))).toString()
+        }
+        rule.onNodeWithTag("files.events.download").performClick()
+        rule.runOnIdle { assertEquals(listOf("download"), requests) }
+    }
+
     @Test fun keeperChoiceShowsDatesAndCanBeSelectedDirectly() {
         val requests = mutableListOf<String>()
         val item = JSONObject().put("id", "copy").put("name", "report (1).txt").put("kind", "candidate")

@@ -35,6 +35,13 @@ internal class FilesEventLog(
             entry.optString("details", "").takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
     }.take(32_000)
 
+    /** The download includes every retained entry and detail, without the clipboard limit. */
+    @Synchronized fun exportJson(): String = JSONObject().put("schemaVersion", 1)
+        .put("exportedAt", Instant.ofEpochMilli(now()).toString())
+        .put("order", "newest-first")
+        .put("retention", JSONObject().put("maxEntries", 200).put("maxBytes", 192_000))
+        .put("entries", JSONArray(snapshot())).toString(2)
+
     private fun encoded() = JSONArray(entries).toString()
     private fun save() {
         storageError = if (runCatching { write(encoded()) }.getOrDefault(false)) null

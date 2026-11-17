@@ -38,6 +38,26 @@ open class FilesActivity : ComponentActivity() {
     private var launchedFromCoreHandoff = false
     private var refreshToken by mutableIntStateOf(0)
 
+    private val saveEventLog = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) {
+            if (launchedFromCoreHandoff) finish()
+            return@registerForActivityResult
+        }
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val json = controller.exportEventLogJson()
+                    requireNotNull(contentResolver.openOutputStream(uri, "wt")) { "Could not open the log destination" }
+                        .bufferedWriter().use { it.write(json) }
+                }
+            }
+            result.exceptionOrNull()?.let { controller.recordUiFailure("Download event log", it) }
+            Toast.makeText(this@FilesActivity,
+                result.fold({ "Event log saved" }, { it.message ?: "Could not save the event log" }), Toast.LENGTH_LONG).show()
+            if (launchedFromCoreHandoff) finish()
+        }
+    }
+
     private val chooseFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri == null) {
             if (launchedFromCoreHandoff) finish()
@@ -67,6 +87,7 @@ open class FilesActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         controller = (application as FilesApplication).pageController
+        launchedFromCoreHandoff = savedInstanceState?.getBoolean("coreHandoff") == true
         if (intent?.getBooleanExtra(EXTRA_SETTINGS, false) == true) controller.openSettings()
         val handoff = if (savedInstanceState == null) intent?.getStringExtra(WorkspacePageContract.EXTRA_HOST_HANDOFF_NONCE)
             ?.let(controller::consumeHostHandoff) else null
@@ -130,6 +151,7 @@ open class FilesActivity : ComponentActivity() {
 
     private fun handleHandoff(handoff: FilesPageController.HostHandoff, fromCore: Boolean) {
         when (handoff.kind) {
+            "exportEventLog" -> saveEventLog.launch("modular-files-events-${java.time.LocalDate.now()}.json")
             "pickFolder" -> chooseFolder.launch(null)
             "editDocument" -> {
                 // The controller remains on the active Markdown page. This Activity supplies
@@ -146,6 +168,11 @@ open class FilesActivity : ComponentActivity() {
             "openDocument" -> handoff.documentId?.let { openOrShare(it, false, fromCore) }
             "shareDocument" -> handoff.documentId?.let { openOrShare(it, true, fromCore) }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("coreHandoff", launchedFromCoreHandoff)
+        super.onSaveInstanceState(outState)
     }
 
     companion object { const val EXTRA_SETTINGS = "openFilesSettings" }

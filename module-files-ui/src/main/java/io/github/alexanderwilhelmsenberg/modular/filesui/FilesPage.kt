@@ -40,7 +40,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -105,7 +104,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlin.math.roundToInt
 
-/** Trusted native renderer. Module data is text and typed actions; it is never executable UI code. */
+/** Module-owned overlays remain in the same coordinate system as the file browser. */
 @Composable
 fun FilesPage(
     pageJson: String,
@@ -117,6 +116,26 @@ fun FilesPage(
     documentCancel: suspend (String) -> Unit = { },
     onScrollState: (String, Int, Int) -> Unit = { _, _, _ -> },
     onRefresh: (() -> Unit)? = null,
+    onMenuStateChanged: ((() -> Boolean)?) -> Unit = { },
+) {
+    FilesMenuHost(modifier, onMenuStateChanged) {
+        FilesPageContent(pageJson, onAction, onOpenDocument, Modifier.fillMaxSize(), documentLoader,
+            documentCommit, documentCancel, onScrollState, onRefresh)
+    }
+}
+
+/** Trusted native renderer. Module data is text and typed actions; it is never executable UI code. */
+@Composable
+private fun FilesPageContent(
+    pageJson: String,
+    onAction: (String) -> Unit,
+    onOpenDocument: (String, String) -> Unit,
+    modifier: Modifier,
+    documentLoader: suspend (String, String) -> ParcelFileDescriptor?,
+    documentCommit: suspend (String) -> Boolean,
+    documentCancel: suspend (String) -> Unit,
+    onScrollState: (String, Int, Int) -> Unit,
+    onRefresh: (() -> Unit)?,
 ) {
     val page = remember(pageJson) { runCatching { JSONObject(pageJson) }.getOrNull() }
     if (page == null || page.optInt("version") != 1 || page.optString("kind") != "files") {
@@ -355,7 +374,7 @@ fun FilesPage(
                     val headerActions = actions.filterNot { it.kind in setOf("back", "loadMore", "confirm", "cancel", "scroll", "sizeProgress", "documentCommit", "documentCancel", "create", "createFile", "search", "trash") }
                     Box {
                         FilesMoreButton(pageMenuExpanded, "files.action.more") { pageMenuExpanded = true }
-                        DropdownMenu(shape = RectangleShape, expanded = pageMenuExpanded, onDismissRequest = { pageMenuExpanded = false }) {
+                        FilesDropdownMenu(shape = RectangleShape, expanded = pageMenuExpanded, onDismissRequest = { pageMenuExpanded = false }) {
                             headerActions.forEach { action ->
                                 DropdownMenuItem(text = { Text(action.label) },
                                     modifier = Modifier.testTag("files.action.${action.kind}"), onClick = {
@@ -399,7 +418,7 @@ fun FilesPage(
                             color = MaterialTheme.colorScheme.primaryContainer) {
                             Box(contentAlignment = Alignment.Center) { Text("+", style = MaterialTheme.typography.headlineMedium) }
                         }
-                        DropdownMenu(shape = RectangleShape, expanded = createMenuExpanded, onDismissRequest = { createMenuExpanded = false }) {
+                        FilesDropdownMenu(shape = RectangleShape, expanded = createMenuExpanded, onDismissRequest = { createMenuExpanded = false }) {
                             createFolder?.let { action -> DropdownMenuItem(text = { Text("Folder") },
                                 modifier = Modifier.testTag("files.create.folder"), onClick = {
                                     createMenuExpanded = false; formAction = action; formValue = action.initial
@@ -483,7 +502,7 @@ fun FilesPage(
                     if (overflowActions.isNotEmpty()) {
                         Box {
                             FilesMoreButton(pageMenuExpanded, "files.action.more") { pageMenuExpanded = true }
-                            DropdownMenu(shape = RectangleShape, expanded = pageMenuExpanded, onDismissRequest = { pageMenuExpanded = false },
+                            FilesDropdownMenu(shape = RectangleShape, expanded = pageMenuExpanded, onDismissRequest = { pageMenuExpanded = false },
                                 modifier = Modifier.animateContentSize()) {
                                 overflowActions.forEach { action ->
                                     DropdownMenuItem(text = { Text(if (action.kind == "info") "ⓘ  Info" else action.label) },
@@ -704,7 +723,7 @@ private fun FilesEntryRow(item: JSONObject, details: Boolean, sourceHidden: Bool
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
         Box {
-            DropdownMenu(shape = RectangleShape, expanded = expanded, onDismissRequest = { expanded = false }) {
+            FilesDropdownMenu(shape = RectangleShape, expanded = expanded, onDismissRequest = { expanded = false }) {
                 secondary.forEach { action ->
                     DropdownMenuItem(text = { Text(action.label) },
                         modifier = Modifier.testTag("files.item.action.${action.kind}"), onClick = {
@@ -899,7 +918,7 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                     FilesCleanIcon("more", "More clean options", "files.clean.more") {
                         cleanMenuExpanded = true
                     }
-                    DropdownMenu(shape = RectangleShape, expanded = cleanMenuExpanded,
+                    FilesDropdownMenu(shape = RectangleShape, expanded = cleanMenuExpanded,
                         onDismissRequest = { cleanMenuExpanded = false }) {
                         menuActions.forEach { action ->
                             DropdownMenuItem(text = { Text(action.label) }, enabled = action.enabled,
@@ -1028,7 +1047,7 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                             Box {
                                 FilesCleanIcon("sort", "Sort by ${sortLabels.firstOrNull { it.first == sort }?.second ?: "Priority"}",
                                     "files.clean.sort") { sortMenuExpanded = true }
-                                DropdownMenu(shape = RectangleShape, expanded = sortMenuExpanded,
+                                FilesDropdownMenu(shape = RectangleShape, expanded = sortMenuExpanded,
                                     onDismissRequest = { sortMenuExpanded = false }) {
                                     sortLabels.forEach { (key, label) ->
                                         DropdownMenuItem(text = { Text(label) },
@@ -1210,7 +1229,7 @@ private fun FileRow(item: JSONObject, view: String, send: (PageAction, JSONObjec
             if (secondary.isNotEmpty()) {
                 Box {
                     FilesMoreButton(expanded, "files.item.more") { expanded = true }
-                    DropdownMenu(shape = RectangleShape, expanded = expanded, onDismissRequest = { expanded = false }) {
+                    FilesDropdownMenu(shape = RectangleShape, expanded = expanded, onDismissRequest = { expanded = false }) {
                         secondary.forEach { action ->
                             DropdownMenuItem(text = { Text(action.label) }, onClick = {
                                 expanded = false; onCommand(action)

@@ -40,6 +40,49 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun folderLongPressDeletePreparesOnlyThatFolderAndStillRequiresConfirmation() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 1, includeSubfolder = true)
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            fun folder() = page(controller).getJSONArray("items").let { rows ->
+                (0 until rows.length()).map(rows::getJSONObject).single { it.getString("id") == "subfolder" }
+            }
+            rowAction(controller, folder(), "Delete")
+            val review = awaitView(controller, "review")
+            assertEquals(1, review.getJSONArray("items").length())
+            assertEquals("subfolder", review.getJSONArray("items").getJSONObject(0).getString("id"))
+            assertEquals(0, repository.moveCalls)
+            action(controller, review, "Cancel")
+            assertEquals("browser", page(controller).getString("view"))
+            assertEquals(0, repository.moveCalls)
+            rowAction(controller, folder(), "Delete")
+            action(controller, awaitView(controller, "review"), "Delete")
+            awaitView(controller, "browser")
+            assertEquals(1, repository.moveCalls)
+            assertEquals(1, repository.lastPlanSize)
+        } finally { context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun folderLongPressSupportsCopyCutAndMoveWithoutSelectingTheRowFirst() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val controller = FilesPageController(context, ReviewFixtureRepository(itemCount = 0, includeSubfolder = true))
+        try {
+            controller.addedLocation("test-volume")
+            fun folder() = page(controller).getJSONArray("items").getJSONObject(0)
+            rowAction(controller, folder(), "Copy")
+            assertEquals("copy", page(controller).getJSONObject("clipboard").getString("mode"))
+            assertEquals(1, page(controller).getJSONObject("clipboard").getInt("count"))
+            rowAction(controller, folder(), "Cut")
+            assertEquals("cut", page(controller).getJSONObject("clipboard").getString("mode"))
+            rowAction(controller, folder(), "Move…")
+            assertEquals("movePicker", page(controller).getString("view"))
+        } finally { context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
     @Test fun interruptedReadOnlyTrashReviewResumesAndReadyPlanNeedsFreshConfirmation() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()

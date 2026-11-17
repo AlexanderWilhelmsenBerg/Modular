@@ -72,6 +72,14 @@ cancellation clears the pending request. Android's recent process-exit reasons a
 recorded on startup and included in JSON exports so crashes, memory pressure and
 other process stops can be distinguished. Home navigation does not request cancel.
 
+Files 0.1.6 renders dropdown menus as bounded, scrollable overlays inside the
+module's existing surface. Drawing, anchors and input use the same root; menus
+create no separate Android popup window. Outside tap, Back and Escape dismiss
+without dispatching a file action, and the module intercepts app navigation while
+a menu is open. Folder context menus expose Copy, Cut, Move and reviewed Delete
+without a separate selection step. Storage location roots remain excluded.
+The visual dashboard audit is recorded in `docs/design/files-dashboard-review.md`.
+
 Progress publishes the current verification/mutation step, byte count when known,
 and elapsed time, without taking the page lock from a repository callback. Page
 rendering uses cached trash metadata; active mutations use display-only folder

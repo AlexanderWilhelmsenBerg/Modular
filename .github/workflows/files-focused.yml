@@ -37,6 +37,7 @@ jobs:
             adb install -r addon-files/build/outputs/apk/debug/addon-files-debug.apk
             adb install -r addon-files/build/outputs/apk/androidTest/debug/addon-files-debug-androidTest.apk
             python3 scripts/run-files-device-tests.py
+            python3 scripts/run-files-menu-checks.py
             test ! -d app/build/outputs/apk
       - name: Upload per-class Files test reports
         if: always()
@@ -44,3 +45,10 @@ jobs:
         with:
           name: files-focused-device-reports
           path: build/reports/device/
+      - name: Upload physical menu screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-menu-screenshots
+          path: build/ui-screenshots/files-menus/
+          if-no-files-found: error

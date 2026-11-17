@@ -29,7 +29,20 @@ import kotlin.concurrent.withLock
 
 /** Real filesystem and DocumentsProvider implementation. IDs encode a grant key and a verified ancestry chain. */
 class AndroidFilesRepository(private val context: Context,
+    metadataWorkers: Int = Runtime.getRuntime().availableProcessors().coerceIn(2, 4),
+    private val directoryReadObserver: (String) -> Unit = {},
     private val contentReadObserver: (String) -> Unit = {}) : FilesRepository {
+    private val readWorkers = metadataWorkers.coerceIn(1, 4)
+    private val metadataExecutor by lazy {
+        val count = java.util.concurrent.atomic.AtomicInteger()
+        (java.util.concurrent.Executors.newFixedThreadPool(readWorkers) { task ->
+            Thread(task, "files-metadata-${count.incrementAndGet()}").apply { isDaemon = true }
+        } as java.util.concurrent.ThreadPoolExecutor).apply {
+            setKeepAliveTime(15, java.util.concurrent.TimeUnit.SECONDS); allowCoreThreadTimeOut(true)
+        }
+    }
+    @Volatile private var reviewStats: Map<String, Long> = emptyMap()
+    override fun trashReviewDiagnostics(): Map<String, Long> = reviewStats
     private val resolver = context.contentResolver
     private val prefs = context.getSharedPreferences("files_storage_v1", Context.MODE_PRIVATE)
     private val totals = ConcurrentHashMap<String, DirectoryTotal>()
@@ -496,18 +509,39 @@ class AndroidFilesRepository(private val context: Context,
         } finally { mutationLock.unlock() }
     }
 
-    override fun trashEntries(): List<TrashEntry> {
+    private data class TrashIndex(val root: Root, val folder: Node?, val byName: Map<String, Node>)
+    private data class TrashSnapshot(val entries: List<TrashEntry>, val indexes: Map<String, TrashIndex>)
+
+    private fun <T, R> parallelMetadata(values: List<T>, cancel: Cancellation, task: (T) -> R): List<R> {
+        val futures = values.map { value -> metadataExecutor.submit(java.util.concurrent.Callable {
+            check(!cancel.isCanceled()) { "Trash review canceled" }; task(value)
+        }) }
+        try {
+            return futures.map { future ->
+                check(!cancel.isCanceled()) { "Trash review canceled" }
+                future.get()
+            }
+        } finally { futures.filterNot { it.isDone }.forEach { it.cancel(true) } }
+    }
+
+    override fun trashEntries(): List<TrashEntry> = readTrashSnapshot(Cancellation { false }).entries
+
+    private fun readTrashSnapshot(cancel: Cancellation, progress: Progress = Progress { _, _, _ -> }): TrashSnapshot {
         mutationLock.lock()
         try {
         val cached = readTrashCache().associateBy { it.id }.toMutableMap()
         val online = HashSet<String>()
         val metadataIds = HashSet<String>()
         val payloadIds = HashSet<String>()
+        val indexes = linkedMapOf<String, TrashIndex>()
         for (root in roots()) {
             try {
+                check(!cancel.isCanceled()) { "Trash review canceled" }
                 resolveInternal(rootId(root)) // A revoked grant or unplugged drive must remain offline.
                 val folder = findTrash(root)
                 val stored = folder?.let(::children).orEmpty()
+                val byName = stored.associateBy { it.name }
+                indexes[root.key] = TrashIndex(root, folder, byName)
                 online.add(root.key)
                 stored.forEach { item ->
                     when {
@@ -515,25 +549,33 @@ class AndroidFilesRepository(private val context: Context,
                         item.name.endsWith(".folder") -> payloadIds.add("${root.key}:${item.name.removeSuffix(".folder")}")
                     }
                 }
-                stored.filter { it.name.endsWith(".meta.json") }.forEach { meta ->
+                val metadata = stored.filter { it.name.endsWith(".meta.json") }
+                val completed = java.util.concurrent.atomic.AtomicInteger()
+                parallelMetadata(metadata, cancel) { meta ->
+                    val record = runCatching { readJson(meta) }.getOrNull()
+                    progress.onProgress(0, null, "Reading trash index ${completed.incrementAndGet()}/${metadata.size}")
+                    record
+                }.filterNotNull().forEach { record ->
                     try {
-                        val record = readJson(meta)
                         val id = record.getString("id")
                         metadataIds.add("${root.key}:$id")
                         val payloadName = record.getString("payload")
-                        val payload = stored.firstOrNull { it.name == payloadName }
+                        val payload = byName[payloadName]
                         if (payload != null || runCatching { resolve(record.optString("originalId")); false }.getOrDefault(true)) {
                             cached[id] = recordToTrash(record, root.key, payload != null)
                         } else cached.remove(id)
                     } catch (_: Exception) { }
                 }
-            } catch (_: Exception) { /* Offline records stay in cache. */ }
+            } catch (failure: Exception) {
+                if (cancel.isCanceled()) throw java.util.concurrent.CancellationException("Trash review canceled")
+                // Offline records stay in cache.
+            }
         }
         val result = cached.values.filter { StorageSafety.retainTrashRecord(it.locationId, it.id, online, metadataIds, payloadIds) }
             .map { it.copy(available = it.locationId in online && "${it.locationId}:${it.id}" in payloadIds) }
             .sortedByDescending { it.trashedAtMillis }
         saveTrashCache(result)
-        return result
+        return TrashSnapshot(result, indexes)
         } finally { mutationLock.unlock() }
     }
 
@@ -586,28 +628,40 @@ class AndroidFilesRepository(private val context: Context,
 
     override fun prepareEmptyTrash(ids: List<String>, cancel: Cancellation, progress: Progress): EmptyTrashPlan {
         check(!cancel.isCanceled()) { "Trash review canceled" }
-        val selected = trashEntries().filter { it.id in ids.toSet() }
+        val started = android.os.SystemClock.elapsedRealtime()
+        val snapshot = readTrashSnapshot(cancel, progress)
+        val wanted = ids.toSet()
+        val selected = snapshot.entries.filter { it.id in wanted }
         val errors = selected.filter { !it.available }.map { "${it.originalPath}: storage unavailable" }.toMutableList()
-        ids.distinct().filter { wanted -> selected.none { it.id == wanted } }.forEach { errors.add("$it: trash entry missing") }
+        val found = selected.map { it.id }.toSet()
+        wanted.filterNot { it in found }.forEach { errors.add("$it: trash entry missing") }
         val manifest = ArrayList<FileEntry>()
         val fingerprints = LinkedHashMap<String, String>()
-        selected.filter { it.available }.forEachIndexed { index, item ->
+        val completed = java.util.concurrent.atomic.AtomicInteger()
+        val parts = parallelMetadata(selected.filter { it.available }, cancel) { item ->
+            val localManifest = arrayListOf<FileEntry>()
+            val localFingerprints = linkedMapOf<String, String>()
+            val localErrors = arrayListOf<String>()
             check(!cancel.isCanceled()) { "Trash review canceled" }
             try {
-                val payload = locatePayload(item) ?: error("Payload missing")
+                val payload = locatePayload(item, snapshot.indexes) ?: error("Payload missing")
                 require(!(payload.directory && payload.root.tree != null)) { "Provider cannot safely empty a folder in trash" }
                 val seen = HashSet<String>()
                 fun visit(node: Node) {
                     check(!cancel.isCanceled()) { "Trash review canceled" }
                     require(seen.add(nodeIdentity(node))) { "Cyclic or repeated trash item" }
-                    manifest.add(node.entry())
-                    progress.onProgress(0, null, "Reviewing trash ${index + 1}/${selected.size} · ${item.originalName}")
-                    fingerprints[node.id] = identityFingerprint(node)
+                    localManifest.add(node.entry())
+                    localFingerprints[node.id] = identityFingerprint(node)
                     if (node.directory) children(node).forEach(::visit)
                 }
                 visit(payload)
-            } catch (e: Exception) { errors.add(e.message ?: "Cannot enumerate trash") }
+            } catch (e: Exception) { localErrors.add(e.message ?: "Cannot enumerate trash") }
+            progress.onProgress(0, null, "Reviewed trash ${completed.incrementAndGet()}/${selected.size} · ${item.originalName}")
+            Triple(localManifest, localFingerprints, localErrors)
         }
+        for ((entries, revisions, issues) in parts) { manifest.addAll(entries); fingerprints.putAll(revisions); errors.addAll(issues) }
+        reviewStats = mapOf("workers" to readWorkers.toLong(), "entries" to selected.size.toLong(),
+            "manifestEntries" to manifest.size.toLong(), "elapsedMillis" to (android.os.SystemClock.elapsedRealtime() - started))
         return EmptyTrashPlan(selected, manifest, errors.isEmpty(), errors, fingerprints)
     }
 
@@ -622,11 +676,12 @@ class AndroidFilesRepository(private val context: Context,
         val operation = UUID.randomUUID().toString()
         startJournal(operation, "emptyTrash", plan.entries.map { it.id }, null)
         val outcomes = ArrayList<FileOutcome>()
+        val indexes = readTrashSnapshot(cancel, progress).indexes
         for ((index, record) in plan.entries.withIndex()) {
             progress.onProgress(0, null, "Emptying trash ${index + 1}/${plan.entries.size} · ${record.originalName}")
             if (cancel.isCanceled()) { outcomes.add(FileOutcome(record.id, FileOutcome.Status.CANCELED)); continue }
             try {
-                val payload = locatePayload(record) ?: error("Storage unavailable")
+                val payload = locatePayload(record, indexes) ?: error("Storage unavailable")
                 val covered = plan.descendants.filter { it.id == payload.id || it.relativePath.startsWith(payload.relative.trimEnd('/') + "/") }
                 val error = validateGroup(covered, plan.fingerprints, covered.filter { it.isDirectory }.associate { folder -> folder.id to covered.filter { it.parentId == folder.id }.map { it.id }.toSet() }, cancel, progress)
                 require(error == null) { error ?: "Changed" }
@@ -636,7 +691,7 @@ class AndroidFilesRepository(private val context: Context,
                     if (node.directory) require(children(node).isEmpty()) { "New trash child" }
                     deleteExact(node)
                 }
-                deleteMeta(record)
+                deleteMeta(record, indexes)
                 outcomes.add(FileOutcome(record.id, FileOutcome.Status.SUCCESS))
             } catch (e: Exception) { outcomes.add(FileOutcome(record.id, FileOutcome.Status.FAILED, e.message)) }
         }
@@ -832,6 +887,7 @@ class AndroidFilesRepository(private val context: Context,
     }
 
     private fun children(parent: Node): List<Node> {
+        directoryReadObserver(parent.name)
         require(parent.directory)
         val file = parent.file
         if (file != null) return (file.listFiles() ?: error("Cannot list folder")).map { child ->
@@ -1080,10 +1136,20 @@ class AndroidFilesRepository(private val context: Context,
 
     private fun findTrash(root: Root): Node? {
         val parent = resolveInternal(rootId(root))
+        if (root.file != null) return runCatching {
+            resolveInternal(directChildId(parent.id, trashName)).takeIf { it.directory }
+        }.getOrNull()
         return children(parent).firstOrNull { it.name == trashName && it.directory }
     }
     private fun ensureTrash(root: Root): Node = findTrash(root) ?: create(resolveInternal(rootId(root)), trashName, DocumentsContract.Document.MIME_TYPE_DIR, internal = true)
-    private fun locatePayload(record: TrashEntry): Node? {
+    private fun locatePayload(record: TrashEntry, indexes: Map<String, TrashIndex>? = null): Node? {
+        if (indexes != null) {
+            val index = indexes[record.locationId] ?: return null
+            val node = index.byName["${record.id}.payload"] ?: index.byName["${record.id}.folder"] ?: return null
+            return if (node.file != null) runCatching { resolveInternal(node.id) }.getOrNull()
+                else query(requireNotNull(node.uri)).copy(root = node.root, id = node.id, parentId = node.parentId,
+                    relative = node.relative, uri = node.uri)
+        }
         val root = roots().firstOrNull { it.key == record.locationId } ?: return null
         val folder = findTrash(root) ?: return null
         return children(folder).firstOrNull { it.name == "${record.id}.payload" || it.name == "${record.id}.folder" }
@@ -1097,7 +1163,13 @@ class AndroidFilesRepository(private val context: Context,
         }
     }
     private fun readJson(node: Node): JSONObject = input(node).use { JSONObject(it.readBytes().toString(Charsets.UTF_8)) }
-    private fun deleteMeta(record: TrashEntry) {
+    private fun deleteMeta(record: TrashEntry, indexes: Map<String, TrashIndex>? = null) {
+        if (indexes != null) {
+            val node = indexes[record.locationId]?.byName?.get("${record.id}.meta.json")
+                ?: error("Recovery metadata missing")
+            deleteExact(if (node.file != null) resolveInternal(node.id) else node)
+            return
+        }
         val root = roots().firstOrNull { it.key == record.locationId } ?: error("Storage unavailable")
         val folder = findTrash(root) ?: error("Trash unavailable")
         val meta = children(folder).firstOrNull { it.name == "${record.id}.meta.json" } ?: error("Recovery metadata missing")

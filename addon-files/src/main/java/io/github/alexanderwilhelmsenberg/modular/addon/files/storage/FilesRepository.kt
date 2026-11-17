@@ -51,6 +51,7 @@ interface FilesRepository {
     /** Display-only snapshot while a mutation owns storage; review always reads live entries. */
     fun cachedTrashEntries(): List<TrashEntry>? = null
     fun trashSummary(): TrashSummary
+    fun trashReviewDiagnostics(): Map<String, Long> = emptyMap()
     fun restore(ids: List<String>, choices: Map<String, RestoreChoice>, cancel: Cancellation = Cancellation { false }): OperationResult
     fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan
     fun prepareEmptyTrash(ids: List<String>, cancel: Cancellation): EmptyTrashPlan {

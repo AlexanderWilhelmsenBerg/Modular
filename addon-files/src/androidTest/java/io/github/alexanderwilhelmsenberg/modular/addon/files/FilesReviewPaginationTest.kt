@@ -31,6 +31,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,6 +40,93 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun interruptedReadOnlyTrashReviewResumesAndReadyPlanNeedsFreshConfirmation() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "review-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        repository.trash.add(TrashEntry("trash-one", "test-volume", "file", "root", "file", "file",
+            1, 1, 1, null, false, true))
+        try {
+            // The old process persisted a request but never completed preparation.
+            TrashReviewStore(file).begin(listOf("trash-one"), 2)
+            val recovered = FilesPageController(context, repository, FilesOperationLifetime.NONE, TrashReviewStore(file))
+            assertTrue(recovered.recoverTrashReview())
+            awaitView(recovered, "emptyTrashReview")
+            assertEquals(1, repository.trashPrepareCalls)
+            assertEquals(0, repository.emptyCalls)
+            assertNotNull(TrashReviewStore(file).load()!!.plan)
+            // Another process restart restores the prepared plan without repeating storage work.
+            val next = FilesPageController(context, repository, FilesOperationLifetime.NONE, TrashReviewStore(file))
+            assertTrue(next.recoverTrashReview())
+            val review = page(next)
+            assertEquals("emptyTrashReview", review.getString("view"))
+            assertEquals(1, repository.trashPrepareCalls)
+            assertEquals(0, repository.emptyCalls)
+            action(next, review, "Empty permanently")
+            awaitView(next, "trash")
+            assertEquals(1, repository.emptyCalls)
+            assertNull(TrashReviewStore(file).load())
+        } finally {
+            TrashReviewStore(file).clear()
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun canceledRecoveredReviewIsNotSavedOrResumedAgain() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "review-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        val release = CountDownLatch(1)
+        repository.trashPrepareRelease = release
+        try {
+            TrashReviewStore(file).begin(listOf("trash-one"), 0)
+            val controller = FilesPageController(context, repository, FilesOperationLifetime.NONE, TrashReviewStore(file))
+            assertTrue(controller.recoverTrashReview())
+            assertTrue(repository.trashPrepareEntered.await(5, TimeUnit.SECONDS))
+            action(controller, page(controller), "Cancel operation")
+            release.countDown()
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertNull(TrashReviewStore(file).load())
+            assertEquals(0, repository.emptyCalls)
+            assertFalse(FilesPageController(context, repository, FilesOperationLifetime.NONE,
+                TrashReviewStore(file)).recoverTrashReview())
+        } finally {
+            release.countDown(); TrashReviewStore(file).clear()
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun recoveredReviewRetainsForegroundHandoffAcrossPassiveReadsUntilConsumed() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "review-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        val ready = CountDownLatch(1)
+        val lifetime = object : FilesOperationLifetime {
+            override fun begin(id: String, label: String) = "Open Files to resume background work"
+            override fun awaitReady(id: String, cancel: Cancellation) { check(ready.await(5, TimeUnit.SECONDS)) }
+        }
+        try {
+            TrashReviewStore(file).begin(listOf("trash-one"), 0)
+            val controller = FilesPageController(context, repository, lifetime, TrashReviewStore(file))
+            assertTrue(controller.recoverTrashReview())
+            val nonce = page(controller).getJSONObject("hostLaunch").getString("nonce")
+            assertEquals(nonce, page(controller).getJSONObject("hostLaunch").getString("nonce"))
+            assertEquals(0, repository.trashPrepareCalls)
+            assertEquals("startOperation", controller.consumeHostHandoff(nonce)!!.kind)
+            assertNull(controller.consumeHostHandoff(nonce))
+            assertFalse(page(controller).has("hostLaunch"))
+            ready.countDown()
+            awaitView(controller, "emptyTrashReview")
+            assertEquals(0, repository.emptyCalls)
+        } finally {
+            ready.countDown(); TrashReviewStore(file).clear()
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
     @Test fun blockedBackgroundStartHandsOffAndWaitsBeforeReadingStorage() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
@@ -1035,6 +1124,7 @@ class FilesReviewPaginationTest {
         var lastPlanSize = 0
         val trash = mutableListOf<TrashEntry>()
         var emptyCalls = 0
+        var trashPrepareCalls = 0
         var trashPreparationFailure = false
         var prepareRelease: CountDownLatch? = null
         val prepareEntered = CountDownLatch(1)
@@ -1141,6 +1231,7 @@ class FilesReviewPaginationTest {
         override fun restore(ids: List<String>, choices: Map<String, RestoreChoice>,
             cancel: Cancellation): OperationResult = error("Unexpected restore")
         override fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan {
+            trashPrepareCalls++
             trashPrepareEntered.countDown()
             trashPrepareRelease?.let { check(it.await(10, TimeUnit.SECONDS)) }
             check(!trashPreparationFailure) { "fixture storage unavailable" }

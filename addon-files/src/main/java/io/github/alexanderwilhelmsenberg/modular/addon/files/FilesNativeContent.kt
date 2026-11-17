@@ -68,6 +68,16 @@ internal fun FilesNativeContent(
     val scroll = remember { ScrollSaveState() }
     val reloadRunning = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     val pageUpdates = remember { FilesPageRequestGate() }
+    val deliveredHostLaunches = remember { LinkedHashSet<String>() }
+
+    fun deliverHostLaunch(response: String) {
+        if (!response.contains("\"hostLaunch\"")) return
+        JSONObject(response).optJSONObject("hostLaunch")?.optString("nonce")
+            ?.takeIf { it.isNotBlank() && deliveredHostLaunches.add(it) }?.let {
+                while (deliveredHostLaunches.size > 32) deliveredHostLaunches.remove(deliveredHostLaunches.first())
+                onHostLaunch(it)
+            }
+    }
 
     fun reportFailure(operation: String, failure: Throwable, fallback: String, show: Boolean = true) {
         if (show) error = failure.message ?: fallback
@@ -92,7 +102,10 @@ internal fun FilesNativeContent(
             val result = withContext(Dispatchers.IO) {
                 ioMutex.withLock { runCatching { controller.getPage(PAGE_REQUEST) } }
             }
-            result.onSuccess { if (pageUpdates.mayApply(ticket)) { page = it; error = null } }
+            result.onSuccess {
+                if (pageUpdates.mayApply(ticket)) { page = it; error = null }
+                deliverHostLaunch(it)
+            }
                 .onFailure { reportFailure("Load Files page", it, "Files could not be loaded", pageUpdates.mayApply(ticket)) }
             } finally { reloadRunning.set(false) }
         }
@@ -109,8 +122,7 @@ internal fun FilesNativeContent(
             pendingActions = (pendingActions - 1).coerceAtLeast(0)
             result.onSuccess { response ->
                 if (pageUpdates.mayApply(ticket)) { page = response; error = null }
-                JSONObject(response).optJSONObject("hostLaunch")?.optString("nonce")
-                    ?.takeIf { it.isNotBlank() }?.let(onHostLaunch)
+                deliverHostLaunch(response)
             }.onFailure { if (pageUpdates.mayApply(ticket)) error = it.message ?: "Files action failed" }
             }
         }

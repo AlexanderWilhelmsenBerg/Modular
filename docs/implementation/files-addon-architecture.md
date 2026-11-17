@@ -57,6 +57,21 @@ silently execute without background protection. Cancellation records whether it
 came from the screen, notification, or Android's data-sync timeout. Progress uses
 an explicit Stop label; Back leaves the operation running.
 
+Files 0.1.5 indexes each storage location's trash folder once per preparation or
+execution pass. Up to four metadata workers read independent sidecars and prepare
+independent payload identities; deletion remains serial under the mutation lock.
+Progress reports index/review item counts, and exported diagnostics include worker
+count, reviewed entries, manifest entries and preparation time.
+
+Read-only Empty trash requests and prepared manifests are stored atomically in
+private storage. After a process restart, pending preparation restarts and a ready
+manifest reopens for explicit confirmation. The service requests intent redelivery
+only while a pending read-only request exists. Confirmation is never persisted as
+authorization to replay deletion; live identity/child checks still apply. Explicit
+cancellation clears the pending request. Android's recent process-exit reasons are
+recorded on startup and included in JSON exports so crashes, memory pressure and
+other process stops can be distinguished. Home navigation does not request cancel.
+
 Progress publishes the current verification/mutation step, byte count when known,
 and elapsed time, without taking the page lock from a repository callback. Page
 rendering uses cached trash metadata; active mutations use display-only folder

@@ -354,6 +354,37 @@ public class CleanerEngineTest {
         assertEquals(List.of("two"), moved.get(0).getDescendants().stream().map(FileEntry::getId).toList());
     }
 
+    @Test public void folderExecutionStillRequiresTheRepositoryProviderSafetyGate() {
+        var original = directory("one", "root", "folder", NOW.minusSeconds(10));
+        var copy = directory("two", "root", "folder(1)", NOW);
+        var analysis = analyze(List.of(directory("root", null, "root", NOW), original, copy));
+        var group = analysis.groups().stream().filter(g -> g.category() == CleanerEngine.Category.NUMBERED_COPY).findFirst().orElseThrow();
+        var plan = CleanerEngine.plan(analysis, Map.of(group.id(), "one"), Set.of(group.id()), Set.of());
+        assertTrue(plan.blockers().toString(), plan.readyForReview());
+        var gated = new java.util.concurrent.atomic.AtomicInteger();
+        var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
+                new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "get" -> {
+                        var e = Map.of("one", original, "two", copy).get(args[0]);
+                        yield new FileEntry(e.id(), e.volumeId(), e.parentId(), e.name(), e.path(), true,
+                                null, null, e.modified().toEpochMilli(), null, true, true);
+                    }
+                    case "fingerprint" -> "rev-" + args[0];
+                    case "list" -> new FilePage(List.of(), null, 0, true);
+                    case "prepareDeletion" -> {
+                        gated.incrementAndGet();
+                        yield new io.github.alexanderwilhelmsenberg.modular.addon.files.storage.DeletionPlan("blocked",
+                                List.of(), List.of(), 0L, 0L, false,
+                                List.of("Provider cannot safely remove a folder"), Map.of(), Map.of());
+                    }
+                    default -> throw new AssertionError("Provider rejection must prevent mutation: " + method.getName());
+                });
+        var result = new CleanerRepositoryAdapter(repository, null).executeReviewed(plan, (Cancellation) () -> false);
+        assertEquals(1, gated.get());
+        assertTrue(result.getErrors().toString(), result.getErrors().contains("Provider cannot safely remove a folder"));
+        assertNull(result.getTrash());
+    }
+
     @Test public void shallowScanExpandsOnlySelectedFolderGroupsForReview() {
         var root = new FileEntry("root", "volume", null, "root", "/root", true,
                 null, null, NOW.toEpochMilli(), null, true, true);

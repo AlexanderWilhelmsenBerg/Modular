@@ -857,7 +857,7 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                     Text("Review issues", style = MaterialTheme.typography.titleLarge)
                 }
                 HorizontalDivider()
-                LazyColumn(Modifier.weight(1f)) {
+                LazyColumn(Modifier.weight(1f).testTag("files.clean.issues.list")) {
                     items(cleanIssues) { issue ->
                         Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
                             Text(issue.optString("message"), style = MaterialTheme.typography.bodyMedium)
@@ -869,6 +869,10 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                             }
                         }
                         HorizontalDivider()
+                    }
+                    if (cleanIssueCount > cleanIssues.size) item {
+                        Text("Review a smaller selection to see remaining issues.",
+                            Modifier.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

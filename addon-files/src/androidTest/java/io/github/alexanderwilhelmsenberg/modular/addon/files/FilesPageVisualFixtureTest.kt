@@ -15,6 +15,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -303,7 +304,9 @@ class FilesPageVisualFixtureTest {
         rule.onNodeWithTag("files.clean.showIssues").performClick()
         rule.onNodeWithTag("files.clean.issues.dialog").assertIsDisplayed()
         rule.onNodeWithText("Project notes: notes (1).md would replace notes.md in the destination.").assertIsDisplayed()
-        rule.onNodeWithText("Review a smaller selection to see remaining issues.").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithTag("files.clean.issues.list").performScrollToNode(
+            hasText("Review a smaller selection to see remaining issues."))
+        rule.onNodeWithText("Review a smaller selection to see remaining issues.").assertIsDisplayed()
         rule.onNodeWithTag("files.clean.issues.close").performClick()
         rule.onNodeWithTag("files.clean.issues.dialog").assertDoesNotExist()
         rule.onNodeWithTag("files.clean.more").performClick()

@@ -292,10 +292,19 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
         )
         val reviewedRemovals = plan.trashSteps().flatMap { listOf(it.entryId()) + it.reviewedDescendantIds() }.toSet()
         val removals = reviewedRemovals.map { liveEntries.getValue(it) }
-        val deletion = DeletionPlan(java.util.UUID.randomUUID().toString(), roots.map(liveEntries::getValue),
-            removals, plan.knownSuggestedBytes(), removals.count { !it.isDirectory }.toLong(), true, emptyList(),
-            reviewedRemovals.associateWith { plan.manifest().getValue(it).revision() },
-            plan.directoryChildren().filterKeys { it in reviewedRemovals })
+        // Folder reviews also enforce provider-specific removal constraints. Keep that
+        // repository gate, even after our manifest check (SAF folders cannot be removed
+        // atomically without risking new children). File-only reviews can reuse hashes.
+        if (removals.any { it.parentId == null || it.name == ".ModularFilesTrash" })
+            return Execution(null, emptyList(), listOf("A protected storage location cannot be removed"))
+        val deletion = if (removals.any { it.isDirectory }) repository.prepareDeletion(roots, cancel, progress)
+            else DeletionPlan(java.util.UUID.randomUUID().toString(), roots.map(liveEntries::getValue),
+                removals, plan.knownSuggestedBytes(), removals.size.toLong(), true, emptyList(),
+                reviewedRemovals.associateWith { plan.manifest().getValue(it).revision() }, emptyMap())
+        if (!deletion.complete || deletion.errors.isNotEmpty())
+            return Execution(null, emptyList(), deletion.errors.ifEmpty { listOf("Incomplete deletion review") })
+        if ((deletion.roots + deletion.descendants).map { it.id }.toSet() != reviewedRemovals)
+            return Execution(null, emptyList(), listOf("Deletion descendants changed since review"))
         val trash = try {
             repository.moveToTrash(deletion, cancel, progress)
         } catch (ex: Exception) {

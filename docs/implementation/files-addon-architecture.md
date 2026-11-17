@@ -55,7 +55,8 @@ and elapsed time, without taking the page lock from a repository callback. Page
 rendering uses cached trash metadata; active mutations use display-only folder
 snapshots. Reviewed execution validates only its manifest, reviewed directory
 children, and rename destinations, then reuses that verified manifest for trash
-instead of walking unrelated subtrees and hashing a second deletion plan. The
+instead of walking unrelated subtrees. File-only plans reuse verified hashes;
+directory plans also pass the repository's provider-specific review gate. The
 repository still checks fingerprints and directory children before mutation.
 
 Numbered-copy suggestions prefer the highest number unless a known modification

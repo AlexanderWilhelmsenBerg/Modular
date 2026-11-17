@@ -41,10 +41,12 @@ internal fun FilesEventLogPage(page: JSONObject, send: (JSONObject) -> Unit, mod
                         ?.setPrimaryClip(ClipData.newPlainText("Modular Files event log", page.optString("eventLogText")))
                 }, modifier = Modifier.testTag("files.events.copy")) { Text("Copy") }
                 TextButton(onClick = {
+                    val json = action("shareEventLog")
+                    if (json != null) { send(json); return@TextButton }
                     val share = Intent(Intent.ACTION_SEND).setType("text/plain")
                         .putExtra(Intent.EXTRA_TEXT, page.optString("eventLogText"))
                     context.startActivity(Intent.createChooser(share, "Share Files event log").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }, modifier = Modifier.testTag("files.events.share")) { Text("Share") }
+                }, modifier = Modifier.testTag("files.events.share")) { Text(if (action("shareEventLog") != null) "Share JSON" else "Share") }
                 action("refresh")?.let { TextButton(onClick = { send(it) }) { Text("Refresh") } }
                 action("clearEventLog")?.let { TextButton(onClick = { send(it) },
                     modifier = Modifier.testTag("files.events.clear")) { Text("Clear") } }

@@ -50,6 +50,13 @@ cancellation. Android foreground-start failures are logged and displayed; OS
 timeouts request cancellation. Process death is reported from a persisted running
 marker on restart and never replays destructive work automatically.
 
+Files 0.1.4 waits for the foreground service to acknowledge startup before storage
+work begins. If Android rejects an embedded background start, the existing
+authenticated Activity handoff retries from a visible Files Activity. It does not
+silently execute without background protection. Cancellation records whether it
+came from the screen, notification, or Android's data-sync timeout. Progress uses
+an explicit Stop label; Back leaves the operation running.
+
 Progress publishes the current verification/mutation step, byte count when known,
 and elapsed time, without taking the page lock from a repository callback. Page
 rendering uses cached trash metadata; active mutations use display-only folder
@@ -57,7 +64,16 @@ snapshots. Reviewed execution validates only its manifest, reviewed directory
 children, and rename destinations, then reuses that verified manifest for trash
 instead of walking unrelated subtrees. File-only plans reuse verified hashes;
 directory plans also pass the repository's provider-specific review gate. The
-repository still checks fingerprints and directory children before mutation.
+repository still checks identities and directory children before mutation.
+
+Delete/trash and cleanup reviews use versioned identity/metadata revisions rather
+than reading file contents. Direct storage includes device/inode, type/mode,
+size, and nanosecond mtime/ctime. Provider storage uses its document identity and
+available metadata. New children, replaced files, protected roots, and unsafe SAF
+folder removal remain blocked. After removing reviewed children, directory
+identity is rechecked independently from the metadata those removals change.
+Content verification remains separate for exact-duplicate comparisons, copied
+data, and document saves. A metadata identity is not a content-equality claim.
 
 Numbered-copy suggestions prefer the highest number unless a known modification
 date shows a lower-numbered entry is newer, or the highest number is ambiguous.
@@ -70,7 +86,11 @@ exports every retained entry and detail, plus app/Android version and current
 operation progress. The clipboard/share preview remains capped at 32,000
 characters; JSON has no preview truncation. The bounded log retains at most 200
 events / 192,000 encoded bytes. Neither export includes file contents or action
-tokens.
+tokens. Exports are accepted by an application-owned queue, stage a complete
+private JSON file before opening the destination, and check readback when the
+provider permits it. Activity destruction cannot cancel the accepted write. Share
+JSON grants read access only to the staged export, avoiding a destination-provider
+write. JSON also includes retained operation-history outcomes for partial failures.
 
 ## Delivery and verification
 

@@ -322,7 +322,7 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
             try {
                 val keeper = repository.get(rename.keeperId())
                 val reviewedKeeper = plan.manifest()[keeper.id]
-                if (reviewedKeeper == null || repository.fingerprint(keeper.id, cancel, progress) != reviewedKeeper.revision()) {
+                if (reviewedKeeper == null || repository.identityFingerprint(keeper.id, cancel, progress) != reviewedKeeper.revision()) {
                     renames.add(FileOutcome(keeper.id, FileOutcome.Status.CHANGED, "Keeper changed; rename needs fresh review"))
                     continue
                 }
@@ -331,7 +331,7 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
                     renames.add(FileOutcome(keeper.id, FileOutcome.Status.CHANGED, "Rename destination occupied; keeper retained"))
                     continue
                 }
-                val renamed = repository.rename(keeper.id, rename.newName())
+                val renamed = repository.renameReviewed(keeper.id, rename.newName(), reviewedKeeper.revision())
                 renames.add(FileOutcome(keeper.id, FileOutcome.Status.SUCCESS, resultingId = renamed.id))
             } catch (ex: Exception) {
                 renames.add(FileOutcome(rename.keeperId(), FileOutcome.Status.FAILED, ex.message ?: "Rename failed; keeper retained"))
@@ -378,7 +378,7 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
             if (entry.isDirectory) CleanerEngine.Kind.DIRECTORY else CleanerEngine.Kind.FILE,
             entry.sizeBytes, entry.modifiedAtMillis?.let(Instant::ofEpochMilli),
             entry.createdAtMillis?.let(Instant::ofEpochMilli),
-            if (verifyFingerprint) repository.fingerprint(entry.id, cancel, progress).also {
+            if (verifyFingerprint) repository.identityFingerprint(entry.id, cancel, progress).also {
                 if (cancel.isCanceled()) throw CancellationException("Cleaner scan canceled")
             } else CleanerEngine.PENDING_REVISION,
             childrenComplete, if (parseApk) apkEvidence(entry, cancel) else null

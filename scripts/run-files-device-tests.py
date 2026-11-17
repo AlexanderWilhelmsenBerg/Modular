@@ -25,10 +25,11 @@ BROAD_TESTS = (
     "FilesActivityInsetsTest",
     "FilesScrollLifecycleTest",
     "FilesPageVisualFixtureTest",
+    "FilesMenuTouchTest",
     "FilesHandoffNonceTest",
     "ArchiveRealStorageTest",
 )
-EXPECTED_COUNTS = {"FilesReviewPaginationTest": 25, "FilesTrashReviewStoreTest": 3, "DirectStorageSafetyTest": 5, "FilesLogExportTest": 2, "FilesPageVisualFixtureTest": 2, "FilesEventLogUiTest": 5, "FilesNativeDocumentUiTest": 2}
+EXPECTED_COUNTS = {"FilesReviewPaginationTest": 27, "FilesMenuTouchTest": 2, "FilesTrashReviewStoreTest": 3, "DirectStorageSafetyTest": 5, "FilesLogExportTest": 2, "FilesPageVisualFixtureTest": 2, "FilesEventLogUiTest": 5, "FilesNativeDocumentUiTest": 2}
 
 
 def adb(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:

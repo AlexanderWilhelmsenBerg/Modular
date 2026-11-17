@@ -59,6 +59,7 @@ internal fun FilesNativeContent(
     val ioMutex = remember { Mutex() }
     var page by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var dismissMenu by remember { mutableStateOf<(() -> Boolean)?>(null) }
     var pendingActions by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var showPendingAction by remember { mutableStateOf(false) }
     LaunchedEffect(pendingActions > 0) {
@@ -149,19 +150,20 @@ internal fun FilesNativeContent(
 
     val uiState = remember(page) { filesSurfaceUiState(page) }
     SideEffect {
-        onBackState(uiState.backActionId != null, uiState.exclusiveGestures, uiState.backActionId?.let { id ->
-            { performAction(actionRequest(id)); true }
-        })
+        onBackState(dismissMenu != null || uiState.backActionId != null,
+            dismissMenu != null || uiState.exclusiveGestures,
+            dismissMenu ?: uiState.backActionId?.let { id -> { performAction(actionRequest(id)); true } })
     }
 
     val appsThresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
-    val appsGesture = remember(uiState.allowAppsSwipe, onRequestApps, appsThresholdPx) {
+    val allowAppsSwipe = uiState.allowAppsSwipe && dismissMenu == null
+    val appsGesture = remember(allowAppsSwipe, onRequestApps, appsThresholdPx) {
         object : NestedScrollConnection {
             private var upwardPx = 0f
             private var requested = false
 
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                if (source != NestedScrollSource.UserInput || !uiState.allowAppsSwipe || onRequestApps == null)
+                if (source != NestedScrollSource.UserInput || !allowAppsSwipe || onRequestApps == null)
                     return Offset.Zero
                 if (available.y >= 0f) {
                     upwardPx = 0f
@@ -186,7 +188,7 @@ internal fun FilesNativeContent(
     }
 
     Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-        .then(if (onRequestApps != null && uiState.allowAppsSwipe) Modifier.nestedScroll(appsGesture) else Modifier)) {
+        .then(if (onRequestApps != null && allowAppsSwipe) Modifier.nestedScroll(appsGesture) else Modifier)) {
         val currentPage = page
         if (currentPage == null) {
             Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -195,6 +197,7 @@ internal fun FilesNativeContent(
             }
         } else {
             FilesPage(currentPage,
+                onMenuStateChanged = { dismissMenu = it },
                 onRefresh = ::load,
                 onScrollState = { key, anchor, offset ->
                     val position = Triple(key, anchor, offset)

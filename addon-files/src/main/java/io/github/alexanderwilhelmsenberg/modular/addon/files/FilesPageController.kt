@@ -868,6 +868,25 @@ class FilesPageController internal constructor(context: Context,
             action(row, if (entry.id in selected) "Selected" else "Select", "select") {
                 if (!selected.add(entry.id)) selected.remove(entry.id)
             }
+            if (entry.readable) {
+                action(row, "Copy", "copy") { clipboard = listOf(entry.id); clipboardMove = false; selected.clear() }
+                if (entry.writable) {
+                    action(row, "Cut", "cut") { clipboard = listOf(entry.id); clipboardMove = true; selected.clear() }
+                    action(row, "Move…", "move") {
+                        clipboard = listOf(entry.id); clipboardMove = true; selected.clear()
+                        destinationFolderId = entry.parentId ?: folderId
+                        view = "movePicker"
+                    }
+                }
+            }
+            if (entry.writable) action(row, "Delete", "review") {
+                val returnView = view
+                startJob("Preparing deletion review", "review") { cancel, _ ->
+                    val plan = repository.prepareDeletion(listOf(entry.id), cancel)
+                    synchronized(lock) { review = plan; reviewReturnView = returnView; selected.clear() }
+                    "${plan.fileCount} affected files captured for review"
+                }
+            }
             if (!entry.isDirectory) {
                 action(row, "Open with", "openExternal", hostAction = "openDocument", documentId = entry.id) { }
                 val archiveExt = entry.name.lowercase()

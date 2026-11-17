@@ -34,7 +34,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Module-owned page state and command router. All calls are blocking and belong on an I/O thread. */
 class FilesPageController internal constructor(context: Context,
     private val repository: FilesRepository = createFilesRepository(context),
-    private val operationLifetime: FilesOperationLifetime = FilesOperationLifetime.NONE) {
+    private val operationLifetime: FilesOperationLifetime = FilesOperationLifetime.NONE,
+    private val trashReviewStore: TrashReviewStore? = null) {
     private val app = context.applicationContext
     private val preferences = app.getSharedPreferences("files-page", Context.MODE_PRIVATE)
     private val eventPreferences = app.getSharedPreferences("files-events", Context.MODE_PRIVATE)
@@ -141,7 +142,8 @@ class FilesPageController internal constructor(context: Context,
         val status: String, val done: Long = 0, val total: Long? = null,
         val backgroundWarning: String? = null)
     @Volatile private var operationDisplay: OperationDisplay? = null
-    private var lastProgressEventAt = 0L
+    private val lastProgressEventAt = java.util.concurrent.atomic.AtomicLong()
+    @Volatile private var activeTrashReviewId: String? = null
     private var activeJobId: String? = null
     private var jobLabel = ""
     private var jobBackView = "browser"
@@ -177,9 +179,16 @@ class FilesPageController internal constructor(context: Context,
 
     init {
         events.record("files.started", "Files ${BuildConfig.VERSION_NAME} · Android ${android.os.Build.VERSION.SDK_INT}")
+        val previousExit = FilesExitDiagnostics.snapshot(app).optJSONObject(0)
+        if (previousExit != null && previousExit.optLong("at") > preferences.getLong("lastExitLoggedAt", 0)) {
+            events.record("process.previous_exit", "${previousExit.optString("reason")} · ${previousExit.optString("description")}",
+                "WARN", details = previousExit.toString())
+            preferences.edit().putLong("lastExitLoggedAt", previousExit.optLong("at")).apply()
+        }
         preferences.getString("runningOperationId", null)?.let { id ->
             val label = preferences.getString("runningOperationLabel", "File operation")
-            message = "$label was interrupted when the Files process stopped. Review storage before retrying."
+            message = "$label was interrupted when the Files process stopped" +
+                (previousExit?.optString("reason")?.let { " ($it)" } ?: "") + ". Review storage before retrying."
             events.record("operation.interrupted", message!!, "WARN", id)
             preferences.edit().remove("runningOperationId").remove("runningOperationLabel").apply()
         }
@@ -188,7 +197,7 @@ class FilesPageController internal constructor(context: Context,
     private fun beginOperation(id: String, label: String) {
         message = null
         jobStatus = label
-        lastProgressEventAt = 0
+        lastProgressEventAt.set(0)
         preferences.edit().putString("runningOperationId", id).putString("runningOperationLabel", label).commit()
         val warning = operationLifetime.begin(id, label)
         operationDisplay = OperationDisplay(id, label, System.currentTimeMillis(), label,
@@ -208,8 +217,8 @@ class FilesPageController internal constructor(context: Context,
         jobStatus = status
         operationLifetime.update(old.id, status, done, total)
         val now = System.currentTimeMillis()
-        if (now - lastProgressEventAt >= 5_000) {
-            lastProgressEventAt = now
+        val previous = lastProgressEventAt.get()
+        if (now - previous >= 5_000 && lastProgressEventAt.compareAndSet(previous, now)) {
             events.record("operation.progress", status, operationId = old.id,
                 details = "bytesDone=$done; bytesTotal=${total ?: "unknown"}; elapsedMs=${now - old.startedAt}")
         }
@@ -219,6 +228,7 @@ class FilesPageController internal constructor(context: Context,
         if (operationDisplay?.id != id) return
         operationLifetime.finish(id)
         operationDisplay = null
+        if (pendingHostLaunch?.optString("kind") == "startOperation") pendingHostLaunch = null
         preferences.edit().remove("runningOperationId").remove("runningOperationLabel").apply()
     }
 
@@ -238,6 +248,7 @@ class FilesPageController internal constructor(context: Context,
     }
 
     internal fun cancelCurrentOperation(reason: String = "user") { requestOperationCancel(reason) }
+    internal fun recordLifecycleEvent(event: String, text: String) { events.record(event, text) }
 
     fun exportEventLogJson(): String {
         val history = runCatching { repository.history().map { operation ->
@@ -249,7 +260,48 @@ class FilesPageController internal constructor(context: Context,
         } }.getOrElse { events.record("history.export_failed", it.message ?: "History unavailable", "WARN"); emptyList() }
         return JSONObject(events.exportJson())
             .put("appVersion", BuildConfig.VERSION_NAME).put("androidApi", android.os.Build.VERSION.SDK_INT)
-            .put("activeOperation", operationJson()).put("operationHistory", JSONArray(history)).toString(2)
+            .put("activeOperation", operationJson()).put("operationHistory", JSONArray(history))
+            .put("recentProcessExits", FilesExitDiagnostics.snapshot(app))
+            .put("trashReviewMetrics", JSONObject(repository.trashReviewDiagnostics())).toString(2)
+    }
+
+    internal fun recoverTrashReview(): Boolean = synchronized(lock) {
+        if (activeJobCancel != null || cleanScanCancel != null) return@synchronized false
+        val saved = trashReviewStore?.load() ?: run {
+            trashReviewStore?.error?.let {
+                events.record("trash.review_recovery_failed", "Saved trash review could not be restored", "ERROR", details = it)
+                message = "Saved trash review is unreadable. Open Trash to prepare a new review."
+            }
+            return@synchronized false
+        }
+        offlineTrashPending = saved.offline
+        if (saved.plan != null) {
+            emptyTrashReview = saved.plan; view = "emptyTrashReview"; currentOffset = 0
+            message = "Recovered the prepared trash review. Items will be checked again before deletion."
+            events.record("trash.review_recovered", "Prepared review recovered", operationId = saved.id)
+        } else {
+            events.record("trash.review_resumed", "Resuming interrupted read-only trash review", operationId = saved.id)
+            prepareTrashReview(saved.ids, saved.offline, saved)
+        }
+        true
+    }
+
+    private fun prepareTrashReview(ids: List<String>, offline: Int, resume: TrashReviewStore.Saved? = null) {
+        requireIdle()
+        val saved = resume ?: trashReviewStore?.begin(ids, offline)
+            ?: TrashReviewStore.Saved(UUID.randomUUID().toString(), ids, offline)
+        startJob("Preparing permanent trash review", "emptyTrashReview", saved.id) { cancel, progress ->
+            val plan = repository.prepareEmptyTrash(saved.ids, cancel, progress)
+            check(!cancel.isCanceled()) { "Trash review canceled" }
+            trashReviewStore?.complete(saved.id, plan)
+            if (!plan.complete || plan.errors.isNotEmpty()) events.record("trash.review_incomplete",
+                "${plan.errors.size} errors prevent permanent deletion", "WARN", activeJobId,
+                details = plan.errors.take(40).joinToString("\n"))
+            events.record("trash.review_metrics", "Prepared ${plan.entries.size} trash entries", operationId = activeJobId,
+                details = JSONObject(repository.trashReviewDiagnostics()).toString())
+            synchronized(lock) { emptyTrashReview = plan; offlineTrashPending = saved.offline }
+            "${plan.entries.size} available trash entries ready for review; ${saved.offline} offline remain pending"
+        }
     }
 
     private fun cleanKey(folder: String): String = listOf(folder, cleanerIncludeSubfolders,
@@ -266,6 +318,7 @@ class FilesPageController internal constructor(context: Context,
     fun consumeHostHandoff(nonce: String): HostHandoff? = synchronized(lock) {
         if (nonce.length !in 32..64) return@synchronized null
         val item = handoffs.remove(nonce) ?: return@synchronized null
+        if (pendingHostLaunch?.optString("nonce") == nonce) pendingHostLaunch = null
         item.value.takeIf { item.expiresAt >= System.currentTimeMillis() &&
             (item.value.kind != "startOperation" || operationDisplay?.id == item.value.documentId) &&
             (item.value.kind != "editDocument" || (view == "markdown" && documentId == item.value.documentId)) }
@@ -531,7 +584,10 @@ class FilesPageController internal constructor(context: Context,
         if (view == "browser" || view == "search") page.put("scrollKey", scrollKey())
         message?.let { page.put("message", it) }
         documentSaveStatus?.let { page.put("documentSaveStatus", it) }
-        pendingHostLaunch?.let { page.put("hostLaunch", it); pendingHostLaunch = null }
+        pendingHostLaunch?.let {
+            page.put("hostLaunch", it)
+            if (it.optString("kind") != "startOperation") pendingHostLaunch = null
+        }
         val actions = JSONArray()
         val items = JSONArray()
         if (view !in setOf("eventLog", "eventDetail")) action(actions, "Event log", "eventLog") {
@@ -872,13 +928,11 @@ class FilesPageController internal constructor(context: Context,
                 val online = all.filter { it.available }
                 offlineTrashPending = all.size - online.size
                 if (online.isEmpty()) message = "Trash is on unavailable storage; reconnect before emptying"
-                else startJob("Preparing permanent trash review", "emptyTrashReview") { cancel, progress ->
-                    val plan = repository.prepareEmptyTrash(online.map { it.id }, cancel, progress)
-                    if (!plan.complete || plan.errors.isNotEmpty()) events.record("trash.review_incomplete",
-                        "${plan.errors.size} errors prevent permanent deletion", "WARN", activeJobId,
-                        details = plan.errors.take(40).joinToString("\n"))
-                    synchronized(lock) { emptyTrashReview = plan }
-                    "${plan.entries.size} available trash entries ready for review; $offlineTrashPending offline remain pending"
+                else {
+                    requireIdle()
+                    val prepared = trashReviewStore?.load()?.plan
+                    if (prepared != null) { emptyTrashReview = prepared; view = "emptyTrashReview" }
+                    else prepareTrashReview(online.map { it.id }, offlineTrashPending)
                 }
             }
         }
@@ -1027,10 +1081,11 @@ class FilesPageController internal constructor(context: Context,
         if (plan.errors.isNotEmpty()) page.put("message", plan.errors.take(3).joinToString("; "))
         plan.descendants.drop(offset).take(limit).forEach { items.put(entryJson(it, false)) }
         next(page, actions, offset, limit, plan.descendants.size)
-        action(actions, "Cancel", "cancel") { emptyTrashReview = null; view = "trash" }
-        action(actions, "Back", "back") { emptyTrashReview = null; view = "trash" }
+        action(actions, "Cancel", "cancel") { trashReviewStore?.clear(); emptyTrashReview = null; view = "trash" }
+        action(actions, "Back", "back") { view = "trash" }
         if (plan.complete && plan.errors.isEmpty()) action(actions, "Empty permanently", "confirm", destructive = true) {
             startJob("Emptying reviewed trash", "trash") { cancel, progress ->
+                trashReviewStore?.clear() // A confirmed destructive operation is never replayed automatically.
                 val result = repository.emptyTrash(plan, cancel, progress)
                 logOperationResult("trash.empty", result)
                 synchronized(lock) { emptyTrashReview = null }
@@ -1632,13 +1687,14 @@ class FilesPageController internal constructor(context: Context,
         }
     }
 
-    private fun startJob(label: String, returnView: String,
+    private fun startJob(label: String, returnView: String, durableTrashReviewId: String? = null,
         task: (Cancellation, Progress) -> String) {
         requireIdle()
         val cancel = AtomicBoolean(false)
         val operationId = UUID.randomUUID().toString()
         activeJobCancel = cancel
         activeJobId = operationId
+        activeTrashReviewId = durableTrashReviewId
         jobLabel = label
         jobBackView = when (view) {
             "review" -> reviewReturnView
@@ -1667,6 +1723,8 @@ class FilesPageController internal constructor(context: Context,
                 if (activeJobCancel !== cancel) return@synchronized
                 activeJobCancel = null
                 activeJobId = null
+                if (cancel.get() || outcome.isFailure) durableTrashReviewId?.let { trashReviewStore?.clear(it) }
+                activeTrashReviewId = null
                 finishOperation(operationId)
                 // Completing an old job cannot dismiss a screen opened after it.
                 jobResultView = if (outcome.isSuccess && !cancel.get()) returnView else backView
@@ -1690,6 +1748,7 @@ class FilesPageController internal constructor(context: Context,
     private fun requestOperationCancel(reason: String = "user") {
         activeJobCancel?.set(true)
         cleanScanCancel?.set(true)
+        activeTrashReviewId?.let { trashReviewStore?.clear(it) }
         updateOperation("Cancel requested; finishing the current safe step")
         events.record("operation.cancel_requested", if (cleanScanCancel != null) "Cleanup scan" else jobLabel,
             operationId = activeJobId ?: "clean:$cleanScanId", details = "Requested by $reason")

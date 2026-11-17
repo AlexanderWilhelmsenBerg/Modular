@@ -27,7 +27,7 @@ class DirectStorageSafetyTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "ModularIdentity-${UUID.randomUUID()}"
         val fixture = File(Environment.getExternalStorageDirectory(), name)
-        val reads = mutableListOf<String>()
+        val reads = java.util.Collections.synchronizedList(mutableListOf<String>())
         val repository = io.github.alexanderwilhelmsenberg.modular.addon.files.storage.AndroidFilesRepository(context) { reads.add(it) }
         try {
             val root = repository.locations().single { it.kind == StorageLocation.Kind.PHONE }
@@ -63,7 +63,7 @@ class DirectStorageSafetyTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "ModularFilesCleaner-${UUID.randomUUID()}"
         val fixture = File(Environment.getExternalStorageDirectory(), name)
-        val reads = mutableListOf<String>()
+        val reads = java.util.Collections.synchronizedList(mutableListOf<String>())
         val repository = io.github.alexanderwilhelmsenberg.modular.addon.files.storage.AndroidFilesRepository(context) { reads.add(it) }
         try {
             val root = repository.locations().single { it.kind == StorageLocation.Kind.PHONE }

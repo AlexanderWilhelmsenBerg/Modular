@@ -38,6 +38,6 @@
                 android:resource="@raw/module_descriptor" />
         </service>
         <service android:name=".FilesOperationService" android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync" android:stopWithTask="false" />
     </application>
 </manifest>

@@ -102,9 +102,11 @@ class FilesOperationService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val app = application as FilesApplication
-        val state = app.operationLifetime.state
+        var state = app.operationLifetime.state
+        val recovering = state == null && app.trashReviewStore.load()?.plan == null && app.trashReviewStore.load() != null
         // A short operation can finish before Android delivers this start request.
-        val shown = state ?: AndroidFilesOperationLifetime.State("finished", "Files", "Operation finished")
+        val shown = state ?: AndroidFilesOperationLifetime.State("recovery", "Files",
+            if (recovering) "Resuming trash review" else "Operation finished")
         try {
             ServiceCompat.startForeground(this, NOTIFICATION, notification(this, shown),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -112,6 +114,10 @@ class FilesOperationService : Service() {
             if (state != null) app.operationLifetime.markFailed(state.id, failure)
             stopSelf(startId)
             return START_NOT_STICKY
+        }
+        if (recovering) {
+            app.pageController // Initialization restores the saved read-only request.
+            state = app.operationLifetime.state
         }
         if (state == null) { stopSelf(startId); return START_NOT_STICKY }
         app.operationLifetime.markStarted(state.id)
@@ -123,8 +129,16 @@ class FilesOperationService : Service() {
         if (intent?.action == CANCEL) {
             Thread { app.pageController.cancelCurrentOperation("notification") }.start()
         }
-        // Destructive jobs must never be blindly replayed after process death.
-        return START_NOT_STICKY
+        // Only a persisted read-only review can be redelivered; never a destructive confirmation.
+        return if (app.trashReviewStore.load()?.let { it.plan == null } == true) START_REDELIVER_INTENT else START_NOT_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val app = application as FilesApplication
+        if (app.operationLifetime.state != null) Thread {
+            app.pageController.recordLifecycleEvent("service.task_removed", "Task removed; background operation continues")
+        }.start()
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {

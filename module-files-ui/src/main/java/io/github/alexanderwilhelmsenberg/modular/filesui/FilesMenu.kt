@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.key.Key
@@ -46,6 +47,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import kotlin.math.roundToInt
 
 /** Menus share the embedded surface's layout and input coordinates; no child Window is created. */
@@ -115,7 +117,15 @@ internal fun FilesDropdownMenu(expanded: Boolean, onDismissRequest: () -> Unit,
     val latestDismiss by rememberUpdatedState(onDismissRequest)
     val latestModifier by rememberUpdatedState(modifier)
     val focus = remember { FocusRequester() }
-    Box(Modifier.onGloballyPositioned { anchor = it.parentLayoutCoordinates?.boundsInRoot() ?: it.boundsInRoot() })
+    Box(Modifier.onGloballyPositioned { coordinates ->
+        var parent = coordinates.parentLayoutCoordinates
+        // A row menu has an empty Box anchor. Use its nearest sized ancestor;
+        // clipped boundsInRoot() for an empty layout can discard its position.
+        while (parent != null && (parent.size.width == 0 || parent.size.height == 0))
+            parent = parent.parentLayoutCoordinates
+        val target = parent ?: coordinates
+        anchor = Rect(target.localToRoot(Offset.Zero), target.size.toSize())
+    })
     DisposableEffect(expanded, state) {
         val entry = if (expanded) MenuEntry({ anchor }, { latestDismiss() }) {
             Surface(modifier = latestModifier.testTag("files.menu").focusRequester(focus)

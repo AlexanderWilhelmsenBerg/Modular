@@ -63,7 +63,14 @@ class FilesMenuTouchTest {
 
     @Test fun longPressOffersDeleteAndOutsideTapDoesNotOpenTheFolder() {
         show()
+        val row = rule.onNodeWithTag("files.folder.row:photos").fetchSemanticsNode().boundsInRoot
         rule.onNodeWithTag("files.folder.row:photos").performTouchInput { longClick() }
+        val menu = rule.onNodeWithTag("files.menu").fetchSemanticsNode().boundsInRoot
+        val tolerance = 8 * owner.resources.displayMetrics.density
+        assertTrue("Folder menu must open below its row when there is room: row=$row menu=$menu",
+            menu.top >= row.bottom - tolerance)
+        assertTrue("Folder menu must align with the row's end: row=$row menu=$menu",
+            kotlin.math.abs(menu.right - row.right) <= tolerance)
         for (kind in listOf("copy", "cut", "move", "review")) {
             rule.onNodeWithTag("files.item.action.$kind").performScrollTo().assertIsDisplayed()
         }

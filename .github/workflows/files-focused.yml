@@ -52,8 +52,8 @@ jobs:
         if: always()
         run: |
           mkdir -p build/reports/device
-          adb logcat -d -b crash -v threadtime -t 1500 > build/reports/device/crash-buffer.txt || true
-          adb shell run-as io.github.alexanderwilhelmsenberg.modular.addon.files.debug cat files/last-java-crash.json > build/reports/device/last-java-crash.json || true
+          timeout 10s adb logcat -d -b crash -v threadtime -t 1500 > build/reports/device/crash-buffer.txt || true
+          timeout 10s adb shell run-as io.github.alexanderwilhelmsenberg.modular.addon.files.debug cat files/last-java-crash.json > build/reports/device/last-java-crash.json || true
       - name: Upload Files test reports
         if: always()
         uses: actions/upload-artifact@v4

@@ -40,6 +40,12 @@ internal fun FilesEventLogPage(page: JSONObject, send: (JSONObject) -> Unit, mod
                     context.getSystemService(ClipboardManager::class.java)
                         ?.setPrimaryClip(ClipData.newPlainText("Modular Files event log", page.optString("eventLogText")))
                 }, modifier = Modifier.testTag("files.events.copy")) { Text("Copy") }
+                page.optString("crashReportText").takeIf { it.isNotBlank() }?.let { crash ->
+                    TextButton(onClick = {
+                        context.getSystemService(ClipboardManager::class.java)
+                            ?.setPrimaryClip(ClipData.newPlainText("Modular Files crash", crash))
+                    }, modifier = Modifier.testTag("files.events.copyCrash")) { Text("Copy crash") }
+                }
                 TextButton(onClick = {
                     val json = action("shareEventLog")
                     if (json != null) { send(json); return@TextButton }
@@ -92,6 +98,7 @@ internal fun FilesActiveOperation(page: JSONObject, send: (JSONObject) -> Unit) 
     Column(Modifier.fillMaxWidth().testTag("files.operation.active")) {
         Text(operation.optString("label"), style = MaterialTheme.typography.titleSmall)
         FilesOperationDetails(operation)
+        FilesNotificationPrompt(page, send)
         Row {
             for (index in 0 until (actions?.length() ?: 0)) {
                 val action = actions?.optJSONObject(index) ?: continue
@@ -100,6 +107,15 @@ internal fun FilesActiveOperation(page: JSONObject, send: (JSONObject) -> Unit) 
                         !operation.optBoolean("cancelRequested")) { Text(action.optString("label")) }
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun FilesNotificationPrompt(page: JSONObject, send: (JSONObject) -> Unit) {
+    page.optJSONObject("progressNotificationAction")?.let { action ->
+        TextButton(onClick = { send(action) }, modifier = Modifier.testTag("files.progress.notifications")) {
+            Text(action.optString("label", "Show progress notifications"))
         }
     }
 }

@@ -2,6 +2,7 @@ package io.github.alexanderwilhelmsenberg.modular.addon.files
 
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerEngine
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Cancellation
@@ -40,6 +41,89 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun pendingCleanupScanResumesReadOnlyAndSavesFindingsAfterNavigation() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "scan-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 105)
+        val release = CountDownLatch(1)
+        repository.scanRelease = release
+        try {
+            val options = CleanerEngine.Options("root", false, emptySet(), emptySet(), 1024, 90,
+                java.time.Instant.now(), setOf(CleanerEngine.Category.NUMBERED_COPY))
+            CleanScanStore(file).begin("Saved folder", options)
+            val controller = FilesPageController(context, repository, FilesOperationLifetime.NONE, null, CleanScanStore(file))
+            assertTrue(controller.recoverReadOnlyWork())
+            assertTrue(repository.scanSecondPage.await(5, TimeUnit.SECONDS))
+            action(controller, page(controller), "Event log")
+            release.countDown()
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertEquals("eventLog", page(controller).getString("view"))
+            assertNotNull(CleanScanStore(file).load()!!.analysis)
+            assertEquals(0, repository.moveCalls)
+            assertEquals(0, repository.emptyCalls)
+        } finally { release.countDown(); CleanScanStore(file).clear(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun completedCleanupFindingsRestoreWithoutScanningOrOpeningPayloads() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().putString("view", "clean").putString("folder", "root").commit()
+        val file = java.io.File(context.cacheDir, "scan-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        try {
+            val options = CleanerEngine.Options("root", false, emptySet(), emptySet(), 1024, 90,
+                java.time.Instant.now(), setOf(CleanerEngine.Category.NUMBERED_COPY))
+            val store = CleanScanStore(file); val request = store.begin("Saved folder", options)
+            store.complete(request.id, CleanerEngine.Analysis(emptyMap(), emptyList(), emptyList(), emptyList(), options))
+            val controller = FilesPageController(context, repository, FilesOperationLifetime.NONE, null, CleanScanStore(file))
+            controller.recoverReadOnlyWork()
+            val restored = page(controller)
+            assertEquals("clean", restored.getString("view"))
+            assertFalse(restored.getBoolean("cleanSetup"))
+            assertFalse(restored.has("activeOperation"))
+            assertEquals(0, repository.scanCalls)
+            assertEquals(0, repository.fingerprintCalls)
+        } finally { CleanScanStore(file).clear(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun canceledRecoveredScanCannotRestorePendingWorkOrLateFindings() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "scan-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 105)
+        val release = CountDownLatch(1); repository.scanRelease = release
+        try {
+            val options = CleanerEngine.Options("root", false, emptySet(), emptySet(), 1024, 90,
+                java.time.Instant.now(), setOf(CleanerEngine.Category.NUMBERED_COPY))
+            CleanScanStore(file).begin("Saved folder", options)
+            val controller = FilesPageController(context, repository, FilesOperationLifetime.NONE, null, CleanScanStore(file))
+            controller.recoverReadOnlyWork()
+            assertTrue(repository.scanSecondPage.await(5, TimeUnit.SECONDS))
+            action(controller, page(controller), "Cancel current operation")
+            release.countDown()
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertNull(CleanScanStore(file).load())
+            assertEquals(0, repository.moveCalls)
+        } finally { release.countDown(); CleanScanStore(file).clear(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun repeatedCrashesPauseAutomaticScanRecovery() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "scan-${UUID.randomUUID()}.json")
+        try {
+            val options = CleanerEngine.Options("root", false, emptySet(), emptySet(), 1024, 90,
+                java.time.Instant.now(), setOf(CleanerEngine.Category.OLDER_VERSION))
+            val store = CleanScanStore(file); store.begin("Saved folder", options)
+            repeat(3) { store.recovering(store.load()!!) }
+            val repository = ReviewFixtureRepository(itemCount = 0)
+            val controller = FilesPageController(context, repository, FilesOperationLifetime.NONE, null, store)
+            assertFalse(controller.recoverReadOnlyWork())
+            assertTrue(page(controller).getString("message").contains("paused"))
+            assertEquals(0, repository.scanCalls)
+        } finally { CleanScanStore(file).clear(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
     @Test fun folderLongPressDeletePreparesOnlyThatFolderAndStillRequiresConfirmation() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()

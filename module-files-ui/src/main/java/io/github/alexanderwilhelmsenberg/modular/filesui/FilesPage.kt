@@ -301,6 +301,7 @@ private fun FilesPageContent(
                     .put("status", page.optString("jobStatus")), Modifier.padding(vertical = 16.dp))
                 Text("You can leave this screen. The operation continues until it finishes or you cancel it.",
                     style = MaterialTheme.typography.bodySmall)
+                FilesNotificationPrompt(page) { send(PageAction(it), null) }
                 actions.firstOrNull { it.kind == "eventLog" }?.let { action ->
                     TextButton(onClick = { send(action, null) }) { Text("Event log") }
                 }
@@ -931,6 +932,7 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
             }
             HorizontalDivider()
             if (!scanning) FilesActiveOperation(page) { send(PageAction(it), null) }
+            else FilesNotificationPrompt(page) { send(PageAction(it), null) }
             page.optString("cleanScopeName").takeIf { it.isNotBlank() }?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

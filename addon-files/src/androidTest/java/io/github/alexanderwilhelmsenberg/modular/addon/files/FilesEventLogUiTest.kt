@@ -17,6 +17,28 @@ import org.junit.Test
 class FilesEventLogUiTest {
     @get:Rule val rule = createComposeRule()
 
+    @Test fun notificationPromptDispatchesAndCrashCopyKeepsTheFullStack() {
+        val requests = mutableListOf<String>()
+        val state = mutableStateOf(JSONObject().put("version", 1).put("kind", "files").put("view", "progress")
+            .put("items", JSONArray()).put("actions", JSONArray())
+            .put("activeOperation", JSONObject().put("id", "scan").put("label", "Scanning folder").put("status", "Inspecting APK"))
+            .put("progressNotificationAction", JSONObject().put("id", "notifications").put("kind", "notifications")
+                .put("label", "Show progress notifications")).toString())
+        rule.setContent { MaterialTheme { FilesPage(state.value, onAction = {
+            requests.add(JSONObject(it).getString("actionId"))
+        }, onOpenDocument = { _, _ -> }) } }
+        rule.onNodeWithTag("files.progress.notifications").performClick()
+        rule.runOnIdle { assertEquals(listOf("notifications"), requests) }
+        val stack = "java.lang.IllegalStateException: full crash\n" + "at example.Frame.method(Frame.kt:1)\n".repeat(350)
+        rule.runOnIdle { state.value = JSONObject().put("version", 1).put("kind", "files").put("view", "eventLog")
+            .put("items", JSONArray()).put("actions", JSONArray()).put("crashReportText", stack).toString() }
+        rule.onNodeWithTag("files.events.copyCrash").performClick()
+        rule.runOnIdle {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            assertEquals(stack, context.getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.text?.toString())
+        }
+    }
+
     @Test fun reviewIssueActionsUseTheFullScreenAndDispatchImmediately() {
         val requests = mutableListOf<String>()
         val issue = JSONObject().put("message", "A file already occupies the rename destination")

@@ -11,6 +11,9 @@ RUNNER = PACKAGE + ".test/androidx.test.runner.AndroidJUnitRunner"
 BASE_CLASS = "io.github.alexanderwilhelmsenberg.modular.addon.files."
 REPORT_DIR = Path("build/reports/device")
 BROAD_TESTS = (
+    "FilesCrashReportsTest",
+    "CleanScanStoreTest",
+    "FilesBackgroundScanTest",
     "FilesOperationServiceTest",
     "FilesLogExportTest",
     "DirectStorageSafetyTest",
@@ -29,7 +32,7 @@ BROAD_TESTS = (
     "FilesHandoffNonceTest",
     "ArchiveRealStorageTest",
 )
-EXPECTED_COUNTS = {"FilesReviewPaginationTest": 27, "FilesMenuTouchTest": 2, "FilesTrashReviewStoreTest": 3, "DirectStorageSafetyTest": 5, "FilesLogExportTest": 2, "FilesPageVisualFixtureTest": 2, "FilesEventLogUiTest": 5, "FilesNativeDocumentUiTest": 2}
+EXPECTED_COUNTS = {"FilesReviewPaginationTest": 31, "FilesCrashReportsTest": 2, "CleanScanStoreTest": 3, "FilesBackgroundScanTest": 2, "FilesMenuTouchTest": 2, "FilesTrashReviewStoreTest": 3, "DirectStorageSafetyTest": 5, "FilesLogExportTest": 2, "FilesPageVisualFixtureTest": 2, "FilesEventLogUiTest": 6, "FilesNativeDocumentUiTest": 2}
 
 
 def adb(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -68,6 +71,7 @@ def main() -> None:
     try:
         try:
             adb("shell", "appops", "set", "--uid", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "allow")
+            adb("shell", "pm", "grant", PACKAGE, "android.permission.POST_NOTIFICATIONS")
             for name in BROAD_TESTS:
                 try:
                     run_test(name)

@@ -80,6 +80,33 @@ a menu is open. Folder context menus expose Copy, Cut, Move and reviewed Delete
 without a separate selection step. Storage location roots remain excluded.
 The visual dashboard audit is recorded in `docs/design/files-dashboard-review.md`.
 
+Files 0.1.7 exposes Android notification permission/settings from active work and
+Files settings. The foreground notification opens the current operation; a
+separate completion notification remains after the service stops. Notification
+permission is optional and never a substitute for the foreground-service gate.
+
+Cleanup scan options, progress counts, a completed snapshot and final findings
+are saved atomically. Pending read-only work can restart in the service after
+process loss; stable request IDs survive restart. Completed findings restore
+without another content scan and still require fresh review before deletion.
+Explicit cancellation clears the saved request. Three failed automatic recoveries
+pause further retries. Destructive confirmations are never persisted for replay.
+
+Older-version scans use confined, granted local paths for APK metadata rather
+than copying every local APK into cache. Providers without a local path retain
+the bounded-buffer staging path and report its byte progress. APK evidence is
+cached by file identity/revision and rechecked when the revision changes.
+
+An uncaught-exception handler writes a bounded private crash report independently
+of controller/event-log locks and then delegates to Android's original handler.
+The report includes exception/root cause, stack, thread/process, operation step
+and heap usage/limit. It does not swallow a fatal exception. The next startup
+imports it into Event log; JSON and Copy crash include its separate full report.
+The supplied 0.1.6 evidence establishes Java crashes during Older versions scans,
+including foreground-service importance, but does not contain their exception
+stacks. Hardware-specific resolution therefore remains unconfirmed until a stack
+or a reproducing device test identifies the exception.
+
 Progress publishes the current verification/mutation step, byte count when known,
 and elapsed time, without taking the page lock from a repository callback. Page
 rendering uses cached trash metadata; active mutations use display-only folder

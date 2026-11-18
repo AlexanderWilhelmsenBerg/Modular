@@ -6,6 +6,8 @@ import android.os.ParcelFileDescriptor
 
 /** Blocking I/O API. Call from an I/O dispatcher, never the main thread. */
 interface FilesRepository {
+    /** Optional confined/granted local path for read-only metadata inspection. Never authorizes writes. */
+    fun localMetadataPath(id: String): String? = null
     fun locations(): List<StorageLocation>
     /** Call after ACTION_OPEN_DOCUMENT_TREE succeeds; its returned read/write flags are persisted. */
     fun addSelectedFolder(uri: Uri, grantFlags: Int): StorageLocation

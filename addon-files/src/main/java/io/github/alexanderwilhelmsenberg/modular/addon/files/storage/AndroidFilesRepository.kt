@@ -43,6 +43,7 @@ class AndroidFilesRepository(private val context: Context,
     }
     @Volatile private var reviewStats: Map<String, Long> = emptyMap()
     override fun trashReviewDiagnostics(): Map<String, Long> = reviewStats
+    override fun localMetadataPath(id: String): String? = resolve(id).file?.takeIf { it.canRead() }?.absolutePath
     private val resolver = context.contentResolver
     private val prefs = context.getSharedPreferences("files_storage_v1", Context.MODE_PRIVATE)
     private val totals = ConcurrentHashMap<String, DirectoryTotal>()

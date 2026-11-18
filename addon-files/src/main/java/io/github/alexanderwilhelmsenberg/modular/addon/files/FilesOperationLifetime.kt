@@ -8,6 +8,7 @@ internal interface FilesOperationLifetime {
     }
     fun update(id: String, status: String, done: Long, total: Long?) {}
     fun finish(id: String) {}
+    fun result(id: String, summary: String) {}
 
     companion object { val NONE = object : FilesOperationLifetime {} }
 }

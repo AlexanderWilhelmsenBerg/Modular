@@ -22,6 +22,7 @@ import java.util.zip.ZipFile
 
 /** Performs blocking I/O. Call only from an I/O dispatcher after the user's explicit Scan action. */
 class CleanerRepositoryAdapter(private val repository: FilesRepository, private val context: Context? = null) {
+    private val apkCache by lazy { context?.let { ApkEvidenceCache(File(it.filesDir, "apk-evidence-v1")) } }
     data class Snapshot(val entries: List<CleanerEngine.Entry>, val errors: List<String>)
     data class Execution(val trash: OperationResult?, val renames: List<FileOutcome>, val errors: List<String>)
 
@@ -30,7 +31,8 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
                  excludedRules: Set<String> = emptySet(),
                  progressiveOptions: CleanerEngine.Options? = null,
                  onProgress: ((CleanerEngine.Progress) -> Unit)? = null,
-                 verifiedIds: Set<String>? = null): Snapshot {
+                 verifiedIds: Set<String>? = null,
+                 onItem: ((String, Long, Long?) -> Unit)? = null): Snapshot {
         val entries = mutableListOf<CleanerEngine.Entry>()
         val errors = mutableListOf<String>()
         val root = repository.get(rootId)
@@ -100,7 +102,8 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
                         }
                     } else toCleaner(child, true, cancel, verifyFingerprint &&
                         (verifiedIds == null || child.id in verifiedIds),
-                        parseApk && (progressiveOptions?.includeSubfolders() != false || folder.id == rootId))
+                        parseApk && (progressiveOptions?.includeSubfolders() != false || folder.id == rootId),
+                        Progress { done, total, name -> onItem?.invoke(name, done, total) })
                 }
                 children.addAll(converted)
                 if (children.size > 1_000 && !groupHintsDeferred) {
@@ -381,26 +384,43 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
             if (verifyFingerprint) repository.identityFingerprint(entry.id, cancel, progress).also {
                 if (cancel.isCanceled()) throw CancellationException("Cleaner scan canceled")
             } else CleanerEngine.PENDING_REVISION,
-            childrenComplete, if (parseApk) apkEvidence(entry, cancel) else null
+            childrenComplete, if (parseApk) apkEvidence(entry, cancel, progress) else null
         )
 
-    private fun apkEvidence(entry: FileEntry, cancel: Cancellation): CleanerEngine.ApkEvidence? {
+    private fun apkEvidence(entry: FileEntry, cancel: Cancellation, progress: Progress): CleanerEngine.ApkEvidence? {
         val appContext = context ?: return null
         if (entry.isDirectory || !entry.name.endsWith(".apk", ignoreCase = true)) return null
-        val temp = File.createTempFile("cleaner-apk-", ".apk", appContext.cacheDir)
+        val revision = repository.identityFingerprint(entry.id, cancel, progress)
+        val key = "${entry.id}|${entry.name}|$revision"
+        apkCache?.get(key)?.let { return it }
+        progress.onProgress(0, null, "Inspecting APK · ${entry.name}")
+        io.github.alexanderwilhelmsenberg.modular.addon.files.FilesCrashReports.operation =
+            runCatching { org.json.JSONObject(io.github.alexanderwilhelmsenberg.modular.addon.files.FilesCrashReports.operation ?: "{}") }
+                .getOrDefault(org.json.JSONObject()).put("stage", "apk_metadata").put("file", entry.name)
+                .put("fileId", entry.id).toString()
+        val direct = repository.localMetadataPath(entry.id)
+        val temp = if (direct == null) File.createTempFile("cleaner-apk-", ".apk", appContext.cacheDir) else null
         try {
-            ParcelFileDescriptor.AutoCloseInputStream(repository.openRead(entry.id)).use { input ->
+            if (temp != null) ParcelFileDescriptor.AutoCloseInputStream(repository.openRead(entry.id)).use { input ->
                 FileOutputStream(temp).use { output ->
                     val buffer = ByteArray(32 * 1024)
+                    var copied = 0L
+                    var reported = 0L
                     while (true) {
                         if (cancel.isCanceled()) throw CancellationException("Cleaner scan canceled")
                         val count = input.read(buffer)
                         if (count < 0) break
                         output.write(buffer, 0, count)
+                        copied += count
+                        if (copied - reported >= 1024 * 1024) {
+                            reported = copied
+                            progress.onProgress(copied, entry.sizeBytes, "Reading APK metadata · ${entry.name}")
+                        }
                     }
                 }
             }
-            val info = appContext.packageManager.getPackageArchiveInfo(temp.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES)
+            val path = direct ?: requireNotNull(temp).absolutePath
+            val info = appContext.packageManager.getPackageArchiveInfo(path, PackageManager.GET_SIGNING_CERTIFICATES)
                 ?: return null
             val signatures = info.signingInfo?.apkContentsSigners ?: return null
             if (signatures.isEmpty()) return null
@@ -408,7 +428,7 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
                 MessageDigest.getInstance("SHA-256").digest(signature.toByteArray())
                     .joinToString("") { "%02x".format(it.toInt() and 0xff) }
             }.sorted().joinToString("+")
-            val architectures = ZipFile(temp).use { zip ->
+            val architectures = ZipFile(path).use { zip ->
                 zip.entries().asSequence().mapNotNull { zipEntry ->
                     val path = zipEntry.name.split('/')
                     if (path.size >= 3 && path[0] == "lib") path[1] else null
@@ -421,16 +441,21 @@ class CleanerRepositoryAdapter(private val repository: FilesRepository, private 
                 "stable" in lower -> "stable"
                 else -> null
             }
-            return CleanerEngine.ApkEvidence(
+            val evidence = CleanerEngine.ApkEvidence(
                 info.packageName, signer, info.longVersionCode, info.versionName,
                 architectures, channel, info.splitNames?.sorted()?.joinToString("+") ?: "base",
                 (info.applicationInfo?.flags ?: 0) and ApplicationInfo.FLAG_DEBUGGABLE != 0
             )
+            if (repository.identityFingerprint(entry.id, cancel, progress) != revision)
+                throw IOException("APK changed during inspection")
+            // Provider identity/mtime may be weak or absent; only local stat-backed revisions are reusable.
+            if (direct != null) runCatching { apkCache?.put(key, evidence) }
+            return evidence
         } catch (_: Exception) {
             if (cancel.isCanceled()) throw IOException("Cleaner scan canceled")
             return null
         } finally {
-            temp.delete()
+            temp?.delete()
         }
     }
 

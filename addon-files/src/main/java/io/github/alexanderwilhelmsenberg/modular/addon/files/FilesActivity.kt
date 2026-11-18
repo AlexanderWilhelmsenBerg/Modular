@@ -37,6 +37,11 @@ open class FilesActivity : ComponentActivity() {
     private lateinit var controller: FilesPageController
     private var launchedFromCoreHandoff = false
     private var refreshToken by mutableIntStateOf(0)
+    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        controller.recordLifecycleEvent("notification.permission", if (granted) "Progress notifications enabled" else "Notification permission declined")
+        refreshToken++
+        if (launchedFromCoreHandoff) finish()
+    }
 
     private val saveEventLog = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) {
@@ -83,6 +88,7 @@ open class FilesActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         controller = (application as FilesApplication).pageController
+        if (intent?.getBooleanExtra(EXTRA_SHOW_OPERATION, false) == true) controller.openCurrentOperation(intent.getStringExtra("operationId"))
         launchedFromCoreHandoff = savedInstanceState?.getBoolean("coreHandoff") == true
         if (intent?.getBooleanExtra(EXTRA_SETTINGS, false) == true) controller.openSettings()
         val handoff = if (savedInstanceState == null) intent?.getStringExtra(WorkspacePageContract.EXTRA_HOST_HANDOFF_NONCE)
@@ -118,6 +124,13 @@ open class FilesActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_SHOW_OPERATION, false)) controller.openCurrentOperation(intent.getStringExtra("operationId"))
+        refreshToken++
     }
 
     private fun openOrShare(documentId: String, share: Boolean, finishAfter: Boolean = false) {
@@ -172,6 +185,17 @@ open class FilesActivity : ComponentActivity() {
                 }
             }
             "exportEventLog" -> saveEventLog.launch("modular-files-events-${java.time.LocalDate.now()}.json")
+            "notifications" -> {
+                if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                    (!getSharedPreferences("files-page", MODE_PRIVATE).getBoolean("notificationsRequested", false) ||
+                        shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS))) {
+                    getSharedPreferences("files-page", MODE_PRIVATE).edit().putBoolean("notificationsRequested", true).apply()
+                    notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                    if (fromCore) finish()
+                }
+            }
             "pickFolder" -> chooseFolder.launch(null)
             "editDocument" -> {
                 // The controller remains on the active Markdown page. This Activity supplies
@@ -195,5 +219,8 @@ open class FilesActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
     }
 
-    companion object { const val EXTRA_SETTINGS = "openFilesSettings" }
+    companion object {
+        const val EXTRA_SETTINGS = "openFilesSettings"
+        const val EXTRA_SHOW_OPERATION = "showFilesOperation"
+    }
 }

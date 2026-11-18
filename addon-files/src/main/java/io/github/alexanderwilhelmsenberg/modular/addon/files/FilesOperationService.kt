@@ -33,6 +33,7 @@ internal class AndroidFilesOperationLifetime(private val context: Context) : Fil
         ready = id to java.util.concurrent.CountDownLatch(1)
         startFailure = null
         lastNotification = 0
+        context.getSystemService(NotificationManager::class.java).cancel(FilesNotifications.RESULT)
         return runCatching {
             ContextCompat.startForegroundService(context, Intent(context, FilesOperationService::class.java))
             null
@@ -89,6 +90,10 @@ internal class AndroidFilesOperationLifetime(private val context: Context) : Fil
             }
         }
     }
+
+    @Synchronized override fun result(id: String, summary: String) {
+        state?.takeIf { it.id == id }?.let { runCatching { FilesNotifications.completed(context, it, summary) } }
+    }
 }
 
 class FilesOperationService : Service() {
@@ -103,10 +108,12 @@ class FilesOperationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val app = application as FilesApplication
         var state = app.operationLifetime.state
-        val recovering = state == null && app.trashReviewStore.load()?.plan == null && app.trashReviewStore.load() != null
+        val pendingTrash = app.trashReviewStore.load()?.let { it.plan == null } == true
+        val pendingScan = app.cleanScanStore.load()?.let { it.analysis == null && it.attempts < 3 } == true
+        val recovering = state == null && (pendingTrash || pendingScan)
         // A short operation can finish before Android delivers this start request.
         val shown = state ?: AndroidFilesOperationLifetime.State("recovery", "Files",
-            if (recovering) "Resuming trash review" else "Operation finished")
+            if (recovering) "Resuming saved file operation" else "Operation finished")
         try {
             ServiceCompat.startForeground(this, NOTIFICATION, notification(this, shown),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -130,7 +137,9 @@ class FilesOperationService : Service() {
             Thread { app.pageController.cancelCurrentOperation("notification") }.start()
         }
         // Only a persisted read-only review can be redelivered; never a destructive confirmation.
-        return if (app.trashReviewStore.load()?.let { it.plan == null } == true) START_REDELIVER_INTENT else START_NOT_STICKY
+        return if (app.trashReviewStore.load()?.let { it.plan == null } == true ||
+            app.cleanScanStore.load()?.let { it.analysis == null && it.attempts < 3 } == true)
+            START_REDELIVER_INTENT else START_NOT_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -157,8 +166,7 @@ class FilesOperationService : Service() {
         internal const val NOTIFICATION = 4101
         private const val CANCEL = "files.operation.CANCEL"
         internal fun notification(context: Context, state: AndroidFilesOperationLifetime.State): Notification {
-            val open = PendingIntent.getActivity(context, 0, Intent(context, FilesActivity::class.java),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val open = FilesNotifications.open(context, state.id)
             val cancel = PendingIntent.getService(context, 1,
                 Intent(context, FilesOperationService::class.java).setAction(CANCEL),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)

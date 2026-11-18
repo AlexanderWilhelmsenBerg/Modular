@@ -35,9 +35,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 class FilesPageController internal constructor(context: Context,
     private val repository: FilesRepository = createFilesRepository(context),
     private val operationLifetime: FilesOperationLifetime = FilesOperationLifetime.NONE,
-    private val trashReviewStore: TrashReviewStore? = null) {
+    private val trashReviewStore: TrashReviewStore? = null,
+    private val cleanScanStore: CleanScanStore? = null) {
     private val app = context.applicationContext
     private val preferences = app.getSharedPreferences("files-page", Context.MODE_PRIVATE)
+    private val interruptedLabel = preferences.getString("runningOperationLabel", null)
     private val eventPreferences = app.getSharedPreferences("files-events", Context.MODE_PRIVATE)
     private val events = FilesEventLog({ eventPreferences.getString("entries", null) },
         { eventPreferences.edit().putString("entries", it).commit() })
@@ -123,6 +125,7 @@ class FilesPageController internal constructor(context: Context,
     private val totalErrors = mutableMapOf<String, String>()
     @Volatile private var activeJobCancel: AtomicBoolean? = null
     @Volatile private var cleanScanCancel: AtomicBoolean? = null
+    @Volatile private var activeCleanRequestId: String? = null
     private var cleanScanKey: String? = null
     private var cleanScanFolderId: String? = null
     private var cleanScanFolderName: String? = null
@@ -179,6 +182,11 @@ class FilesPageController internal constructor(context: Context,
 
     init {
         events.record("files.started", "Files ${BuildConfig.VERSION_NAME} · Android ${android.os.Build.VERSION.SDK_INT}")
+        FilesCrashReports.read(app)?.takeIf { it.optString("id") != preferences.getString("lastCrashImported", null) }?.let { crash ->
+            events.record("process.uncaught_exception", "${crash.optString("exception")}: ${crash.optString("message")}",
+                "ERROR", details = crash.optString("stack"))
+            if (events.storageError == null) preferences.edit().putString("lastCrashImported", crash.optString("id")).commit()
+        }
         val previousExit = FilesExitDiagnostics.snapshot(app).optJSONObject(0)
         if (previousExit != null && previousExit.optLong("at") > preferences.getLong("lastExitLoggedAt", 0)) {
             events.record("process.previous_exit", "${previousExit.optString("reason")} · ${previousExit.optString("description")}",
@@ -191,6 +199,8 @@ class FilesPageController internal constructor(context: Context,
                 (previousExit?.optString("reason")?.let { " ($it)" } ?: "") + ". Review storage before retrying."
             events.record("operation.interrupted", message!!, "WARN", id)
             preferences.edit().remove("runningOperationId").remove("runningOperationLabel").apply()
+            if (view == "progress" && interruptedLabel != "Scanning folder")
+                view = if (interruptedLabel?.contains("trash", ignoreCase = true) == true) "trash" else "browser"
         }
     }
 
@@ -202,6 +212,7 @@ class FilesPageController internal constructor(context: Context,
         val warning = operationLifetime.begin(id, label)
         operationDisplay = OperationDisplay(id, label, System.currentTimeMillis(), label,
             backgroundWarning = warning)
+        FilesCrashReports.operation = operationJson()?.toString()
         if (warning != null) {
             events.record("operation.foreground_handoff", warning, "WARN", id)
             jobStatus = "Starting background operation through Files"
@@ -215,6 +226,7 @@ class FilesPageController internal constructor(context: Context,
         val old = operationDisplay ?: return
         operationDisplay = old.copy(status = status, done = done, total = total)
         jobStatus = status
+        FilesCrashReports.operation = operationJson()?.toString()
         operationLifetime.update(old.id, status, done, total)
         val now = System.currentTimeMillis()
         val previous = lastProgressEventAt.get()
@@ -228,6 +240,7 @@ class FilesPageController internal constructor(context: Context,
         if (operationDisplay?.id != id) return
         operationLifetime.finish(id)
         operationDisplay = null
+        FilesCrashReports.operation = null
         if (pendingHostLaunch?.optString("kind") == "startOperation") pendingHostLaunch = null
         preferences.edit().remove("runningOperationId").remove("runningOperationLabel").apply()
     }
@@ -262,6 +275,9 @@ class FilesPageController internal constructor(context: Context,
             .put("appVersion", BuildConfig.VERSION_NAME).put("androidApi", android.os.Build.VERSION.SDK_INT)
             .put("activeOperation", operationJson()).put("operationHistory", JSONArray(history))
             .put("recentProcessExits", FilesExitDiagnostics.snapshot(app))
+            .put("lastUnhandledCrash", FilesCrashReports.read(app))
+            .put("notificationState", FilesNotifications.status(app))
+            .put("notifications", FilesNotifications.status(app))
             .put("trashReviewMetrics", JSONObject(repository.trashReviewDiagnostics())).toString(2)
     }
 
@@ -285,6 +301,35 @@ class FilesPageController internal constructor(context: Context,
         }
         true
     }
+
+    internal fun recoverReadOnlyWork(): Boolean = synchronized(lock) {
+        val saved = cleanScanStore?.load() ?: return@synchronized recoverTrashReview()
+        if (saved.analysis != null) {
+            cleanerAnalysis = saved.analysis; cleanerScopeKey = savedCleanKey(saved.options)
+            cleanPresentedKey = cleanerScopeKey; cleanPresentedFolderId = saved.options.scopeId()
+            if (view == "clean" || (view == "progress" && interruptedLabel == "Scanning folder")) {
+                view = "clean"; cleanSetup = false
+            }
+            events.record("clean.result_restored", "Saved cleanup findings restored; review still checks live files")
+            return@synchronized recoverTrashReview()
+        }
+        if (saved.attempts >= 3) {
+            message = "Scan paused after repeated process stops. See Event log for the crash details before trying again."
+            folderId = saved.options.scopeId(); cleanPresentedFolderId = folderId; view = "clean"; cleanSetup = true
+            events.record("clean.recovery_paused", message!!, "ERROR", saved.id)
+            return@synchronized false
+        }
+        if (activeJobCancel != null || cleanScanCancel != null) return@synchronized false
+        folderId = saved.options.scopeId()
+        events.record("clean.resuming", "Resuming read-only scan · ${saved.name}", operationId = saved.id,
+            details = "Previous progress: ${saved.files} files; ${saved.folders} folders")
+        startCleanScan(saved.options.scopeId(), force = true, resume = cleanScanStore.recovering(saved))
+        true
+    }
+
+    private fun savedCleanKey(options: CleanerEngine.Options): String = listOf(options.scopeId(), options.includeSubfolders(),
+        options.largeBytes() / (1024 * 1024), options.oldDownloadDays(), options.excludedIds().sorted().joinToString("|"),
+        options.selectedCategories().map { it.name }.sorted().joinToString("|")).joinToString("::")
 
     private fun prepareTrashReview(ids: List<String>, offline: Int, resume: TrashReviewStore.Saved? = null) {
         requireIdle()
@@ -554,6 +599,23 @@ class FilesPageController internal constructor(context: Context,
     }
 
     fun openSettings() = synchronized(lock) { cleanSettingsFolderId = null; view = "settings"; persist() }
+    internal fun openCurrentOperation(id: String? = null) = synchronized(lock) {
+        if (activeJobCancel != null || cleanScanCancel != null) {
+            if (cleanScanCancel != null) {
+                cleanPresentedKey = cleanScanKey
+                cleanPresentedFolderId = cleanScanFolderId
+            }
+            view = "progress"
+        }
+        else if (id?.startsWith("clean:") == true && cleanerAnalysis != null) {
+            val analysis = cleanerAnalysis!!
+            folderId = analysis.options().scopeId()
+            locationId = analysis.entries()[folderId]?.volumeId() ?: locationId
+            cleanPresentedFolderId = folderId
+            cleanPresentedKey = cleanerScopeKey; cleanSetup = false; view = "clean"
+        }
+        persist()
+    }
 
     private fun render(offset: Int, limit: Int): String {
         commands.beginPage()
@@ -595,6 +657,8 @@ class FilesPageController internal constructor(context: Context,
         }
         if (activeJobCancel != null || cleanScanCancel != null) {
             page.put("activeOperation", operationJson())
+            if (!FilesNotifications.status(app).optBoolean("visible")) page.put("progressNotificationAction",
+                registered("Show progress notifications", "notifications", hostAction = "notifications") {})
             if (view != "progress") action(actions, "Current operation", "showOperation") { view = "progress" }
             action(actions, "Cancel current operation", "cancelOperation") { requestOperationCancel() }
         }
@@ -1506,6 +1570,9 @@ class FilesPageController internal constructor(context: Context,
                 if (activeJobCancel !== cancel) return@synchronized
                 activeJobCancel = null
                 activeJobId = null
+                operationLifetime.result(operationId, if (cancel.get()) "Review canceled" else outcome.fold(
+                    { if (it.readyForReview()) "Cleanup review ready" else "Cleanup review needs attention" },
+                    { "Review failed: ${it.message}" }))
                 finishOperation(operationId)
                 if (!cancel.get() && outcome.isSuccess) {
                     val plan = outcome.getOrThrow()
@@ -1526,13 +1593,15 @@ class FilesPageController internal constructor(context: Context,
         }
     }
 
-    private fun startCleanScan(folder: String, force: Boolean = false) {
-        val excluded = cleanerExcludedIds.toSet()
-        val include = cleanerIncludeSubfolders
-        val largeMiB = cleanerLargeMiB
-        val oldDays = cleanerOldDays
-        val categories = cleanerCategories.toSet()
-        val scopeKey = cleanKey(folder)
+    private fun startCleanScan(folder: String, force: Boolean = false, resume: CleanScanStore.Saved? = null) {
+        val excluded = resume?.options?.excludedIds() ?: cleanerExcludedIds.toSet()
+        val include = resume?.options?.includeSubfolders() ?: cleanerIncludeSubfolders
+        val largeMiB = resume?.options?.largeBytes()?.div(1024 * 1024) ?: cleanerLargeMiB.toLong()
+        val oldDays = resume?.options?.oldDownloadDays() ?: cleanerOldDays.toLong()
+        val categories = resume?.options?.selectedCategories() ?: cleanerCategories.toSet()
+        val options = resume?.options ?: CleanerEngine.Options(folder, include, excluded, emptySet(),
+            largeMiB * 1024 * 1024, oldDays, Instant.now(), categories)
+        val scopeKey = savedCleanKey(options)
         if (view == "browser" || view == "search") {
             cleanBrowserPosition = Triple(currentOffset, scrollAnchor, scrollOffset)
         }
@@ -1550,18 +1619,20 @@ class FilesPageController internal constructor(context: Context,
         }
         requireIdle()
         require(categories.isNotEmpty()) { "Choose at least one check before scanning" }
-        val options = CleanerEngine.Options(folder, include, excluded, emptySet(),
-            largeMiB.toLong() * 1024 * 1024, oldDays.toLong(), Instant.now(), categories)
+        val scopeName = resume?.name ?: runCatching { repository.get(folder).name }.getOrDefault("Selected folder")
+        val saved = resume ?: cleanScanStore?.begin(scopeName, options)
+        activeCleanRequestId = saved?.id
         canceledTotals.add(folder)
         totalCancelFlags[folder]?.set(true)
         val cancel = AtomicBoolean(false)
         val scanId = ++cleanScanId
-        events.record("clean.started", "Scanning ${runCatching { repository.get(folder).name }.getOrDefault("folder")} · ${categories.joinToString { it.name }}",
-            operationId = "clean:$scanId")
+        val operationId = saved?.let { "clean:${it.id}" } ?: "clean:$scanId"
+        events.record("clean.started", "Scanning $scopeName · ${categories.joinToString { it.name }}",
+            operationId = operationId)
         cleanScanCancel = cancel
         cleanScanKey = scopeKey
         cleanScanFolderId = folder
-        cleanScanFolderName = runCatching { repository.get(folder).name }.getOrDefault("Selected folder")
+        cleanScanFolderName = scopeName
         cleanScanCategories = categories
         cleanScanIncludesSubfolders = include
         cleanSetup = false
@@ -1577,13 +1648,13 @@ class FilesPageController internal constructor(context: Context,
         jobReturnView = "clean"
         jobResultView = "clean"
         jobStatus = "Scanning cleanup candidates"
-        beginOperation("clean:$scanId", "Scanning folder")
+        beginOperation(operationId, "Scanning folder")
         view = "progress"
         worker.execute {
             val outcome = runCatching {
-                operationLifetime.awaitReady("clean:$scanId", Cancellation { cancel.get() })
-                operationReady("clean:$scanId")
-                val snapshot = cleaner.snapshot(folder, Cancellation { cancel.get() }, excluded,
+                operationLifetime.awaitReady(operationId, Cancellation { cancel.get() })
+                operationReady(operationId)
+                val snapshot = saved?.snapshot ?: cleaner.snapshot(folder, Cancellation { cancel.get() }, excluded,
                     progressiveOptions = options, onProgress = { batch ->
                         synchronized(lock) {
                             if (cleanScanId == scanId && !cancel.get()) {
@@ -1594,16 +1665,26 @@ class FilesPageController internal constructor(context: Context,
                                 cleanProgressFolders = batch.foldersScanned()
                                 cleanProgressFiles = batch.filesScanned()
                                 updateOperation("Scanning · ${batch.foldersScanned()} folders · ${batch.filesScanned()} files")
+                                saved?.let { cleanScanStore?.progress(it.id, batch.filesScanned(), batch.foldersScanned()) }
                             }
                         }
-                    })
+                    }, onItem = { name, done, total -> updateOperation(name, done, total) })
                 if (cancel.get()) throw IllegalStateException("Scan canceled")
-                cleaner.analyze(snapshot, options, Cancellation { cancel.get() })
+                saved?.let { cleanScanStore?.checkpoint(it.id, snapshot) }
+                cleaner.analyze(snapshot, options, Cancellation { cancel.get() }).also { result ->
+                    if (cancel.get()) throw IllegalStateException("Scan canceled")
+                    saved?.let { cleanScanStore?.complete(it.id, result) }
+                }
             }
             synchronized(lock) {
                 if (cleanScanId != scanId) return@synchronized
                 cleanScanCancel = null
-                finishOperation("clean:$scanId")
+                activeCleanRequestId = null
+                if (cancel.get() || outcome.isFailure) saved?.let { cleanScanStore?.clear(it.id) }
+                operationLifetime.result(operationId, if (cancel.get()) "Scan canceled" else outcome.fold(
+                    { "Scan complete · ${it.groups().size} groups · ${it.suggestions().size} optional findings" },
+                    { "Scan failed: ${it.message}" }))
+                finishOperation(operationId)
                 cleanProgressEntries.clear()
                 cleanProgressGroups.clear()
                 cleanProgressSuggestions.clear()
@@ -1624,7 +1705,7 @@ class FilesPageController internal constructor(context: Context,
                 events.record(if (cancel.get()) "clean.canceled" else if (outcome.isFailure) "clean.failed" else "clean.completed",
                     if (outcome.isSuccess) "Found ${outcome.getOrThrow().groups().size} groups and ${outcome.getOrThrow().suggestions().size} optional findings"
                     else message ?: "Scan stopped", if (outcome.isFailure && !cancel.get()) "ERROR" else "INFO",
-                    "clean:$scanId", outcome.exceptionOrNull())
+                    operationId, outcome.exceptionOrNull())
                 persist()
             }
         }
@@ -1744,6 +1825,8 @@ class FilesPageController internal constructor(context: Context,
                 activeJobId = null
                 if (cancel.get() || outcome.isFailure) durableTrashReviewId?.let { trashReviewStore?.clear(it) }
                 activeTrashReviewId = null
+                operationLifetime.result(operationId, if (cancel.get()) "Operation canceled" else
+                    outcome.getOrElse { "Operation failed: ${it.message}" })
                 finishOperation(operationId)
                 // Completing an old job cannot dismiss a screen opened after it.
                 jobResultView = if (outcome.isSuccess && !cancel.get()) returnView else backView
@@ -1767,10 +1850,11 @@ class FilesPageController internal constructor(context: Context,
     private fun requestOperationCancel(reason: String = "user") {
         activeJobCancel?.set(true)
         cleanScanCancel?.set(true)
+        activeCleanRequestId?.let { cleanScanStore?.clear(it) }
         activeTrashReviewId?.let { trashReviewStore?.clear(it) }
         updateOperation("Cancel requested; finishing the current safe step")
         events.record("operation.cancel_requested", if (cleanScanCancel != null) "Cleanup scan" else jobLabel,
-            operationId = activeJobId ?: "clean:$cleanScanId", details = "Requested by $reason")
+            operationId = operationDisplay?.id ?: activeJobId ?: "clean:$cleanScanId", details = "Requested by $reason")
     }
 
     private fun logOperationResult(kind: String, result: io.github.alexanderwilhelmsenberg.modular.addon.files.storage.OperationResult) {
@@ -2078,6 +2162,8 @@ class FilesPageController internal constructor(context: Context,
         }
         action(actions, "Info", "info") { infoReturnView = view; view = "info" }
         action(actions, "Add folder", "setup", hostAction = "pickFolder") { }
+        action(actions, if (FilesNotifications.status(app).optBoolean("visible")) "Progress notifications enabled" else "Enable progress notifications",
+            "notifications", hostAction = "notifications") { }
         action(actions, if (android.os.Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) "Full access enabled" else "Enable full storage access", "setup",
             hostAction = "fullAccess") { }
         action(actions, "Large file threshold (MiB)", "setting", input = "value", initial = cleanerLargeMiB.toString()) { args ->
@@ -2249,6 +2335,7 @@ class FilesPageController internal constructor(context: Context,
     private fun renderEventLog(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
         val records = events.snapshot()
         page.put("summary", "${records.size} local events").put("eventLogText", events.export())
+        FilesCrashReports.read(app)?.let { page.put("crashReportText", it.toString(2)) }
         events.storageError?.let { page.put("message", it) }
         action(actions, "Back", "back") {
             if (view == "eventDetail") { view = "eventLog"; eventDetailId = null }
@@ -2258,7 +2345,7 @@ class FilesPageController internal constructor(context: Context,
         action(actions, "Refresh", "refresh") { }
         action(actions, "Download JSON", "downloadEventLog", hostAction = "exportEventLog") { }
         action(actions, "Share JSON", "shareEventLog", hostAction = "shareEventLog") { }
-        action(actions, "Clear log", "clearEventLog") { events.clear(); eventDetailId = null; view = "eventLog" }
+        action(actions, "Clear log", "clearEventLog") { events.clear(); FilesCrashReports.clear(app); eventDetailId = null; view = "eventLog" }
         if (view == "eventDetail") {
             records.firstOrNull { it.optString("id") == eventDetailId }?.let { page.put("eventDetail", it) }
             return

@@ -35,6 +35,7 @@ import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Real SCVH detach/close and Activity handoffs; deliberately does not depend on Espresso. */
 class FilesSurfaceDetachTest {
@@ -48,11 +49,14 @@ class FilesSurfaceDetachTest {
         val folder = base.createDirectory(root.rootId, name)
         val fixture = File(Environment.getExternalStorageDirectory(), name)
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val scanStarted = AtomicBoolean(false)
         val saved = CleanScanStore(File(app.cacheDir, "$name.json"))
         val repository = object : FilesRepository by base {
             override fun locations() = listOf(root.copy(rootId = folder.id))
             override fun list(folderId: String, offset: Int, limit: Int, sort: FileSort, showHidden: Boolean): FilePage {
-                if (folderId == folder.id) { entered.countDown(); check(release.await(30, TimeUnit.SECONDS)) }
+                if (folderId == folder.id && scanStarted.get() && app.operationLifetime.state != null) {
+                    entered.countDown(); check(release.await(30, TimeUnit.SECONDS))
+                }
                 return base.list(folderId, offset, limit, sort, showHidden)
             }
         }
@@ -68,7 +72,9 @@ class FilesSurfaceDetachTest {
                 val view = hostView(scenario)
                 val endpoint = endpoint(closed, detached = detached)
                 controller.addedLocation(root.id)
-                action(controller, "Clean"); action(controller, "Start scan")
+                action(controller, "Clean")
+                scanStarted.set(true)
+                action(controller, "Start scan")
                 assertTrue(entered.await(15, TimeUnit.SECONDS))
                 val pid = Process.myPid()
                 repeat(4) {

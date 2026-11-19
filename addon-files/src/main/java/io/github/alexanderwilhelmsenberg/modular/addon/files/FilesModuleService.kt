@@ -16,6 +16,9 @@ class FilesModuleService : BaseModuleService() {
     private val controller get() = (application as FilesApplication).pageController
 
     override fun createCapability(context: ModuleInstanceContext, capabilityId: String): IBinder? {
+        if (capabilityId == StandardCapabilities.WorkspaceSurface.wireValue) {
+            return FilesSurfaceEndpoint(this, context)
+        }
         if (capabilityId != StandardCapabilities.WorkspacePage.wireValue) return null
         return object : WorkspacePageEndpoint(context) {
             override fun onGetPage(requestJson: String): String = controller.getPage(requestJson)

@@ -59,7 +59,10 @@ requirement is not evidence that its implementation has passed validation.
   across page changes and process recreation.
 - **Clean** opens check choices for the current folder; **Start scan** starts
   analysis. Reopening Clean during a scan returns to its current progress and
-  findings. Closing the sheet leaves the scan running and returns to browsing.
+  findings. Leaving Clean returns to browsing and leaves the scan running.
+  Clean uses a full-height internal screen, with a compact top toolbar and no
+  browser backdrop or sheet handle. Files surfaces use sharp rectangular edges,
+  flat Material colors, and inline icon actions with accessible labels.
 - Files opens the last valid location, with breadcrumbs, local file search,
   sort controls, and compact/details views. Persist the storage identity, folder
   URI/path, scroll anchor/offset, view/sort preferences, and active search state
@@ -256,7 +259,7 @@ requirement is not evidence that its implementation has passed validation.
   explicit Include subfolders control. Choose checks before pressing **Start scan**;
   merely opening Clean performs no scan. If a scan is already running, Clean
   reopens it and its captured scope. Findings appear progressively
-  while enumeration and verification continue. Closing the sheet leaves the scan
+  while enumeration and verification continue. Leaving Clean leaves the scan
   running; Cancel explicitly stops it. Background completion must not navigate
   away from the user's chosen screen. Completed results expose the existing
   full deletion review; provisional findings cannot execute a cleanup plan.
@@ -273,6 +276,9 @@ requirement is not evidence that its implementation has passed validation.
   numbered-copy/older-version groups next, then optional large-file, archive,
   and age-only findings. Unknown sizes stay unknown, and estimates exclude the
   retained copy. Priority helps order review; it does not authorize deletion.
+- Allow sorting findings by priority, known removable size, item count, or name,
+  with ascending/descending order. Save the choice and sort the complete result
+  set before pagination. Unknown sizes remain unavailable rather than zero.
 - Use metadata for the initial filename scan. Do not hash every file merely to
   list recommendations. Only selected checks may read contents while scanning.
   With subfolders off, enumerate only the chosen folder. If a directory-copy
@@ -293,8 +299,25 @@ requirement is not evidence that its implementation has passed validation.
   A numbered folder may contain unique files; its contents are included in the
   deletion review rather than silently assumed to match the retained folder.
 - Each result shows name, location, size when known, selection state, and why it
-  was suggested. Large/old files are unselected by default. Duplicate groups can
-  offer a user-invoked Select extras action that preserves a chosen copy.
+  was suggested. Findings are unselected by default, including duplicate groups;
+  a suggested keeper does not automatically include its group for cleanup.
+  **Review** on a finding prepares only that finding, asking which copy to keep
+  when needed. Tapping a card toggles its highlighted selection without a
+  separate Include/Included button. Inline icons offer keeper choice and review.
+  **Select all** includes all findings across pages; **Clear selection** resets
+  them. These actions never choose an ambiguous keeper or delete anything.
+  **Review selected** is disabled for an empty selection.
+- Review preparation is a loading state, followed by a stable review screen or
+  findings with a named conflict. The completed review remains until the user
+  goes Back, cancels, or confirms. Loading, keeper choice, and review own their
+  gestures so a list swipe cannot navigate to a different launcher screen.
+- Selection conflicts, occupied rename destinations, and incomplete verification
+  stay on the findings screen with the affected names and a reason. A compact
+  message can open a scrollable **Show issues** dialog. Never present internal
+  IDs or fingerprint-preparation markers as instructions to the user, and never
+  open the deletion review until its manifest is fully verified. Check actual
+  rename destinations, including excluded files, before reading file contents
+  for a review that cannot proceed.
 - Support excluded folders/files and protected locations that scans cannot
   select. Exclusions apply to future scans and are editable in module settings.
 - Review selected files and the action before cleanup. No automatic deletion,

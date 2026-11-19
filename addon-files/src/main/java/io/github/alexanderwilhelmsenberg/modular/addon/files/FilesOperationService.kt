@@ -1,0 +1,183 @@
+package io.github.alexanderwilhelmsenberg.modular.addon.files
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.os.PowerManager
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
+
+/** Keeps user-started storage work alive when its embedded surface or Activity goes away. */
+internal class AndroidFilesOperationLifetime(private val context: Context) : FilesOperationLifetime {
+    data class State(val id: String, val label: String, val status: String, val done: Long = 0, val total: Long? = null)
+    @Volatile var state: State? = null
+        private set
+    private var lastNotification = 0L
+    @Volatile private var ready: Pair<String, java.util.concurrent.CountDownLatch>? = null
+    @Volatile private var startFailure: String? = null
+    private val main = Handler(Looper.getMainLooper())
+
+    @Synchronized override fun begin(id: String, label: String): String? {
+        state = State(id, label, label)
+        ready = id to java.util.concurrent.CountDownLatch(1)
+        startFailure = null
+        lastNotification = 0
+        context.getSystemService(NotificationManager::class.java).cancel(FilesNotifications.RESULT)
+        return runCatching {
+            ContextCompat.startForegroundService(context, Intent(context, FilesOperationService::class.java))
+            null
+        }.getOrElse { failure -> "Android could not keep this operation running in the background: ${failure.message}" }
+    }
+
+    @Synchronized fun retryFromActivity(id: String): Boolean {
+        if (state?.id != id) return false
+        return runCatching {
+            ContextCompat.startForegroundService(context, Intent(context, FilesOperationService::class.java)); true
+        }.getOrElse { markFailed(id, it); false }
+    }
+
+    fun markStarted(id: String) { ready?.takeIf { it.first == id }?.second?.countDown() }
+    fun markFailed(id: String, failure: Throwable) {
+        if (state?.id != id) return
+        startFailure = failure.message ?: "Android could not start the foreground operation"
+        ready?.takeIf { it.first == id }?.second?.countDown()
+    }
+
+    override fun awaitReady(id: String, cancel: io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Cancellation) {
+        val gate = ready?.takeIf { it.first == id }?.second ?: error("Operation is no longer active")
+        val deadline = android.os.SystemClock.elapsedRealtime() + 30_000
+        while (!gate.await(100, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            check(!cancel.isCanceled()) { "Operation canceled before start" }
+            check(state?.id == id && android.os.SystemClock.elapsedRealtime() < deadline) {
+                "Android did not start the background operation. Open Files and retry."
+            }
+        }
+        check(!cancel.isCanceled()) { "Operation canceled before start" }
+        check(state?.id == id) { "Operation is no longer active" }
+        check(startFailure == null) { startFailure ?: "Background operation unavailable" }
+    }
+
+    @Synchronized override fun update(id: String, status: String, done: Long, total: Long?) {
+        val old = state?.takeIf { it.id == id } ?: return
+        state = old.copy(status = status, done = done, total = total)
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastNotification < 1_000) return
+        lastNotification = now
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
+                android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        // Notification updates do not touch repository or controller locks.
+        runCatching { context.getSystemService(NotificationManager::class.java)
+            .notify(FilesOperationService.NOTIFICATION, FilesOperationService.notification(context, state!!)) }
+    }
+
+    @Synchronized override fun finish(id: String) {
+        if (state?.id != id) return
+        state = null
+        main.post {
+            synchronized(this) {
+                if (state == null) context.stopService(Intent(context, FilesOperationService::class.java))
+            }
+        }
+    }
+
+    @Synchronized override fun result(id: String, summary: String) {
+        state?.takeIf { it.id == id }?.let { runCatching { FilesNotifications.completed(context, it, summary) } }
+    }
+}
+
+class FilesOperationService : Service() {
+    private var wakeLock: PowerManager.WakeLock? = null
+    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onCreate() {
+        super.onCreate()
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(CHANNEL, "File operations", NotificationManager.IMPORTANCE_LOW))
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val app = application as FilesApplication
+        var state = app.operationLifetime.state
+        val pendingTrash = app.trashReviewStore.load()?.let { it.plan == null } == true
+        val pendingScan = app.cleanScanStore.load()?.let { it.analysis == null && it.attempts < 3 } == true
+        val recovering = state == null && (pendingTrash || pendingScan)
+        // A short operation can finish before Android delivers this start request.
+        val shown = state ?: AndroidFilesOperationLifetime.State("recovery", "Files",
+            if (recovering) "Resuming saved file operation" else "Operation finished")
+        try {
+            ServiceCompat.startForeground(this, NOTIFICATION, notification(this, shown),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } catch (failure: RuntimeException) {
+            if (state != null) app.operationLifetime.markFailed(state.id, failure)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        if (recovering) {
+            app.pageController // Initialization restores the saved read-only request.
+            state = app.operationLifetime.state
+        }
+        if (state == null) { stopSelf(startId); return START_NOT_STICKY }
+        app.operationLifetime.markStarted(state.id)
+        if (wakeLock == null) {
+            wakeLock = getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:files-operation")
+                .apply { acquire(60 * 60 * 1000L) }
+        }
+        if (intent?.action == CANCEL) {
+            Thread { app.pageController.cancelCurrentOperation("notification") }.start()
+        }
+        // Only a persisted read-only review can be redelivered; never a destructive confirmation.
+        return if (app.trashReviewStore.load()?.let { it.plan == null } == true ||
+            app.cleanScanStore.load()?.let { it.analysis == null && it.attempts < 3 } == true)
+            START_REDELIVER_INTENT else START_NOT_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val app = application as FilesApplication
+        if (app.operationLifetime.state != null) Thread {
+            app.pageController.recordLifecycleEvent("service.task_removed", "Task removed; background operation continues")
+        }.start()
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Thread { (application as FilesApplication).pageController.cancelCurrentOperation("android_data_sync_timeout") }.start()
+        stopSelf()
+    }
+
+    override fun onDestroy() {
+        wakeLock?.takeIf { it.isHeld }?.release()
+        wakeLock = null
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val CHANNEL = "files-operations"
+        internal const val NOTIFICATION = 4101
+        private const val CANCEL = "files.operation.CANCEL"
+        internal fun notification(context: Context, state: AndroidFilesOperationLifetime.State): Notification {
+            val open = FilesNotifications.open(context, state.id)
+            val cancel = PendingIntent.getService(context, 1,
+                Intent(context, FilesOperationService::class.java).setAction(CANCEL),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val total = state.total?.takeIf { it > 0 }
+            return NotificationCompat.Builder(context, CHANNEL)
+                .setSmallIcon(android.R.drawable.stat_sys_upload)
+                .setContentTitle(state.label).setContentText(state.status)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(state.status))
+                .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
+                .setProgress(1000, if (total == null) 0 else (state.done.toDouble() / total * 1000).toInt().coerceIn(0, 1000), total == null)
+                .addAction(0, "Cancel", cancel).build()
+        }
+    }
+}

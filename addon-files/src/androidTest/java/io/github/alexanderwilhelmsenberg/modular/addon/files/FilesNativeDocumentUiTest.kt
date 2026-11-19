@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -35,6 +36,48 @@ import org.junit.Test
 /** Native page renderer plus real module controller and scoped PFDs, on disposable files. */
 class FilesNativeDocumentUiTest {
     @get:Rule val rule = createComposeRule()
+
+    @Test fun trashReviewRemainsConfirmableAcrossPassivePageReads() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "ModularTrashUi-${UUID.randomUUID()}"
+        val fixture = File(Environment.getExternalStorageDirectory(), name)
+        val repository = createFilesRepository(context)
+        try {
+            assertTrue(Environment.isExternalStorageManager())
+            assertTrue("The isolated test must not empty unrelated trash", repository.trashEntries().isEmpty())
+            val root = repository.locations().single { it.kind == StorageLocation.Kind.PHONE }
+            val folder = repository.createDirectory(root.rootId, name)
+            val file = repository.createFile(folder.id, "reviewed.txt", "text/plain")
+            File(fixture, "reviewed.txt").writeText("Reviewed trash test")
+            repository.moveToTrash(repository.prepareDeletion(listOf(file.id)))
+            assertTrue(repository.trashEntries().isNotEmpty())
+            context.getSharedPreferences("files-page", 0).edit().clear().putString("view", "trash").commit()
+            val controller = FilesPageController(context, repository)
+            rule.setContent { MaterialTheme { FilesNativeContent(controller, 0,
+                onHostLaunch = {}, onExternalDocument = {}) } }
+            rule.waitUntil(15_000) {
+                runCatching { rule.onNodeWithText("Empty trash").assertIsDisplayed() }.isSuccess
+            }
+            rule.onNodeWithText("Empty trash").performClick()
+            rule.waitUntil(15_000) {
+                runCatching { rule.onNodeWithText("Empty permanently").assertIsDisplayed() }.isSuccess
+            }
+            repeat(2) { controller.getPage("""{"version":1,"pageSize":100}""") }
+            rule.onNodeWithText("Empty permanently").performClick()
+            rule.waitUntil(15_000) { repository.trashEntries().isEmpty() }
+            rule.waitUntil(15_000) {
+                runCatching { rule.onNodeWithText("Trash").assertIsDisplayed() }.isSuccess
+            }
+            assertTrue(repository.history().any { it.kind == "emptyTrash" && it.outcomes.all {
+                outcome -> outcome.status == io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FileOutcome.Status.SUCCESS
+            } })
+        } finally {
+            val own = repository.trashEntries().filter { it.originalPath.startsWith("$name/") }
+            if (own.isNotEmpty()) repository.emptyTrash(repository.prepareEmptyTrash(own.map { it.id }))
+            fixture.deleteRecursively()
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
 
     @Test fun markdownEditSavesTwiceAndPdfAdvancesFromFirstToSecondPage() {
         val context = ApplicationProvider.getApplicationContext<Context>()

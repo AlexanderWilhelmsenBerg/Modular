@@ -10,7 +10,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
 /** Validated, immutable declaration of a protocol v4 provider. */
-data class ModuleDescriptor(
+data class ModuleDescriptor @JvmOverloads constructor(
     val schemaVersion: Int,
     val moduleId: String,
     val moduleVersion: String,
@@ -22,6 +22,9 @@ data class ModuleDescriptor(
     val requestedCoreCapabilities: List<String>,
     val managementActivity: String?,
     val configurationFields: List<InstanceConfigurationField>,
+    val workspaceActivity: String? = null,
+    /** Lowest Android API on which this add-on can embed its workspace surface. */
+    val workspaceSurfaceMinSdk: Int = 30,
 )
 
 /** A flat, bounded setting. Every field has a default value. */
@@ -58,7 +61,7 @@ object ModuleDescriptorCodec {
             "Descriptor exceeds size limit"
         }
         val root = parseObject(rawJson, "Invalid descriptor JSON")
-        exactKeys(root, setOf("schemaVersion", "moduleId", "moduleVersion", "displayName", "description", "coreProtocol", "providedCapabilities", "requestedCoreCapabilities", "managementActivity", "instanceConfiguration"), "Invalid descriptor fields")
+        exactKeys(root, setOf("schemaVersion", "moduleId", "moduleVersion", "displayName", "description", "coreProtocol", "providedCapabilities", "requestedCoreCapabilities", "managementActivity", "workspaceActivity", "workspaceSurfaceMinSdk", "instanceConfiguration"), "Invalid descriptor fields")
         require(int(root, "schemaVersion") == 1) { "Unsupported descriptor schema version" }
         val moduleId = string(root, "moduleId", 160)
         require(moduleIdPattern.matches(moduleId)) { "Invalid module ID" }
@@ -81,6 +84,16 @@ object ModuleDescriptorCodec {
             }
             value
         }
+        val workspaceActivity = root["workspaceActivity"]?.let {
+            val value = (it as? JsonPrimitive)?.takeIf { primitive -> primitive.isString }?.contentOrNull
+                ?: throw IllegalArgumentException("Invalid workspace Activity")
+            require(value.length <= 200 && activityPattern.matches(value)) {
+                "Invalid workspace Activity"
+            }
+            value
+        }
+        val workspaceSurfaceMinSdk = optionalInt(root, "workspaceSurfaceMinSdk") ?: 30
+        require(workspaceSurfaceMinSdk in 30..10_000) { "Invalid workspace surface minimum SDK" }
         val schema = root["instanceConfiguration"] as? JsonObject
             ?: throw IllegalArgumentException("Invalid instance configuration schema")
         exactKeys(schema, setOf("schemaVersion", "fields"), "Invalid instance configuration schema")
@@ -90,9 +103,49 @@ object ModuleDescriptorCodec {
         require(fieldsArray.size <= MAX_CONFIGURATION_FIELDS) { "Too many configuration fields" }
         val fields = fieldsArray.map(::parseField)
         require(fields.map { it.key }.distinct().size == fields.size) { "Duplicate configuration key" }
-        val descriptor = ModuleDescriptor(1, moduleId, moduleVersion, displayName, description, min, max, provided, requested, activity, fields)
+        val descriptor = ModuleDescriptor(1, moduleId, moduleVersion, displayName, description, min, max,
+            provided, requested, activity, fields, workspaceActivity, workspaceSurfaceMinSdk)
         normalizeConfiguration(descriptor, "{}")
         return descriptor
+    }
+
+    /** Encodes a descriptor with the same validation used for packaged JSON. */
+    @JvmStatic
+    fun encode(descriptor: ModuleDescriptor): String {
+        val root = linkedMapOf<String, JsonElement>(
+            "schemaVersion" to JsonPrimitive(descriptor.schemaVersion),
+            "moduleId" to JsonPrimitive(descriptor.moduleId),
+            "moduleVersion" to JsonPrimitive(descriptor.moduleVersion),
+            "displayName" to JsonPrimitive(descriptor.displayName),
+            "description" to JsonPrimitive(descriptor.description),
+            "coreProtocol" to JsonObject(mapOf(
+                "min" to JsonPrimitive(descriptor.coreProtocolMin),
+                "max" to JsonPrimitive(descriptor.coreProtocolMax))),
+            "providedCapabilities" to JsonArray(descriptor.providedCapabilities.map { JsonPrimitive(it) }),
+            "requestedCoreCapabilities" to JsonArray(descriptor.requestedCoreCapabilities.map { JsonPrimitive(it) }),
+        )
+        descriptor.managementActivity?.let { root["managementActivity"] = JsonPrimitive(it) }
+        descriptor.workspaceActivity?.let { root["workspaceActivity"] = JsonPrimitive(it) }
+        root["workspaceSurfaceMinSdk"] = JsonPrimitive(descriptor.workspaceSurfaceMinSdk)
+        root["instanceConfiguration"] = JsonObject(mapOf(
+            "schemaVersion" to JsonPrimitive(1),
+            "fields" to JsonArray(descriptor.configurationFields.map { field ->
+                val entry = linkedMapOf<String, JsonElement>(
+                    "key" to JsonPrimitive(field.key),
+                    "title" to JsonPrimitive(field.title),
+                    "type" to JsonPrimitive(field.type),
+                    "default" to field.defaultValue,
+                )
+                if (field.enumValues.isNotEmpty()) entry["enum"] = JsonArray(field.enumValues)
+                field.min?.let { entry["min"] = JsonPrimitive(it) }
+                field.max?.let { entry["max"] = JsonPrimitive(it) }
+                field.minLength?.let { entry["minLength"] = JsonPrimitive(it) }
+                field.maxLength?.let { entry["maxLength"] = JsonPrimitive(it) }
+                JsonObject(entry)
+            })))
+        val encoded = JsonObject(root).toString()
+        parse(encoded)
+        return encoded
     }
 
     /** Validates input and returns deterministic JSON with all defaults applied. */

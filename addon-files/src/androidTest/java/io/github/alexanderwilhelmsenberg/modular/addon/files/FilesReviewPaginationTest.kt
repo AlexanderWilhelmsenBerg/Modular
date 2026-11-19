@@ -2,6 +2,7 @@ package io.github.alexanderwilhelmsenberg.modular.addon.files
 
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import io.github.alexanderwilhelmsenberg.modular.addon.files.cleaner.CleanerEngine
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.alexanderwilhelmsenberg.modular.addon.files.storage.Cancellation
@@ -31,6 +32,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,13 +41,540 @@ import org.junit.runner.RunWith
 /** Checks the real page command protocol across the 100-row Binder page boundary. */
 @RunWith(AndroidJUnit4::class)
 class FilesReviewPaginationTest {
+    @Test fun pendingCleanupScanResumesReadOnlyAndSavesFindingsAfterNavigation() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "scan-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 105)
+        val release = CountDownLatch(1)
+        repository.scanRelease = release
+        try {
+            val options = CleanerEngine.Options("root", false, emptySet(), emptySet(), 1024, 90,
+                java.time.Instant.now(), setOf(CleanerEngine.Category.NUMBERED_COPY))
+            CleanScanStore(file).begin("Saved folder", options)
+            val controller = FilesPageController(context, repository, FilesOperationLifetime.NONE, null, CleanScanStore(file))
+            assertTrue(controller.recoverReadOnlyWork())
+            assertTrue(repository.scanSecondPage.await(5, TimeUnit.SECONDS))
+            action(controller, page(controller), "Event log")
+            release.countDown()
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertEquals("eventLog", page(controller).getString("view"))
+            assertNotNull(CleanScanStore(file).load()!!.analysis)
+            assertEquals(0, repository.moveCalls)
+            assertEquals(0, repository.emptyCalls)
+        } finally { release.countDown(); CleanScanStore(file).clear(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun completedCleanupFindingsRestoreWithoutScanningOrOpeningPayloads() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().putString("view", "clean").putString("folder", "root").commit()
+        val file = java.io.File(context.cacheDir, "scan-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        try {
+            val options = CleanerEngine.Options("root", false, emptySet(), emptySet(), 1024, 90,
+                java.time.Instant.now(), setOf(CleanerEngine.Category.NUMBERED_COPY))
+            val store = CleanScanStore(file); val request = store.begin("Saved folder", options)
+            store.complete(request.id, CleanerEngine.Analysis(emptyMap(), emptyList(), emptyList(), emptyList(), options))
+            val controller = FilesPageController(context, repository, FilesOperationLifetime.NONE, null, CleanScanStore(file))
+            controller.recoverReadOnlyWork()
+            val restored = page(controller)
+            assertEquals("clean", restored.getString("view"))
+            assertFalse(restored.getBoolean("cleanSetup"))
+            assertFalse(restored.has("activeOperation"))
+            assertEquals(0, repository.scanCalls)
+            assertEquals(0, repository.fingerprintCalls)
+        } finally { CleanScanStore(file).clear(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun canceledRecoveredScanCannotRestorePendingWorkOrLateFindings() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "scan-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 105)
+        val release = CountDownLatch(1); repository.scanRelease = release
+        try {
+            val options = CleanerEngine.Options("root", false, emptySet(), emptySet(), 1024, 90,
+                java.time.Instant.now(), setOf(CleanerEngine.Category.NUMBERED_COPY))
+            CleanScanStore(file).begin("Saved folder", options)
+            val controller = FilesPageController(context, repository, FilesOperationLifetime.NONE, null, CleanScanStore(file))
+            controller.recoverReadOnlyWork()
+            assertTrue(repository.scanSecondPage.await(5, TimeUnit.SECONDS))
+            action(controller, page(controller), "Cancel current operation")
+            release.countDown()
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertNull(CleanScanStore(file).load())
+            assertEquals(0, repository.moveCalls)
+        } finally { release.countDown(); CleanScanStore(file).clear(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun repeatedCrashesPauseAutomaticScanRecovery() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "scan-${UUID.randomUUID()}.json")
+        try {
+            val options = CleanerEngine.Options("root", false, emptySet(), emptySet(), 1024, 90,
+                java.time.Instant.now(), setOf(CleanerEngine.Category.OLDER_VERSION))
+            val store = CleanScanStore(file); store.begin("Saved folder", options)
+            repeat(3) { store.recovering(store.load()!!) }
+            val repository = ReviewFixtureRepository(itemCount = 0)
+            val controller = FilesPageController(context, repository, FilesOperationLifetime.NONE, null, store)
+            assertFalse(controller.recoverReadOnlyWork())
+            assertTrue(page(controller).getString("message").contains("paused"))
+            assertEquals(0, repository.scanCalls)
+        } finally { CleanScanStore(file).clear(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun folderLongPressDeletePreparesOnlyThatFolderAndStillRequiresConfirmation() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 1, includeSubfolder = true)
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            fun folder() = page(controller).getJSONArray("items").let { rows ->
+                (0 until rows.length()).map(rows::getJSONObject).single { it.getString("id") == "subfolder" }
+            }
+            rowAction(controller, folder(), "Delete")
+            val review = awaitView(controller, "review")
+            assertEquals(1, review.getJSONArray("items").length())
+            assertEquals("subfolder", review.getJSONArray("items").getJSONObject(0).getString("id"))
+            assertEquals(0, repository.moveCalls)
+            action(controller, review, "Cancel")
+            assertEquals("browser", page(controller).getString("view"))
+            assertEquals(0, repository.moveCalls)
+            rowAction(controller, folder(), "Delete")
+            action(controller, awaitView(controller, "review"), "Delete")
+            awaitView(controller, "browser")
+            assertEquals(1, repository.moveCalls)
+            assertEquals(1, repository.lastPlanSize)
+        } finally { context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun folderLongPressSupportsCopyCutAndMoveWithoutSelectingTheRowFirst() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val controller = FilesPageController(context, ReviewFixtureRepository(itemCount = 0, includeSubfolder = true))
+        try {
+            controller.addedLocation("test-volume")
+            fun folder() = page(controller).getJSONArray("items").getJSONObject(0)
+            rowAction(controller, folder(), "Copy")
+            assertEquals("copy", page(controller).getJSONObject("clipboard").getString("mode"))
+            assertEquals(1, page(controller).getJSONObject("clipboard").getInt("count"))
+            rowAction(controller, folder(), "Cut")
+            assertEquals("cut", page(controller).getJSONObject("clipboard").getString("mode"))
+            rowAction(controller, folder(), "Move…")
+            assertEquals("movePicker", page(controller).getString("view"))
+        } finally { context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun interruptedReadOnlyTrashReviewResumesAndReadyPlanNeedsFreshConfirmation() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "review-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        repository.trash.add(TrashEntry("trash-one", "test-volume", "file", "root", "file", "file",
+            1, 1, 1, null, false, true))
+        try {
+            // The old process persisted a request but never completed preparation.
+            TrashReviewStore(file).begin(listOf("trash-one"), 2)
+            val recovered = FilesPageController(context, repository, FilesOperationLifetime.NONE, TrashReviewStore(file))
+            assertTrue(recovered.recoverTrashReview())
+            awaitView(recovered, "emptyTrashReview")
+            assertEquals(1, repository.trashPrepareCalls)
+            assertEquals(0, repository.emptyCalls)
+            assertNotNull(TrashReviewStore(file).load()!!.plan)
+            // Another process restart restores the prepared plan without repeating storage work.
+            val next = FilesPageController(context, repository, FilesOperationLifetime.NONE, TrashReviewStore(file))
+            assertTrue(next.recoverTrashReview())
+            val review = page(next)
+            assertEquals("emptyTrashReview", review.getString("view"))
+            assertEquals(1, repository.trashPrepareCalls)
+            assertEquals(0, repository.emptyCalls)
+            action(next, review, "Empty permanently")
+            awaitView(next, "trash")
+            assertEquals(1, repository.emptyCalls)
+            assertNull(TrashReviewStore(file).load())
+        } finally {
+            TrashReviewStore(file).clear()
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun canceledRecoveredReviewIsNotSavedOrResumedAgain() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "review-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        val release = CountDownLatch(1)
+        repository.trashPrepareRelease = release
+        try {
+            TrashReviewStore(file).begin(listOf("trash-one"), 0)
+            val controller = FilesPageController(context, repository, FilesOperationLifetime.NONE, TrashReviewStore(file))
+            assertTrue(controller.recoverTrashReview())
+            assertTrue(repository.trashPrepareEntered.await(5, TimeUnit.SECONDS))
+            action(controller, page(controller), "Cancel operation")
+            release.countDown()
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertNull(TrashReviewStore(file).load())
+            assertEquals(0, repository.emptyCalls)
+            assertFalse(FilesPageController(context, repository, FilesOperationLifetime.NONE,
+                TrashReviewStore(file)).recoverTrashReview())
+        } finally {
+            release.countDown(); TrashReviewStore(file).clear()
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun recoveredReviewRetainsForegroundHandoffAcrossPassiveReadsUntilConsumed() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val file = java.io.File(context.cacheDir, "review-${UUID.randomUUID()}.json")
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        val ready = CountDownLatch(1)
+        val lifetime = object : FilesOperationLifetime {
+            override fun begin(id: String, label: String) = "Open Files to resume background work"
+            override fun awaitReady(id: String, cancel: Cancellation) { check(ready.await(5, TimeUnit.SECONDS)) }
+        }
+        try {
+            TrashReviewStore(file).begin(listOf("trash-one"), 0)
+            val controller = FilesPageController(context, repository, lifetime, TrashReviewStore(file))
+            assertTrue(controller.recoverTrashReview())
+            val nonce = page(controller).getJSONObject("hostLaunch").getString("nonce")
+            assertEquals(nonce, page(controller).getJSONObject("hostLaunch").getString("nonce"))
+            assertEquals(0, repository.trashPrepareCalls)
+            assertEquals("startOperation", controller.consumeHostHandoff(nonce)!!.kind)
+            assertNull(controller.consumeHostHandoff(nonce))
+            assertFalse(page(controller).has("hostLaunch"))
+            ready.countDown()
+            awaitView(controller, "emptyTrashReview")
+            assertEquals(0, repository.emptyCalls)
+        } finally {
+            ready.countDown(); TrashReviewStore(file).clear()
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun blockedBackgroundStartHandsOffAndWaitsBeforeReadingStorage() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 1)
+        val waiting = CountDownLatch(1)
+        val ready = CountDownLatch(1)
+        val controller = FilesPageController(context, repository, object : FilesOperationLifetime {
+            override fun begin(id: String, label: String) = "Android requires a visible Activity"
+            override fun awaitReady(id: String, cancel: Cancellation) {
+                waiting.countDown(); check(ready.await(5, TimeUnit.SECONDS))
+            }
+        })
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            val starting = action(controller, setup, "Start scan")
+            assertTrue(waiting.await(5, TimeUnit.SECONDS))
+            assertEquals(0, repository.scanCalls)
+            val launch = starting.getJSONObject("hostLaunch")
+            assertEquals("startOperation", launch.getString("kind"))
+            val handoff = controller.consumeHostHandoff(launch.getString("nonce"))!!
+            assertEquals("startOperation", handoff.kind)
+            assertEquals(starting.getJSONObject("activeOperation").getString("id"), handoff.documentId)
+            ready.countDown()
+            awaitView(controller, "clean")
+            assertTrue(repository.scanCalls > 0)
+        } finally { ready.countDown(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun queuedScanContinuesWhileAnotherScreenIsOpenAndReleasesItsLifetime() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 105)
+        val release = CountDownLatch(1)
+        repository.scanRelease = release
+        val began = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        val lifetime = object : FilesOperationLifetime {
+            override fun begin(id: String, label: String): String? { began.countDown(); return null }
+            override fun finish(id: String) { finished.countDown() }
+        }
+        val controller = FilesPageController(context, repository, lifetime)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            val commands = setup.getJSONArray("actions")
+            val scan = (0 until commands.length()).map { commands.getJSONObject(it) }.single { it.getString("kind") == "scan" }
+            val delivered = CountDownLatch(1)
+            controller.enqueueAction(JSONObject().put("version", 1).put("actionId", scan.getString("id"))
+                .put("operationToken", UUID.randomUUID().toString()).toString(), null) {
+                assertTrue(it.isSuccess); delivered.countDown()
+            }
+            assertTrue(delivered.await(5, TimeUnit.SECONDS))
+            assertTrue(began.await(5, TimeUnit.SECONDS))
+            assertTrue(repository.scanSecondPage.await(5, TimeUnit.SECONDS))
+            val progress = page(controller)
+            assertTrue(progress.getInt("filesScanned") >= 100)
+            assertTrue(progress.has("activeOperation"))
+            val log = action(controller, progress, "Event log")
+            assertEquals("eventLog", log.getString("view"))
+            assertTrue(log.has("activeOperation"))
+            release.countDown()
+            assertTrue(finished.await(5, TimeUnit.SECONDS))
+            val completed = page(controller)
+            assertEquals("eventLog", completed.getString("view"))
+            assertFalse(completed.has("activeOperation"))
+            assertFalse(context.getSharedPreferences("files-page", 0).contains("runningOperationId"))
+        } finally { release.countDown(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun reviewSelectedResolvesEveryKeeperWithoutDroppingOtherSelections() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        for (name in listOf("alpha", "beta", "gamma")) {
+            repository.files.add(FileEntry("$name-base", "test-volume", "root", "$name.txt", "$name.txt",
+                false, "text/plain", 12, if (name == "gamma") 1 else 2, null, true, true))
+            repository.files.add(FileEntry("$name-copy", "test-volume", "root", "$name (1).txt", "$name (1).txt",
+                false, "text/plain", 12, if (name == "gamma") 2 else 1, null, true, true))
+        }
+        val controller = FilesPageController(context, repository)
+        controller.addedLocation("test-volume")
+        action(controller, action(controller, page(controller), "Clean"), "Start scan")
+        val selected = action(controller, awaitView(controller, "clean"), "Select all")
+        assertEquals(3, selected.getInt("cleanSelectionCount"))
+        assertEquals(2, selected.getInt("cleanKeeperChoiceCount"))
+        var chooser = action(controller, selected, "Review selected")
+        assertEquals("keeper", chooser.getString("view"))
+        assertEquals(0, repository.fingerprintCalls)
+        repeat(2) { index ->
+            assertEquals(2 - index, chooser.getInt("keeperChoicesRemaining"))
+            assertEquals(3, chooser.getInt("cleanSelectionCount"))
+            val candidates = chooser.getJSONArray("items")
+            val keep = (0 until candidates.length()).map { candidates.getJSONObject(it) }
+                .single { it.getString("id").endsWith("-base") }
+            chooser = rowAction(controller, keep, "Keep this")
+            if (index == 0) {
+                val back = action(controller, chooser, "Back to Clean")
+                assertEquals(3, back.getInt("cleanSelectionCount"))
+                assertEquals(1, back.getInt("cleanKeeperChoiceCount"))
+                chooser = action(controller, back, "Review selected")
+            }
+        }
+        val review = awaitView(controller, "cleanReview")
+        assertEquals(6, review.getJSONArray("items").length())
+        assertTrue(repository.fingerprintCalls > 0)
+        assertEquals(0, repository.moveCalls)
+        val back = action(controller, review, "Back")
+        assertEquals(3, back.getInt("cleanSelectionCount"))
+        assertEquals(0, back.getInt("cleanKeeperChoiceCount"))
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+    }
+
+    @Test fun skippingAKeeperGroupRetainsTheOtherSelectedGroups() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        for (name in listOf("alpha", "beta")) for ((suffix, label) in listOf("base" to "$name.txt", "copy" to "$name (1).txt")) {
+            repository.files.add(FileEntry("$name-$suffix", "test-volume", "root", label, label,
+                false, "text/plain", 12, if (suffix == "base") 2 else 1, null, true, true))
+        }
+        val controller = FilesPageController(context, repository)
+        controller.addedLocation("test-volume")
+        action(controller, action(controller, page(controller), "Clean"), "Start scan")
+        val selected = action(controller, awaitView(controller, "clean"), "Select all")
+        val first = action(controller, selected, "Review selected")
+        val skippedIds = first.getJSONArray("items").let { list ->
+            (0 until list.length()).map { list.getJSONObject(it).getString("id") }.toSet()
+        }
+        val next = action(controller, first, "Skip this group")
+        assertEquals("keeper", next.getString("view"))
+        assertEquals(1, next.getInt("cleanSelectionCount"))
+        val keep = next.getJSONArray("items").getJSONObject(0)
+        rowAction(controller, keep, "Keep this")
+        val review = awaitView(controller, "cleanReview")
+        val items = review.getJSONArray("items")
+        assertEquals(2, items.length())
+        assertTrue((0 until items.length()).none { items.getJSONObject(it).getString("id") in skippedIds })
+        assertEquals(0, repository.moveCalls)
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+    }
+
+    @Test fun progressUnderRepositoryLockDoesNotDeadlockConcurrentPageRead() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 1)
+        repository.progressGate = CountDownLatch(1)
+        val reader = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it).apply { isDaemon = true } }
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val search = action(controller, page(controller), "Search", JSONObject().put("query", "item"))
+            action(controller, search, "Delete all results")
+            action(controller, awaitView(controller, "review"), "Delete")
+            assertTrue(repository.progressEntered.await(5, TimeUnit.SECONDS))
+            repository.blockTrashRead = true
+            val read = reader.submit<JSONObject> { page(controller) }
+            assertTrue(repository.trashReadEntered.await(5, TimeUnit.SECONDS))
+            repository.progressGate!!.countDown()
+            read.get(5, TimeUnit.SECONDS)
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertEquals(1, repository.moveCalls)
+        } finally {
+            repository.progressGate!!.countDown(); reader.shutdownNow()
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun completedBackgroundJobCannotDismissCleanAndTrashCanBeRetried() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 1)
+        val release = CountDownLatch(1)
+        repository.prepareRelease = release
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val search = action(controller, page(controller), "Search", JSONObject().put("query", "item"))
+            action(controller, search, "Delete all results")
+            assertTrue(repository.prepareEntered.await(5, TimeUnit.SECONDS))
+            val browser = action(controller, page(controller), "Back to files")
+            val clean = action(controller, browser, "Clean")
+            assertEquals("clean", clean.getString("view"))
+            release.countDown()
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertEquals("clean", page(controller).getString("view"))
+
+            val trashRecord = TrashEntry("trash-one", "test-volume", "item-0", "root", "item-0", "item-0",
+                1, 1, 1, null, false, true)
+            repository.trash.add(trashRecord)
+            val folder = action(controller, page(controller), "Back to folder")
+            val trash = action(controller, folder, "Trash")
+            repository.trashPrepareRelease = CountDownLatch(1)
+            action(controller, trash, "Empty trash")
+            assertTrue(repository.trashPrepareEntered.await(5, TimeUnit.SECONDS))
+            val behind = action(controller, page(controller), "Back to files")
+            val busy = action(controller, behind, "Empty trash")
+            assertEquals("trash", busy.getString("view"))
+            assertTrue(busy.getString("message").contains("still running"))
+            action(controller, busy, "Cancel current operation")
+            repository.trashPrepareRelease!!.countDown()
+            awaitCondition { !page(controller).has("activeOperation") }
+            assertEquals("trash", page(controller).getString("view"))
+            assertEquals(0, repository.emptyCalls)
+            repository.trashPrepareRelease = null
+            action(controller, page(controller), "Empty trash")
+            val review = awaitView(controller, "emptyTrashReview")
+            action(controller, review, "Empty permanently")
+            val empty = awaitView(controller, "trash")
+            assertEquals(0L, empty.getJSONObject("trash").getLong("fileCount"))
+            assertEquals(1, repository.emptyCalls)
+        } finally { release.countDown(); context.getSharedPreferences("files-page", 0).edit().clear().commit() }
+    }
+
+    @Test fun failedTrashPreparationReleasesBusyStateAndPersistsDiagnostic() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        repository.trash.add(TrashEntry("trash-one", "test-volume", "file", "root", "file", "file", 1, 1, 1, null, false, true))
+        repository.trashPreparationFailure = true
+        repository.trashPrepareRelease = CountDownLatch(1)
+        val controller = FilesPageController(context, repository)
+        controller.addedLocation("test-volume")
+        action(controller, action(controller, page(controller), "Trash"), "Empty trash")
+        assertTrue(repository.trashPrepareEntered.await(5, TimeUnit.SECONDS))
+        action(controller, page(controller), "Event log")
+        repository.trashPrepareRelease!!.countDown()
+        awaitCondition { !page(controller).has("activeOperation") }
+        val failed = action(controller, page(controller), "Back")
+        assertEquals("trash", failed.getString("view"))
+        assertFalse(failed.has("activeOperation"))
+        assertTrue(failed.getString("message").contains("fixture storage unavailable"))
+        val log = action(controller, failed, "Event log")
+        assertTrue(log.getString("eventLogText").contains("fixture storage unavailable"))
+        assertTrue(log.getString("eventLogText").contains("operation.failed"))
+        repository.trashPreparationFailure = false
+        action(controller, action(controller, log, "Back"), "Empty trash")
+        assertTrue(awaitView(controller, "emptyTrashReview").getBoolean("complete"))
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+    }
+
+    @Test fun blockedBatchReturnsNamedConflictAndSingleFindingReviewStaysIndependent() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear()
+            .putStringSet("cleanExcludedIds", setOf("opaque-blocked-base")).commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        fun file(id: String, name: String, modified: Long) = FileEntry(id, "test-volume", "root",
+            name, "root/$name", false, "text/plain", 12L, modified, null, true, true)
+        repository.files.add(file("opaque-blocked-base", "report.txt", 1))
+        repository.files.add(file("opaque-conflict-one", "report (1).txt", 2))
+        repository.files.add(file("opaque-conflict-two", "report (2).txt", 3))
+        repository.files.add(file("opaque-safe-base", "safe.txt", 1))
+        repository.files.add(file("opaque-safe-copy", "safe (1).txt", 2))
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            action(controller, setup, "Start scan")
+            val results = awaitView(controller, "clean")
+            assertEquals(2, results.getJSONArray("items").length())
+            assertEquals(0, results.getInt("cleanSelectionCount"))
+            assertFalse(results.getBoolean("cleanCanReview"))
+            assertEquals(0, repository.fingerprintCalls)
+            val conflict = (0 until results.getJSONArray("items").length())
+                .map { results.getJSONArray("items").getJSONObject(it) }
+                .single { it.getString("name") == "report.txt" }
+            val selectedConflict = rowAction(controller, conflict, "Include")
+            val safe = (0 until selectedConflict.getJSONArray("items").length())
+                .map { selectedConflict.getJSONArray("items").getJSONObject(it) }
+                .single { it.getString("name") == "safe.txt" }
+            val selectedBoth = rowAction(controller, safe, "Include")
+            assertEquals(2, selectedBoth.getInt("cleanSelectionCount"))
+            action(controller, selectedBoth, "Review selected")
+            awaitCondition { page(controller).getString("view") == "clean" }
+            val blocked = page(controller)
+            assertEquals("clean", blocked.getString("view"))
+            val reason = blocked.getString("message")
+            assertTrue(reason.contains("report.txt"))
+            assertTrue(reason.contains("rename", ignoreCase = true) || reason.contains("exist", ignoreCase = true))
+            assertFalse(reason.contains("fingerprint", ignoreCase = true))
+            assertFalse(reason.contains("revision-pending"))
+            assertFalse(reason.contains("opaque-"))
+            assertEquals(0, repository.fingerprintCalls)
+            assertEquals(0, repository.moveCalls)
+
+            val issue = blocked.getJSONArray("cleanIssues").getJSONObject(0)
+            val choose = rowAction(controller, issue, "Choose keeper")
+            assertEquals("keeper", choose.getString("view"))
+            assertEquals(0, repository.fingerprintCalls)
+            val returned = action(controller, choose, "Back to Clean")
+            val exclude = rowAction(controller, returned.getJSONArray("cleanIssues").getJSONObject(0), "Exclude group")
+            assertEquals(1, exclude.getInt("cleanSelectionCount"))
+            assertEquals(0, repository.fingerprintCalls)
+            val cleared = action(controller, exclude, "Clear selection")
+            assertEquals(0, cleared.getInt("cleanSelectionCount"))
+            val safeOnly = (0 until cleared.getJSONArray("items").length())
+                .map { cleared.getJSONArray("items").getJSONObject(it) }
+                .single { it.getString("name") == "safe.txt" }
+            val focused = rowAction(controller, safeOnly, "Review")
+            assertEquals("progress", focused.getString("view"))
+            val review = awaitView(controller, "cleanReview")
+            val ids = (0 until review.getJSONArray("items").length())
+                .map { review.getJSONArray("items").getJSONObject(it).getString("id") }.toSet()
+            assertEquals(setOf("opaque-safe-base", "opaque-safe-copy"), ids)
+            assertTrue(repository.fingerprintCalls > 0)
+            assertEquals(0, repository.moveCalls)
+            val canceled = action(controller, review, "Cancel")
+            assertEquals("clean", canceled.getString("view"))
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
     @Test fun unknownSizesInNumberedFoldersRemainNullableThroughKeeperAndReview() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
         val repository = ReviewFixtureRepository(itemCount = 0)
         fun fixture(id: String, parent: String, name: String, directory: Boolean) = FileEntry(
             id, "test-volume", parent, name, "$parent/$name", directory,
-            if (directory) null else "text/plain", null, 1, null, true, true)
+            if (directory) null else "text/plain", null, if (id == "kept") 2 else 1, null, true, true)
         repository.files.add(fixture("kept", "root", "archive", true))
         repository.files.add(fixture("removed", "root", "archive (1)", true))
         repository.files.add(fixture("kept-file", "kept", "notes.txt", false))
@@ -57,16 +587,14 @@ class FilesReviewPaginationTest {
             val results = awaitView(controller, "clean")
             val group = results.getJSONArray("items").getJSONObject(0)
             assertEquals("group", group.getString("kind"))
-            val keeperPage = rowAction(controller, group, "Choose keeper")
+            val keeperPage = rowAction(controller, group, "Review")
             assertEquals("keeper", keeperPage.getString("view"))
             val candidates = keeperPage.getJSONArray("items")
             assertEquals(2, candidates.length())
             for (index in 0 until candidates.length()) assertUnknownSize(candidates.getJSONObject(index))
             val kept = (0 until candidates.length()).map { candidates.getJSONObject(it) }
                 .single { it.getString("id") == "kept" }
-            val selected = rowAction(controller, kept, "Keep this")
-            assertEquals("clean", selected.getString("view"))
-            val preparing = action(controller, selected, "Review selected")
+            val preparing = rowAction(controller, kept, "Keep this")
             assertEquals("progress", preparing.getString("view"))
             val review = awaitView(controller, "cleanReview")
             val reviewed = review.getJSONArray("items")
@@ -117,6 +645,34 @@ class FilesReviewPaginationTest {
         }
     }
 
+    @Test fun cleanItemSortUsesGroupMemberCount() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        val repository = ReviewFixtureRepository(itemCount = 0)
+        fun file(id: String, name: String) = FileEntry(id, "test-volume", "root",
+            name, "root/$name", false, "text/plain", 12L, 1, null, true, true)
+        repository.files.addAll(listOf(
+            file("two-base", "alpha.txt"), file("two-copy", "alpha (1).txt"),
+            file("three-base", "zeta.txt"), file("three-copy-1", "zeta (1).txt"),
+            file("three-copy-2", "zeta (2).txt")))
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            action(controller, setup, "Start scan")
+            val results = awaitView(controller, "clean")
+            assertEquals(2, results.getInt("findingCount"))
+            val byItems = action(controller, results, "Sort findings", JSONObject()
+                .put("sort", "items").put("direction", "desc"))
+            assertEquals("zeta.txt", byItems.getJSONArray("items").getJSONObject(0).getString("name"))
+            assertEquals(3, byItems.getJSONArray("items").getJSONObject(0).getInt("itemCount"))
+            assertEquals(2, byItems.getJSONArray("items").getJSONObject(1).getInt("itemCount"))
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
     @Test fun largeFileFindingsRankByKnownBytesAndFingerprintOnlyAfterReview() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().putInt("cleanLargeMiB", 1).commit()
@@ -144,6 +700,103 @@ class FilesReviewPaginationTest {
             assertEquals("progress", preparing.getString("view"))
             awaitView(controller, "cleanReview")
             assertTrue(repository.fingerprintCalls > 0)
+            assertEquals(0, repository.moveCalls)
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun cleanSortAndSelectAllCoverFindingsBeyondFirstPage() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().putInt("cleanLargeMiB", 1).commit()
+        val repository = ReviewFixtureRepository(itemCount = 105, largeFiles = true)
+        repository.files.indices.forEach { index ->
+            repository.files[index] = repository.files[index].copy(sizeBytes = (index + 2L) * 1024 * 1024)
+        }
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            val checks = toggleCleanCheck(controller, setup, "LARGE_FILE")
+            action(controller, checks, "Start scan")
+            val results = awaitView(controller, "clean")
+            assertEquals("priority", results.getString("cleanSort"))
+            assertEquals(105, results.getInt("findingCount"))
+
+            val sorted = action(controller, results, "Sort findings", JSONObject()
+                .put("sort", "size").put("direction", "asc"))
+            assertEquals("item-0", sorted.getJSONArray("items").getJSONObject(0).getString("name"))
+            assertEquals("size", sorted.getString("cleanSort"))
+            assertFalse(sorted.getBoolean("cleanSortDescending"))
+            val rest = action(controller, sorted, "Load more")
+            assertEquals(5, rest.getJSONArray("items").length())
+            assertEquals("item-100", rest.getJSONArray("items").getJSONObject(0).getString("name"))
+            val all = action(controller, rest, "Select all")
+            assertEquals(105, all.getInt("cleanSelectionCount"))
+            assertTrue(all.getBoolean("cleanCanReview"))
+            assertTrue((0 until all.getJSONArray("items").length()).all {
+                all.getJSONArray("items").getJSONObject(it).getBoolean("included")
+            })
+            assertEquals(0, repository.fingerprintCalls)
+            assertEquals(0, repository.moveCalls)
+
+            val descending = action(controller, all, "Sort findings", JSONObject()
+                .put("sort", "size").put("direction", "desc"))
+            assertEquals("item-104", descending.getJSONArray("items").getJSONObject(0).getString("name"))
+            assertTrue(descending.getBoolean("cleanSortDescending"))
+            assertEquals(105, descending.getInt("cleanSelectionCount"))
+            val byName = action(controller, descending, "Sort findings", JSONObject()
+                .put("sort", "name").put("direction", "asc"))
+            assertEquals("item-0", byName.getJSONArray("items").getJSONObject(0).getString("name"))
+            val byItems = action(controller, byName, "Sort findings", JSONObject()
+                .put("sort", "items").put("direction", "desc"))
+            assertEquals("items", byItems.getString("cleanSort"))
+            assertTrue(context.getSharedPreferences("files-page", 0).getBoolean("cleanSortDescending", false))
+
+            val cleared = action(controller, byItems, "Clear selection")
+            assertEquals(0, cleared.getInt("cleanSelectionCount"))
+            assertFalse(cleared.getJSONArray("items").getJSONObject(0).getBoolean("included"))
+            val included = rowAction(controller, cleared.getJSONArray("items").getJSONObject(0), "Include",
+                JSONObject().put("included", true))
+            assertEquals(1, included.getInt("cleanSelectionCount"))
+            val stillIncluded = rowAction(controller, included.getJSONArray("items").getJSONObject(0), "Included",
+                JSONObject().put("included", true))
+            assertEquals(1, stillIncluded.getInt("cleanSelectionCount"))
+        } finally {
+            context.getSharedPreferences("files-page", 0).edit().clear().commit()
+        }
+    }
+
+    @Test fun completedCleanReviewRemainsReadyThroughPageRefreshAndPagination() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("files-page", 0).edit().clear().putInt("cleanLargeMiB", 1).commit()
+        val repository = ReviewFixtureRepository(itemCount = 105, largeFiles = true)
+        val controller = FilesPageController(context, repository)
+        try {
+            controller.addedLocation("test-volume")
+            val setup = action(controller, page(controller), "Clean")
+            val checks = toggleCleanCheck(controller, setup, "LARGE_FILE")
+            action(controller, checks, "Start scan")
+            val results = awaitView(controller, "clean")
+            val all = action(controller, results, "Select all")
+            val preparing = action(controller, all, "Review selected")
+            assertEquals("progress", preparing.getString("view"))
+            val review = awaitView(controller, "cleanReview")
+            assertTrue(review.getBoolean("complete"))
+            assertEquals(100, review.getJSONArray("items").length())
+            assertEquals("100", review.getString("nextCursor"))
+            repeat(3) {
+                val refreshed = page(controller)
+                assertEquals("cleanReview", refreshed.getString("view"))
+                assertTrue(refreshed.getBoolean("complete"))
+                assertEquals(0, repository.moveCalls)
+            }
+            val remaining = action(controller, page(controller), "Load more")
+            assertEquals("cleanReview", remaining.getString("view"))
+            assertTrue(remaining.getBoolean("complete"))
+            assertEquals(5, remaining.getJSONArray("items").length())
+            assertTrue(remaining.isNull("nextCursor"))
+            assertEquals("cleanReview", page(controller).getString("view"))
             assertEquals(0, repository.moveCalls)
         } finally {
             context.getSharedPreferences("files-page", 0).edit().clear().commit()
@@ -365,7 +1018,7 @@ class FilesReviewPaginationTest {
         }
     }
 
-    @Test fun scrollUpdatesCannotExpireCleanOrReplaceItsSheetWithAnError() {
+    @Test fun scrollUpdatesCannotExpireCleanOrReplaceItsScreenWithAnError() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
         val repository = ReviewFixtureRepository(itemCount = 0)
@@ -406,7 +1059,7 @@ class FilesReviewPaginationTest {
             assertFalse(afterLateScroll.optString("state") == "error")
             action(controller, afterLateScroll, "Start scan")
             val recommendations = awaitView(controller, "clean")
-            assertEquals("sheet", recommendations.getString("presentation"))
+            assertEquals("screen", recommendations.getString("presentation"))
             val afterAnotherLateScroll = JSONObject(controller.performAction(oldScrollRequest))
             assertEquals("clean", afterAnotherLateScroll.getString("view"))
             assertFalse(afterAnotherLateScroll.optString("message").contains("Action expired"))
@@ -420,7 +1073,7 @@ class FilesReviewPaginationTest {
         }
     }
 
-    @Test fun cleanWaitsForExplicitStartAndClosingSheetKeepsCurrentFolder() {
+    @Test fun cleanWaitsForExplicitStartAndClosingScreenKeepsCurrentFolder() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences("files-page", 0).edit().clear().commit()
         val repository = ReviewFixtureRepository(itemCount = 0)
@@ -438,13 +1091,11 @@ class FilesReviewPaginationTest {
             assertEquals(0, repository.fingerprintCalls)
             val scanning = action(controller, setup, "Start scan")
             assertEquals("progress", scanning.getString("view"))
-            assertEquals("sheet", scanning.getString("presentation"))
-            assertEquals("browser", scanning.getString("underlyingView"))
+            assertEquals("screen", scanning.getString("presentation"))
             assertEquals("clean", scanning.getString("progressFor"))
 
             val recommendations = awaitView(controller, "clean")
-            assertEquals("sheet", recommendations.getString("presentation"))
-            assertEquals("browser", recommendations.getString("underlyingView"))
+            assertEquals("screen", recommendations.getString("presentation"))
             assertTrue(context.getSharedPreferences("files-page", 0)
                 .getLong("lastCleanScanAt:root", 0) > 0)
             assertEquals(0, repository.moveCalls)
@@ -551,13 +1202,16 @@ class FilesReviewPaginationTest {
         return JSONObject(controller.performAction(request.toString()))
     }
 
-    private fun rowAction(controller: FilesPageController, row: JSONObject, label: String): JSONObject {
+    private fun rowAction(controller: FilesPageController, row: JSONObject, label: String,
+        args: JSONObject? = null): JSONObject {
         val actions = row.getJSONArray("actions")
         val command = (0 until actions.length()).map { actions.getJSONObject(it) }
             .single { it.getString("label") == label }
-        return JSONObject(controller.performAction(JSONObject().put("version", 1)
+        val request = JSONObject().put("version", 1)
             .put("actionId", command.getString("id"))
-            .put("operationToken", UUID.randomUUID().toString()).toString()))
+            .put("operationToken", UUID.randomUUID().toString())
+        if (args != null) request.put("args", args)
+        return JSONObject(controller.performAction(request.toString()))
     }
 
     private fun cleanCheck(page: JSONObject, id: String): JSONObject =
@@ -595,6 +1249,19 @@ class FilesReviewPaginationTest {
         var sizeWalks = 0
         var moveCalls = 0
         var lastPlanSize = 0
+        val trash = mutableListOf<TrashEntry>()
+        var emptyCalls = 0
+        var trashPrepareCalls = 0
+        var trashPreparationFailure = false
+        var prepareRelease: CountDownLatch? = null
+        val prepareEntered = CountDownLatch(1)
+        var trashPrepareRelease: CountDownLatch? = null
+        val trashPrepareEntered = CountDownLatch(1)
+        val repositoryLock = java.util.concurrent.locks.ReentrantLock()
+        var progressGate: CountDownLatch? = null
+        val progressEntered = CountDownLatch(1)
+        @Volatile var blockTrashRead = false
+        val trashReadEntered = CountDownLatch(1)
 
         override fun locations() = listOf(StorageLocation("test-volume", "Fixture", "root",
             StorageLocation.Kind.SELECTED_FOLDER, true, true, 1_000_000, 500_000))
@@ -638,19 +1305,36 @@ class FilesReviewPaginationTest {
             else -> null
         }
         override fun prepareDeletion(ids: List<String>, cancel: Cancellation): DeletionPlan {
+            prepareEntered.countDown()
+            prepareRelease?.let { check(it.await(10, TimeUnit.SECONDS)) }
             val selected = files.filter { it.id in ids }
             return DeletionPlan("fixture-plan", selected, selected, selected.size.toLong(),
                 selected.size.toLong(), true, emptyList(), emptyMap(), emptyMap())
         }
         override fun moveToTrash(plan: DeletionPlan, cancel: Cancellation, progress: Progress): OperationResult {
+            progressGate?.let { gate ->
+                repositoryLock.lock()
+                try {
+                    progressEntered.countDown()
+                    check(gate.await(10, TimeUnit.SECONDS))
+                    progress.onProgress(1, 1, "item")
+                } finally { repositoryLock.unlock() }
+            }
             moveCalls++
             lastPlanSize = plan.descendants.size
             return OperationResult("fixture-delete", plan.roots.map {
                 FileOutcome(it.id, FileOutcome.Status.SUCCESS)
             })
         }
-        override fun trashSummary() = TrashSummary(0, 0, 0, 0)
-        override fun trashEntries(): List<TrashEntry> = emptyList()
+        override fun trashSummary(): TrashSummary {
+            if (blockTrashRead) {
+                trashReadEntered.countDown()
+                repositoryLock.lock()
+                repositoryLock.unlock()
+            }
+            return TrashSummary(trash.size.toLong(), 0, trash.sumOf { it.sizeBytes ?: 0L }, 0)
+        }
+        override fun trashEntries(): List<TrashEntry> = trash.toList()
         override fun openRead(id: String): ParcelFileDescriptor = error("Unexpected read")
         override fun openWrite(id: String, expectedFingerprint: String): ParcelFileDescriptor = error("Unexpected write")
         override fun beginStagedWrite(id: String, expectedFingerprint: String): StagedWrite = error("Unexpected staged write")
@@ -673,8 +1357,18 @@ class FilesReviewPaginationTest {
             replacementPlans: Map<String, DeletionPlan>): OperationResult = error("Unexpected copy")
         override fun restore(ids: List<String>, choices: Map<String, RestoreChoice>,
             cancel: Cancellation): OperationResult = error("Unexpected restore")
-        override fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan = error("Unexpected empty")
-        override fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation): OperationResult = error("Unexpected empty")
+        override fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan {
+            trashPrepareCalls++
+            trashPrepareEntered.countDown()
+            trashPrepareRelease?.let { check(it.await(10, TimeUnit.SECONDS)) }
+            check(!trashPreparationFailure) { "fixture storage unavailable" }
+            return EmptyTrashPlan(trash.filter { it.id in ids }, emptyList(), true, emptyList(), emptyMap())
+        }
+        override fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation): OperationResult {
+            emptyCalls++
+            trash.removeAll { entry -> plan.entries.any { it.id == entry.id } }
+            return OperationResult("empty", plan.entries.map { FileOutcome(it.id, FileOutcome.Status.SUCCESS) })
+        }
         override fun history(): List<OperationHistoryEntry> = emptyList()
         override fun clearHistory() = Unit
         override fun undoLast(): OperationResult = error("Unexpected undo")

@@ -44,6 +44,35 @@ class ModuleDescriptorCodecTest {
         assertEquals("{}", ModuleDescriptorCodec.normalizeConfiguration(ModuleDescriptorCodec.parse(empty), "{}"))
     }
 
+    @Test fun workspaceActivityIsOptionalAndValidatedLikeManagementActivity() {
+        assertEquals(null, ModuleDescriptorCodec.parse(descriptor).workspaceActivity)
+        val withActivity = descriptor.replace(
+            "\"instanceConfiguration\":", "\"workspaceActivity\":\".WorkspaceActivity\",\"instanceConfiguration\":")
+        assertEquals(".WorkspaceActivity", ModuleDescriptorCodec.parse(withActivity).workspaceActivity)
+        rejects { ModuleDescriptorCodec.parse(withActivity.replace(".WorkspaceActivity", "other/package.Activity")) }
+    }
+
+    @Test fun workspaceSurfaceMinimumDefaultsTo30AndRoundTrips() {
+        assertEquals(30, ModuleDescriptorCodec.parse(descriptor).workspaceSurfaceMinSdk)
+        val api33 = descriptor.replace(
+            "\"instanceConfiguration\":", "\"workspaceSurfaceMinSdk\":33,\"instanceConfiguration\":")
+        val parsed = ModuleDescriptorCodec.parse(api33)
+        assertEquals(33, parsed.workspaceSurfaceMinSdk)
+        assertEquals(parsed, ModuleDescriptorCodec.parse(ModuleDescriptorCodec.encode(parsed)))
+        assertEquals(30, ModuleDescriptorCodec.parse(
+            ModuleDescriptorCodec.encode(ModuleDescriptorCodec.parse(descriptor))).workspaceSurfaceMinSdk)
+    }
+
+    @Test fun workspaceSurfaceMinimumRejectsUnsupportedValuesAndTypes() {
+        for (candidate in listOf("29", "10001", "-1", "33.5", "\"33\"", "null")) {
+            val raw = descriptor.replace(
+                "\"instanceConfiguration\":", "\"workspaceSurfaceMinSdk\":$candidate,\"instanceConfiguration\":")
+            rejects { ModuleDescriptorCodec.parse(raw) }
+        }
+        val valid = ModuleDescriptorCodec.parse(descriptor)
+        rejects { ModuleDescriptorCodec.encode(valid.copy(workspaceSurfaceMinSdk = 29)) }
+    }
+
     @Test fun rejectsInvalidDescriptorAndUnknownFields() {
         rejects { ModuleDescriptorCodec.parse(descriptor.replace("\"schemaVersion\":1", "\"schemaVersion\":2")) }
         rejects { ModuleDescriptorCodec.parse(descriptor.replace("\"max\":4", "\"max\":3")) }

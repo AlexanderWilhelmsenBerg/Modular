@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -213,7 +213,7 @@ fun FilesStorageMap(
             }
         } else {
             BoxWithConstraints(Modifier.fillMaxWidth().height(280.dp)
-                .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                .clip(RectangleShape).background(MaterialTheme.colorScheme.surfaceVariant)) {
                 val rects = remember(known, maxWidth, maxHeight) {
                     storageMapRects(known.map { it.bytes ?: 0 }, maxWidth.value, maxHeight.value)
                 }
@@ -241,13 +241,13 @@ fun FilesStorageMap(
             verticalArrangement = Arrangement.spacedBy(3.dp)) {
             nodes.map { it.type }.distinct().forEach { type ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(9.dp).background(type.color, RoundedCornerShape(2.dp)))
+                    Box(Modifier.size(9.dp).background(type.color, RectangleShape))
                     Text(" ${type.label}", style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
         if (selected != null) {
-            Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant,
+            Surface(shape = RectangleShape, color = MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.fillMaxWidth().testTag("files-map-detail")) {
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(selected.name, style = MaterialTheme.typography.titleSmall)

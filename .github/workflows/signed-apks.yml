@@ -3,6 +3,15 @@ name: Signed APKs
 on:
   workflow_dispatch:
     inputs:
+      build_target:
+        description: APKs to build (Files updates do not require a Core build)
+        type: choice
+        required: false
+        default: core-and-files
+        options:
+          - core-and-files
+          - files-only
+          - core-only
       include_reference_addons:
         description: Build legacy/reference add-on APKs for SDK testing
         type: boolean
@@ -41,26 +50,53 @@ jobs:
           path.touch(mode=0o600, exist_ok=False)
           path.write_bytes(data)
           PY
-      - name: Build persistent Core and Files debug and release APKs
+      - name: Build selected persistent debug and release APKs
         env:
           MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-signing.p12
           MODULAR_KEYSTORE_PASSWORD: ${{ secrets.MODULAR_KEYSTORE_PASSWORD }}
+          BUILD_TARGET: ${{ inputs.build_target || 'core-and-files' }}
         run: |
           python3 scripts/verify-keystore.py --expected-certificates docs/signing-certificates.json
-          gradle :app:assembleDebug :app:assembleRelease :addon-files:assembleDebug :addon-files:assembleRelease --no-configuration-cache
+          case "$BUILD_TARGET" in
+            core-and-files) gradle :app:assembleDebug :app:assembleRelease :addon-files:assembleDebug :addon-files:assembleRelease --no-configuration-cache ;;
+            files-only) gradle :addon-files:assembleDebug :addon-files:assembleRelease --no-configuration-cache ;;
+            core-only) gradle :app:assembleDebug :app:assembleRelease --no-configuration-cache ;;
+            *) exit 2 ;;
+          esac
       - name: Build legacy/reference add-on APKs for SDK testing
-        if: ${{ inputs.include_reference_addons }}
+        if: ${{ inputs.include_reference_addons && inputs.build_target != 'files-only' && inputs.build_target != 'core-only' }}
         env:
           MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-signing.p12
           MODULAR_KEYSTORE_PASSWORD: ${{ secrets.MODULAR_KEYSTORE_PASSWORD }}
         run: gradle :reference-sort-alphabetical:assembleDebug :reference-sort-alphabetical:assembleRelease :addon-most-used:assembleDebug :addon-most-used:assembleRelease --no-configuration-cache
-      - name: Verify Core signatures and variant identities
-        if: ${{ !inputs.include_reference_addons }}
-        run: python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --core-only --include-files
-      - name: Verify Core and reference add-on signatures and variant identities
-        if: ${{ inputs.include_reference_addons }}
-        run: python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --include-files
+      - name: Verify selected APK signatures and variant identities
+        env:
+          BUILD_TARGET: ${{ inputs.build_target || 'core-and-files' }}
+          INCLUDE_REFERENCE: ${{ inputs.include_reference_addons }}
+        run: |
+          case "$BUILD_TARGET" in
+            files-only) python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --files-only ;;
+            core-only) python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --core-only ;;
+            core-and-files)
+              if [ "$INCLUDE_REFERENCE" = "true" ]; then
+                python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --include-files
+              else
+                python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --core-only --include-files
+              fi ;;
+            *) exit 2 ;;
+          esac
+      - name: Enforce framework source boundaries
+        run: python3 scripts/check-module-boundaries.py
+      - name: Verify Files-only builds leave Core unbuilt
+        if: ${{ inputs.build_target == 'files-only' }}
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          if list(Path("app/build/outputs/apk").rglob("*.apk")):
+              raise SystemExit("Files-only build unexpectedly produced Core APKs")
+          PYCODE
       - name: Upload signed Core APKs
+        if: ${{ inputs.build_target != 'files-only' }}
         uses: actions/upload-artifact@v4
         with:
           name: modular-signed-apks
@@ -69,6 +105,7 @@ jobs:
             app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
       - name: Upload signed Files APKs
+        if: ${{ inputs.build_target != 'core-only' }}
         uses: actions/upload-artifact@v4
         with:
           name: modular-files-signed-apks
@@ -77,7 +114,7 @@ jobs:
             addon-files/build/outputs/apk/release/addon-files-release.apk
           if-no-files-found: error
       - name: Upload legacy/reference add-on APKs
-        if: ${{ inputs.include_reference_addons }}
+        if: ${{ inputs.include_reference_addons && inputs.build_target != 'files-only' && inputs.build_target != 'core-only' }}
         uses: actions/upload-artifact@v4
         with:
           name: modular-reference-addons

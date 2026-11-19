@@ -2,6 +2,7 @@
 """Run the Files device tests with storage access fixed before each instrumentation process."""
 
 from pathlib import Path
+import argparse
 import re
 import subprocess
 
@@ -11,16 +12,32 @@ RUNNER = PACKAGE + ".test/androidx.test.runner.AndroidJUnitRunner"
 BASE_CLASS = "io.github.alexanderwilhelmsenberg.modular.addon.files."
 REPORT_DIR = Path("build/reports/device")
 BROAD_TESTS = (
+    "FilesSurfaceDetachTest",
+    "FilesCrashReportsTest",
+    "CleanScanStoreTest",
+    "FilesBackgroundScanTest",
+    "FilesOperationServiceTest",
+    "FilesLogExportTest",
     "DirectStorageSafetyTest",
+    "FilesTrashScaleTest",
+    "FilesTrashReviewStoreTest",
     "MarkdownRealDocumentTest",
     "PdfRealDocumentTest",
     "FilesNativeDocumentUiTest",
+    "FilesEventLogUiTest",
+    "FilesMarkdownSurfaceHandoffTest",
     "FilesReviewPaginationTest",
     "FilesActivityInsetsTest",
+    "FilesScrollLifecycleTest",
+    "FilesPageVisualFixtureTest",
+    "FilesMenuTouchTest",
     "FilesHandoffNonceTest",
     "ArchiveRealStorageTest",
 )
-EXPECTED_COUNTS = {"FilesReviewPaginationTest": 11, "DirectStorageSafetyTest": 2}
+EXPECTED_COUNTS = {"FilesReviewPaginationTest": 31, "FilesCrashReportsTest": 2, "CleanScanStoreTest": 3, "FilesBackgroundScanTest": 2, "FilesMenuTouchTest": 2, "FilesTrashReviewStoreTest": 3, "DirectStorageSafetyTest": 5, "FilesLogExportTest": 3, "FilesPageVisualFixtureTest": 2, "FilesEventLogUiTest": 6, "FilesNativeDocumentUiTest": 2}
+EXPECTED_COUNTS["FilesSurfaceDetachTest"] = 3
+LIFECYCLE_TESTS = ("FilesSurfaceDetachTest", "FilesBackgroundScanTest", "FilesOperationServiceTest",
+                   "FilesLogExportTest", "FilesCrashReportsTest", "CleanScanStoreTest")
 
 
 def adb(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -47,19 +64,32 @@ def run_test(name: str) -> None:
     expected_count = EXPECTED_COUNTS.get(name, 1)
     success = re.search(rf"^OK \({expected_count} tests?\)\s*$", result.stdout, re.MULTILINE)
     if result.returncode or not success or "INSTRUMENTATION_STATUS_CODE: -2" in output:
+        for filename, command in (
+            ("last-java-crash.json", ("shell", "run-as", PACKAGE, "cat", "files/last-java-crash.json")),
+            ("system-crash-buffer.txt", ("logcat", "-d", "-b", "crash", "-v", "threadtime", "-t", "300")),
+        ):
+            try:
+                (REPORT_DIR / filename).write_text(adb(*command, timeout=10).stdout)
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                pass
         print(output, flush=True)
         raise RuntimeError(f"Files {name} instrumentation did not pass")
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--lifecycle-only", action="store_true", help="Run surface/foreground/export regressions without Espresso")
+    options = parser.parse_args()
+    selected = LIFECYCLE_TESTS if options.lifecycle_only else BROAD_TESTS
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     failures: list[str] = []
     # Changing this app-op can kill the target process. Do it only between runs,
     # after the APKs are installed and before the next instrumentation starts.
     try:
         try:
-            adb("shell", "appops", "set", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "allow")
-            for name in BROAD_TESTS:
+            adb("shell", "appops", "set", "--uid", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "allow")
+            adb("shell", "pm", "grant", PACKAGE, "android.permission.POST_NOTIFICATIONS")
+            for name in selected:
                 try:
                     run_test(name)
                 except (OSError, RuntimeError, subprocess.SubprocessError) as error:
@@ -67,21 +97,22 @@ def main() -> None:
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
             failures.append(f"Broad-access setup: {error}")
 
-        try:
-            adb("shell", "appops", "set", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "ignore")
-            run_test("SelectedFolderSafTest")
-        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-            failures.append(f"SelectedFolderSafTest: {error}")
+        if not options.lifecycle_only:
+            try:
+                adb("shell", "appops", "set", "--uid", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "ignore")
+                run_test("SelectedFolderSafTest")
+            except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+                failures.append(f"SelectedFolderSafTest: {error}")
     finally:
         try:
-            adb("shell", "appops", "set", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "default")
+            adb("shell", "appops", "set", "--uid", PACKAGE, "MANAGE_EXTERNAL_STORAGE", "default")
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
             failures.append(f"App-op restore: {error}")
     if failures:
         report = REPORT_DIR / "addon-files-summary.log"
         report.write_text("\n".join(failures) + "\n")
         raise RuntimeError(f"Files device tests failed; see {report}:\n" + "\n".join(failures))
-    print("All nine Files device test classes passed (sixteen tests)", flush=True)
+    print(f"All {len(selected) + (0 if options.lifecycle_only else 1)} selected Files device test classes passed", flush=True)
 
 
 if __name__ == "__main__":

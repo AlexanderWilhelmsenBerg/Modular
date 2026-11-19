@@ -28,7 +28,22 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /** Real filesystem and DocumentsProvider implementation. IDs encode a grant key and a verified ancestry chain. */
-class AndroidFilesRepository(private val context: Context) : FilesRepository {
+class AndroidFilesRepository(private val context: Context,
+    metadataWorkers: Int = Runtime.getRuntime().availableProcessors().coerceIn(2, 4),
+    private val directoryReadObserver: (String) -> Unit = {},
+    private val contentReadObserver: (String) -> Unit = {}) : FilesRepository {
+    private val readWorkers = metadataWorkers.coerceIn(1, 4)
+    private val metadataExecutor by lazy {
+        val count = java.util.concurrent.atomic.AtomicInteger()
+        (java.util.concurrent.Executors.newFixedThreadPool(readWorkers) { task ->
+            Thread(task, "files-metadata-${count.incrementAndGet()}").apply { isDaemon = true }
+        } as java.util.concurrent.ThreadPoolExecutor).apply {
+            setKeepAliveTime(15, java.util.concurrent.TimeUnit.SECONDS); allowCoreThreadTimeOut(true)
+        }
+    }
+    @Volatile private var reviewStats: Map<String, Long> = emptyMap()
+    override fun trashReviewDiagnostics(): Map<String, Long> = reviewStats
+    override fun localMetadataPath(id: String): String? = resolve(id).file?.takeIf { it.canRead() }?.absolutePath
     private val resolver = context.contentResolver
     private val prefs = context.getSharedPreferences("files_storage_v1", Context.MODE_PRIVATE)
     private val totals = ConcurrentHashMap<String, DirectoryTotal>()
@@ -110,13 +125,14 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         pageFor(all, offset, limit, sort, showHidden)
     }
 
-    override fun cachedListing(folderId: String, offset: Int, limit: Int, sort: FileSort, showHidden: Boolean): FilePage? = mutationLock.withLock {
+    override fun cachedListing(folderId: String, offset: Int, limit: Int, sort: FileSort, showHidden: Boolean): FilePage? {
         require(offset >= 0 && limit in 1..maxPage)
         // The original location and folder must still be accessible before showing saved entries.
-        val node = runCatching { resolve(folderId) }.getOrNull() ?: return@withLock null
-        if (!node.directory) return@withLock null
-        val snapshot = listingCache.read(folderId, System.currentTimeMillis(), cachedListingAgeMillis) ?: return@withLock null
-        pageFor(snapshot.entries, offset, limit, sort, showHidden)
+        val node = runCatching { resolve(folderId) }.getOrNull() ?: return null
+        if (!node.directory) return null
+        val snapshot = listingCache.read(folderId, System.currentTimeMillis(),
+            if (mutationLock.isLocked) Long.MAX_VALUE else cachedListingAgeMillis) ?: return null
+        return pageFor(snapshot.entries, offset, limit, sort, showHidden)
     }
 
     override fun invalidateListing(folderId: String) = mutationLock.withLock {
@@ -298,6 +314,16 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         return fingerprint(node)
     }
 
+    override fun fingerprint(id: String, cancel: Cancellation, progress: Progress): String =
+        fingerprint(resolve(id), cancel, progress)
+
+    override fun identityFingerprint(id: String, cancel: Cancellation, progress: Progress): String {
+        check(!cancel.isCanceled()) { "Operation canceled" }
+        val node = resolve(id)
+        progress.onProgress(0, null, "Checking ${node.name}")
+        return identityFingerprint(node)
+    }
+
     override fun scopedContent(id: String): ScopedContent {
         val node = resolve(id)
         require(!node.directory)
@@ -316,11 +342,17 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         create(parent, name, mimeType).entry()
     }
 
-    override fun rename(id: String, newName: String): FileEntry {
+    override fun rename(id: String, newName: String): FileEntry = renameWithReview(id, newName, null)
+
+    override fun renameReviewed(id: String, newName: String, expectedIdentity: String): FileEntry =
+        renameWithReview(id, newName, expectedIdentity)
+
+    private fun renameWithReview(id: String, newName: String, expectedIdentity: String?): FileEntry {
         mutationLock.lock()
         try {
         validName(newName)
         val node = resolve(id)
+        if (expectedIdentity != null) require(matchesRevision(node, expectedIdentity)) { "File changed before rename" }
         require(node.parentId != null && node.writable) { "Cannot rename this location" }
         val parent = resolve(node.parentId)
         require(children(parent).none { it.name == newName }) { "A file with that name exists" }
@@ -335,7 +367,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
             val docId = DocumentsContract.getDocumentId(newUri)
             resolve(safChildId(parent.id, docId)).entry()
         }
-        recordOperation(operation, "rename", listOf(FileOutcome(id, FileOutcome.Status.SUCCESS, node.name, renamed.id, resultFingerprint = fingerprint(renamed.id))))
+        recordOperation(operation, "rename", listOf(FileOutcome(id, FileOutcome.Status.SUCCESS, node.name, renamed.id,
+            resultFingerprint = if (expectedIdentity == null) fingerprint(renamed.id) else identityFingerprint(resolve(renamed.id)))))
         finishJournal(operation)
         return renamed
         } finally { mutationLock.unlock() }
@@ -387,7 +420,10 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         } finally { mutationLock.unlock() }
     }
 
-    override fun prepareDeletion(ids: List<String>, cancel: Cancellation): DeletionPlan {
+    override fun prepareDeletion(ids: List<String>, cancel: Cancellation): DeletionPlan =
+        prepareDeletion(ids, cancel, Progress { _, _, _ -> })
+
+    override fun prepareDeletion(ids: List<String>, cancel: Cancellation, progress: Progress): DeletionPlan {
         val roots = ArrayList<FileEntry>()
         val manifest = LinkedHashMap<String, FileEntry>()
         val fingerprints = LinkedHashMap<String, String>()
@@ -405,7 +441,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                 errors.add("${node.relative}: provider cannot safely delete a folder if a child is added after review")
             }
             try {
-                val fp = fingerprint(node)
+                progress.onProgress(0, null, "Reviewing ${manifest.size + 1} items · ${node.name}")
+                val fp = identityFingerprint(node)
                 manifest[node.id] = node.entry()
                 fingerprints[node.id] = fp
                 if (node.directory) {
@@ -431,7 +468,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         val progressTotal = plan.totalKnownBytes.takeIf { plan.descendants.all { it.isDirectory || it.sizeBytes != null } }
         for (group in groups) {
             if (cancel.isCanceled()) { group.forEach { outcomes.add(FileOutcome(it.id, FileOutcome.Status.CANCELED)) }; continue }
-            val error = validateGroup(group, plan.fingerprints, plan.directoryChildren)
+            progress.onProgress(0, null, "Verifying ${group.firstOrNull()?.name ?: "reviewed files"}")
+            val error = validateGroup(group, plan.fingerprints, plan.directoryChildren, cancel, progress)
             if (error != null) { group.forEach { outcomes.add(FileOutcome(it.id, FileOutcome.Status.CHANGED, error)) }; continue }
             val files = group.filter { !it.isDirectory }.sortedByDescending { it.relativePath.length }
             var failed = false
@@ -443,8 +481,10 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                     val changed = remainingChildrenChanged(group, item.id, plan.directoryChildren, removedIds)
                     require(changed == null) { changed ?: "Folder changed" }
                     val current = resolve(item.id)
-                    require(fingerprint(current) == plan.fingerprints[item.id]) { "File changed" }
+                    require(matchesRevision(current, plan.fingerprints[item.id], cancel, progress)) { "File changed" }
                     val record = trashOne(current, cancel) { n -> movedBytes += n; progress.onProgress(movedBytes, progressTotal, item.name) }
+                    if (current.file != null) movedBytes += item.sizeBytes ?: 0L
+                    progress.onProgress(movedBytes, progressTotal, "Moved ${item.name} to trash")
                     outcomes.add(FileOutcome(item.id, FileOutcome.Status.SUCCESS, resultingId = record.id))
                     removedIds.add(item.id)
                 } catch (e: Exception) { failed = true; outcomes.add(FileOutcome(item.id, FileOutcome.Status.FAILED, e.message)) }
@@ -455,6 +495,8 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                     val changed = remainingChildrenChanged(group, item.id, plan.directoryChildren, removedIds)
                     require(changed == null) { changed ?: "Folder changed" }
                     val current = resolve(item.id)
+                    require(matchesRevision(current, plan.fingerprints[item.id], cancel, progress,
+                        directoryChildrenRemoved = true)) { "Folder identity changed" }
                     require(children(current).isEmpty()) { "Folder has new or unreviewed children" }
                     val record = trashEmptyFolder(current)
                     outcomes.add(FileOutcome(item.id, FileOutcome.Status.SUCCESS, resultingId = record.id))
@@ -468,18 +510,39 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         } finally { mutationLock.unlock() }
     }
 
-    override fun trashEntries(): List<TrashEntry> {
+    private data class TrashIndex(val root: Root, val folder: Node?, val byName: Map<String, Node>)
+    private data class TrashSnapshot(val entries: List<TrashEntry>, val indexes: Map<String, TrashIndex>)
+
+    private fun <T, R> parallelMetadata(values: List<T>, cancel: Cancellation, task: (T) -> R): List<R> {
+        val futures = values.map { value -> metadataExecutor.submit(java.util.concurrent.Callable {
+            check(!cancel.isCanceled()) { "Trash review canceled" }; task(value)
+        }) }
+        try {
+            return futures.map { future ->
+                check(!cancel.isCanceled()) { "Trash review canceled" }
+                future.get()
+            }
+        } finally { futures.filterNot { it.isDone }.forEach { it.cancel(true) } }
+    }
+
+    override fun trashEntries(): List<TrashEntry> = readTrashSnapshot(Cancellation { false }).entries
+
+    private fun readTrashSnapshot(cancel: Cancellation, progress: Progress = Progress { _, _, _ -> }): TrashSnapshot {
         mutationLock.lock()
         try {
         val cached = readTrashCache().associateBy { it.id }.toMutableMap()
         val online = HashSet<String>()
         val metadataIds = HashSet<String>()
         val payloadIds = HashSet<String>()
+        val indexes = linkedMapOf<String, TrashIndex>()
         for (root in roots()) {
             try {
+                check(!cancel.isCanceled()) { "Trash review canceled" }
                 resolveInternal(rootId(root)) // A revoked grant or unplugged drive must remain offline.
                 val folder = findTrash(root)
                 val stored = folder?.let(::children).orEmpty()
+                val byName = stored.associateBy { it.name }
+                indexes[root.key] = TrashIndex(root, folder, byName)
                 online.add(root.key)
                 stored.forEach { item ->
                     when {
@@ -487,27 +550,37 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                         item.name.endsWith(".folder") -> payloadIds.add("${root.key}:${item.name.removeSuffix(".folder")}")
                     }
                 }
-                stored.filter { it.name.endsWith(".meta.json") }.forEach { meta ->
+                val metadata = stored.filter { it.name.endsWith(".meta.json") }
+                val completed = java.util.concurrent.atomic.AtomicInteger()
+                parallelMetadata(metadata, cancel) { meta ->
+                    val record = runCatching { readJson(meta) }.getOrNull()
+                    progress.onProgress(0, null, "Reading trash index ${completed.incrementAndGet()}/${metadata.size}")
+                    record
+                }.filterNotNull().forEach { record ->
                     try {
-                        val record = readJson(meta)
                         val id = record.getString("id")
                         metadataIds.add("${root.key}:$id")
                         val payloadName = record.getString("payload")
-                        val payload = stored.firstOrNull { it.name == payloadName }
+                        val payload = byName[payloadName]
                         if (payload != null || runCatching { resolve(record.optString("originalId")); false }.getOrDefault(true)) {
                             cached[id] = recordToTrash(record, root.key, payload != null)
                         } else cached.remove(id)
                     } catch (_: Exception) { }
                 }
-            } catch (_: Exception) { /* Offline records stay in cache. */ }
+            } catch (failure: Exception) {
+                if (cancel.isCanceled()) throw java.util.concurrent.CancellationException("Trash review canceled")
+                // Offline records stay in cache.
+            }
         }
         val result = cached.values.filter { StorageSafety.retainTrashRecord(it.locationId, it.id, online, metadataIds, payloadIds) }
             .map { it.copy(available = it.locationId in online && "${it.locationId}:${it.id}" in payloadIds) }
             .sortedByDescending { it.trashedAtMillis }
         saveTrashCache(result)
-        return result
+        return TrashSnapshot(result, indexes)
         } finally { mutationLock.unlock() }
     }
+
+    override fun cachedTrashEntries(): List<TrashEntry> = readTrashCache()
 
     override fun trashSummary(): TrashSummary {
         val entries = if (mutationLock.tryLock()) {
@@ -548,49 +621,78 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         } finally { mutationLock.unlock() }
     }
 
-    override fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan {
-        val selected = trashEntries().filter { it.id in ids.toSet() }
+    override fun prepareEmptyTrash(ids: List<String>): EmptyTrashPlan = prepareEmptyTrash(ids, Cancellation { false })
+
+    override fun prepareEmptyTrash(ids: List<String>, cancel: Cancellation): EmptyTrashPlan {
+        return prepareEmptyTrash(ids, cancel, Progress { _, _, _ -> })
+    }
+
+    override fun prepareEmptyTrash(ids: List<String>, cancel: Cancellation, progress: Progress): EmptyTrashPlan {
+        check(!cancel.isCanceled()) { "Trash review canceled" }
+        val started = android.os.SystemClock.elapsedRealtime()
+        val snapshot = readTrashSnapshot(cancel, progress)
+        val wanted = ids.toSet()
+        val selected = snapshot.entries.filter { it.id in wanted }
         val errors = selected.filter { !it.available }.map { "${it.originalPath}: storage unavailable" }.toMutableList()
-        ids.distinct().filter { wanted -> selected.none { it.id == wanted } }.forEach { errors.add("$it: trash entry missing") }
+        val found = selected.map { it.id }.toSet()
+        wanted.filterNot { it in found }.forEach { errors.add("$it: trash entry missing") }
         val manifest = ArrayList<FileEntry>()
         val fingerprints = LinkedHashMap<String, String>()
-        selected.filter { it.available }.forEach { item ->
+        val completed = java.util.concurrent.atomic.AtomicInteger()
+        val parts = parallelMetadata(selected.filter { it.available }, cancel) { item ->
+            val localManifest = arrayListOf<FileEntry>()
+            val localFingerprints = linkedMapOf<String, String>()
+            val localErrors = arrayListOf<String>()
+            check(!cancel.isCanceled()) { "Trash review canceled" }
             try {
-                val payload = locatePayload(item) ?: error("Payload missing")
+                val payload = locatePayload(item, snapshot.indexes) ?: error("Payload missing")
                 require(!(payload.directory && payload.root.tree != null)) { "Provider cannot safely empty a folder in trash" }
                 val seen = HashSet<String>()
                 fun visit(node: Node) {
+                    check(!cancel.isCanceled()) { "Trash review canceled" }
                     require(seen.add(nodeIdentity(node))) { "Cyclic or repeated trash item" }
-                    manifest.add(node.entry())
-                    fingerprints[node.id] = fingerprint(node)
+                    localManifest.add(node.entry())
+                    localFingerprints[node.id] = identityFingerprint(node)
                     if (node.directory) children(node).forEach(::visit)
                 }
                 visit(payload)
-            } catch (e: Exception) { errors.add(e.message ?: "Cannot enumerate trash") }
+            } catch (e: Exception) { localErrors.add(e.message ?: "Cannot enumerate trash") }
+            progress.onProgress(0, null, "Reviewed trash ${completed.incrementAndGet()}/${selected.size} · ${item.originalName}")
+            Triple(localManifest, localFingerprints, localErrors)
         }
+        for ((entries, revisions, issues) in parts) { manifest.addAll(entries); fingerprints.putAll(revisions); errors.addAll(issues) }
+        reviewStats = mapOf("workers" to readWorkers.toLong(), "entries" to selected.size.toLong(),
+            "manifestEntries" to manifest.size.toLong(), "elapsedMillis" to (android.os.SystemClock.elapsedRealtime() - started))
         return EmptyTrashPlan(selected, manifest, errors.isEmpty(), errors, fingerprints)
     }
 
     override fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation): OperationResult {
+        return emptyTrash(plan, cancel, Progress { _, _, _ -> })
+    }
+
+    override fun emptyTrash(plan: EmptyTrashPlan, cancel: Cancellation, progress: Progress): OperationResult {
         mutationLock.lock()
         try {
         require(plan.complete) { "Incomplete trash review" }
         val operation = UUID.randomUUID().toString()
         startJournal(operation, "emptyTrash", plan.entries.map { it.id }, null)
         val outcomes = ArrayList<FileOutcome>()
-        for (record in plan.entries) {
+        val indexes = readTrashSnapshot(cancel, progress).indexes
+        for ((index, record) in plan.entries.withIndex()) {
+            progress.onProgress(0, null, "Emptying trash ${index + 1}/${plan.entries.size} · ${record.originalName}")
             if (cancel.isCanceled()) { outcomes.add(FileOutcome(record.id, FileOutcome.Status.CANCELED)); continue }
             try {
-                val payload = locatePayload(record) ?: error("Storage unavailable")
+                val payload = locatePayload(record, indexes) ?: error("Storage unavailable")
                 val covered = plan.descendants.filter { it.id == payload.id || it.relativePath.startsWith(payload.relative.trimEnd('/') + "/") }
-                val error = validateGroup(covered, plan.fingerprints, covered.filter { it.isDirectory }.associate { folder -> folder.id to covered.filter { it.parentId == folder.id }.map { it.id }.toSet() })
+                val error = validateGroup(covered, plan.fingerprints, covered.filter { it.isDirectory }.associate { folder -> folder.id to covered.filter { it.parentId == folder.id }.map { it.id }.toSet() }, cancel, progress)
                 require(error == null) { error ?: "Changed" }
                 covered.sortedWith(compareBy<FileEntry> { it.isDirectory }.thenByDescending { it.relativePath.length }).forEach { item ->
+                    check(!cancel.isCanceled()) { "Empty trash canceled; remaining entries retained" }
                     val node = resolveInternal(item.id)
                     if (node.directory) require(children(node).isEmpty()) { "New trash child" }
                     deleteExact(node)
                 }
-                deleteMeta(record)
+                deleteMeta(record, indexes)
                 outcomes.add(FileOutcome(record.id, FileOutcome.Status.SUCCESS))
             } catch (e: Exception) { outcomes.add(FileOutcome(record.id, FileOutcome.Status.FAILED, e.message)) }
         }
@@ -646,7 +748,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
             "rename" -> original.outcomes.filter { it.status == FileOutcome.Status.SUCCESS }.forEach { outcome ->
                 try {
                     val current = requireNotNull(outcome.resultingId)
-                    require(fingerprint(current) == outcome.resultFingerprint) { "Renamed item changed" }
+                    require(matchesRevision(resolve(current), outcome.resultFingerprint)) { "Renamed item changed" }
                     val restored = rename(current, requireNotNull(outcome.message))
                     results.add(FileOutcome(outcome.id, FileOutcome.Status.SUCCESS, resultingId = restored.id))
                 } catch (e: Exception) { results.add(FileOutcome(outcome.id, FileOutcome.Status.FAILED, e.message)) }
@@ -786,6 +888,7 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     }
 
     private fun children(parent: Node): List<Node> {
+        directoryReadObserver(parent.name)
         require(parent.directory)
         val file = parent.file
         if (file != null) return (file.listFiles() ?: error("Cannot list folder")).map { child ->
@@ -891,12 +994,14 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         return resolveInternal(safChildId(parent.id, DocumentsContract.getDocumentId(uri)))
     }
 
-    private fun validateGroup(group: List<FileEntry>, fingerprints: Map<String, String>, dirChildren: Map<String, Set<String>>): String? {
+    private fun validateGroup(group: List<FileEntry>, fingerprints: Map<String, String>, dirChildren: Map<String, Set<String>>,
+        cancel: Cancellation = Cancellation { false }, progress: Progress = Progress { _, _, _ -> }): String? {
         return try {
             val actualChildren = LinkedHashMap<String, Set<String>>()
             for (item in group) {
+                check(!cancel.isCanceled()) { "Operation canceled" }
                 val node = resolveInternal(item.id)
-                if (fingerprint(node) != fingerprints[item.id]) return "File or folder changed; review again"
+                if (!matchesRevision(node, fingerprints[item.id], cancel, progress)) return "File or folder changed; review again"
                 if (node.directory) actualChildren[node.id] = children(node).map { it.id }.toSet()
             }
             if (!StorageSafety.reviewedChildrenUnchanged(dirChildren.filterKeys { it in actualChildren.keys }, actualChildren)) return "Folder children changed; review again"
@@ -914,17 +1019,42 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         } catch (e: Exception) { e.message ?: "Folder unavailable" }
     }
 
-    private fun fingerprint(node: Node): String {
+    /** No file stream is opened. Local ctime also catches edits that restore mtime/size. */
+    private fun identityFingerprint(node: Node): String {
+        val stat = node.file?.let { Os.lstat(it.path) }
+        require(stat == null || !android.system.OsConstants.S_ISLNK(stat.st_mode)) { "Symbolic links cannot be deleted through a reviewed path" }
+        val objectKey = "${node.id}|${node.directory}|${stat?.st_dev}|${stat?.st_ino}|${stat?.st_mode}"
+        val metadata = if (stat == null) "${node.name}|${node.size}|${node.modified}|${node.mime}"
+            else "${stat.st_size}|${stat.st_mtim.tv_sec}:${stat.st_mtim.tv_nsec}|${stat.st_ctim.tv_sec}:${stat.st_ctim.tv_nsec}"
+        return "identity-v1:${digest(objectKey.toByteArray())}:${digest(metadata.toByteArray())}"
+    }
+
+    private fun matchesRevision(node: Node, expected: String?, cancel: Cancellation = Cancellation { false },
+        progress: Progress = Progress { _, _, _ -> }, directoryChildrenRemoved: Boolean = false): Boolean {
+        check(!cancel.isCanceled()) { "Operation canceled" }
+        if (expected == null) return false
+        if (!expected.startsWith("identity-v1:")) return fingerprint(node, cancel, progress) == expected
+        progress.onProgress(0, null, "Checking ${node.name}")
+        val actual = identityFingerprint(node)
+        return if (node.directory && directoryChildrenRemoved)
+            actual.substringBeforeLast(':') == expected.substringBeforeLast(':') else actual == expected
+    }
+
+    private fun fingerprint(node: Node, cancel: Cancellation = Cancellation { false },
+        progress: Progress = Progress { _, _, _ -> }): String {
         val identity = node.file?.let { file -> runCatching { val stat = Os.stat(file.path); "${stat.st_dev}:${stat.st_ino}" }.getOrNull() }
         val metadata = "${node.id}|${node.name}|${node.directory}|${node.size}|${node.modified}|${node.mime}|$identity"
-        return digest(metadata.toByteArray() + if (node.directory) byteArrayOf() else digest(input(node)).toByteArray())
+        progress.onProgress(0, if (node.directory) null else node.size, "Verifying ${node.name}")
+        return digest(metadata.toByteArray() + if (node.directory) byteArrayOf() else digest(input(node), cancel) { done ->
+            progress.onProgress(done, node.size, "Verifying ${node.name}")
+        }.toByteArray())
     }
 
     private fun trashOne(node: Node, cancel: Cancellation, progress: (Long) -> Unit): TrashEntry {
         val folder = ensureTrash(node.root)
         val uuid = UUID.randomUUID().toString()
         val payloadName = "$uuid.payload"
-        val expectedFingerprint = if (node.file == null) fingerprint(node) else null
+        val expectedFingerprint = if (node.file == null) fingerprint(node, cancel) else null
         val record = trashJson(uuid, node, payloadName)
         writeMeta(folder, uuid, record) // Recovery identity is on the same storage before any source removal.
         var payload: Node? = null
@@ -937,12 +1067,12 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
                 resolveInternal(directChildId(folder.id, payloadName))
             } else {
                 val copy = copyNode(node, folder, CollisionChoice.SKIP, cancel, progress, payloadName) ?: error("Trash collision")
-                require(fingerprint(node) == expectedFingerprint) { "Source changed during trash copy" }
+                require(fingerprint(node, cancel) == expectedFingerprint) { "Source changed during trash copy" }
                 copy
             }
             if (node.file == null) {
                 // The copied payload has been verified, metadata is durable, and source still exists.
-                require(fingerprint(node) == expectedFingerprint) { "Source changed before trash removal" }
+                require(fingerprint(node, cancel) == expectedFingerprint) { "Source changed before trash removal" }
                 deleteExact(node)
                 sourceDeleted = true
             }
@@ -1007,10 +1137,20 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
 
     private fun findTrash(root: Root): Node? {
         val parent = resolveInternal(rootId(root))
+        if (root.file != null) return runCatching {
+            resolveInternal(directChildId(parent.id, trashName)).takeIf { it.directory }
+        }.getOrNull()
         return children(parent).firstOrNull { it.name == trashName && it.directory }
     }
     private fun ensureTrash(root: Root): Node = findTrash(root) ?: create(resolveInternal(rootId(root)), trashName, DocumentsContract.Document.MIME_TYPE_DIR, internal = true)
-    private fun locatePayload(record: TrashEntry): Node? {
+    private fun locatePayload(record: TrashEntry, indexes: Map<String, TrashIndex>? = null): Node? {
+        if (indexes != null) {
+            val index = indexes[record.locationId] ?: return null
+            val node = index.byName["${record.id}.payload"] ?: index.byName["${record.id}.folder"] ?: return null
+            return if (node.file != null) runCatching { resolveInternal(node.id) }.getOrNull()
+                else query(requireNotNull(node.uri)).copy(root = node.root, id = node.id, parentId = node.parentId,
+                    relative = node.relative, uri = node.uri)
+        }
         val root = roots().firstOrNull { it.key == record.locationId } ?: return null
         val folder = findTrash(root) ?: return null
         return children(folder).firstOrNull { it.name == "${record.id}.payload" || it.name == "${record.id}.folder" }
@@ -1024,7 +1164,13 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         }
     }
     private fun readJson(node: Node): JSONObject = input(node).use { JSONObject(it.readBytes().toString(Charsets.UTF_8)) }
-    private fun deleteMeta(record: TrashEntry) {
+    private fun deleteMeta(record: TrashEntry, indexes: Map<String, TrashIndex>? = null) {
+        if (indexes != null) {
+            val node = indexes[record.locationId]?.byName?.get("${record.id}.meta.json")
+                ?: error("Recovery metadata missing")
+            deleteExact(if (node.file != null) resolveInternal(node.id) else node)
+            return
+        }
         val root = roots().firstOrNull { it.key == record.locationId } ?: error("Storage unavailable")
         val folder = findTrash(root) ?: error("Trash unavailable")
         val meta = children(folder).firstOrNull { it.name == "${record.id}.meta.json" } ?: error("Recovery metadata missing")
@@ -1057,7 +1203,11 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
         else require(DocumentsContract.deleteDocument(resolver, requireNotNull(node.uri))) { "Provider rejected deletion" }
     }
 
-    private fun input(node: Node): InputStream = if (node.file != null) FileInputStream(node.file) else resolver.openInputStream(requireNotNull(node.uri)) ?: error("Read unsupported")
+    private fun input(node: Node): InputStream {
+        contentReadObserver(node.name)
+        return if (node.file != null) FileInputStream(node.file)
+            else resolver.openInputStream(requireNotNull(node.uri)) ?: error("Read unsupported")
+    }
     private fun output(node: Node): OutputStream = if (node.file != null) FileOutputStream(node.file) else resolver.openOutputStream(requireNotNull(node.uri), "wt") ?: error("Write unsupported")
     private fun uniqueName(parent: Node, name: String): String {
         val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
@@ -1075,10 +1225,17 @@ class AndroidFilesRepository(private val context: Context) : FilesRepository {
     private fun encode(value: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray(Charsets.UTF_8))
     private fun decode(value: String): String = String(Base64.getUrlDecoder().decode(value), Charsets.UTF_8)
     private fun digest(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
-    private fun digest(input: InputStream): String = input.use { stream ->
+    private fun digest(input: InputStream, cancel: Cancellation = Cancellation { false },
+        progress: (Long) -> Unit = {}): String = input.use { stream ->
         val md = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(128 * 1024)
-        while (true) { val count = stream.read(buffer); if (count < 0) break; md.update(buffer, 0, count) }
+        var done = 0L
+        while (true) {
+            check(!cancel.isCanceled()) { "Operation canceled" }
+            val count = stream.read(buffer); if (count < 0) break; md.update(buffer, 0, count)
+            done += count
+            progress(done)
+        }
         md.digest().toHex()
     }
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }

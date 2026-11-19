@@ -7,7 +7,8 @@ import subprocess
 OUT = Path("build/ui-screenshots/files")
 RUNNER = "io.github.alexanderwilhelmsenberg.modular.debug.test/androidx.test.runner.AndroidJUnitRunner"
 TEST = "io.github.alexanderwilhelmsenberg.modular.capabilities.FilesCrossApkHomeTest"
-VISUAL_TEST = "io.github.alexanderwilhelmsenberg.modular.ui.FilesPageVisualFixtureTest"
+VISUAL_TEST = "io.github.alexanderwilhelmsenberg.modular.addon.files.FilesPageVisualFixtureTest"
+VISUAL_RUNNER = "io.github.alexanderwilhelmsenberg.modular.addon.files.debug.test/androidx.test.runner.AndroidJUnitRunner"
 MATRIX = [
     (320, "LIGHT", "1.0"),
     (414, "LIGHT", "1.0"),
@@ -38,7 +39,7 @@ try:
                 print(f"Could not preserve failed Files capture: {error}", flush=True)
             raise RuntimeError(f"Files capture test failed for {width}dp/{theme}/font {font}:\n{result}")
         visual = adb("shell", "am", "instrument", "-w", "-e", "class", VISUAL_TEST,
-                     "-e", "files_theme", theme, RUNNER, timeout=300)
+                     "-e", "files_theme", theme, VISUAL_RUNNER, timeout=300)
         if "OK (2 tests)" not in visual:
             raise RuntimeError(f"Files visual fixture failed for {width}dp/{theme}/font {font}:\n{visual}")
         adb("pull", "/sdcard/Pictures/ModularFiles/.", str(OUT), timeout=60)

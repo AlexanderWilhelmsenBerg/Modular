@@ -85,6 +85,66 @@ public class CleanerEngineTest {
         var plan = CleanerEngine.plan(analysis, Map.of(), Set.of(analysis.groups().get(0).id()), Set.of());
         assertFalse(plan.readyForReview());
         assertTrue(plan.blockers().stream().anyMatch(b -> b.contains("fingerprint requires review preparation")));
+        assertTrue(plan.issues().stream().allMatch(i -> i.type() == CleanerEngine.ReviewIssueType.FINGERPRINT_PENDING));
+    }
+
+    @Test public void realRenameCollisionPrecedesPendingIssuesAndSkipsFingerprintHydration() {
+        var root = directory("root", null, "root", NOW);
+        var first = new CleanerEngine.Entry("first", "volume", "root", "/copy(1).zip", "copy(1).zip",
+                CleanerEngine.Kind.FILE, 5L, NOW.minusSeconds(10), null, CleanerEngine.PENDING_REVISION, true, null);
+        var second = new CleanerEngine.Entry("second", "volume", "root", "/copy(2).zip", "copy(2).zip",
+                CleanerEngine.Kind.FILE, 5L, NOW, null, CleanerEngine.PENDING_REVISION, true, null);
+        var occupied = file("occupied-opaque-id", "root", "copy.zip", 9, NOW);
+        var options = new CleanerEngine.Options("root", true, Set.of(occupied.id()), Set.of(), 100, 30, NOW);
+        var analysis = CleanerEngine.analyze(List.of(root, first, second, occupied), options, (a, b) -> false);
+        var selected = Set.of(analysis.groups().get(0).id());
+        var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
+                new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> {
+                    throw new AssertionError("Unresolved rename collision must not touch storage: " + method.getName());
+                });
+        var plan = new CleanerRepositoryAdapter(repository, null).prepareReview(analysis, Map.of(), selected,
+                Set.of(), (Cancellation) () -> false);
+        assertFalse(plan.readyForReview());
+        assertEquals(CleanerEngine.ReviewIssueType.RENAME_COLLISION, plan.issues().get(0).type());
+        assertTrue(plan.issues().stream().anyMatch(i -> i.type() == CleanerEngine.ReviewIssueType.FINGERPRINT_PENDING));
+        assertTrue(plan.blockers().get(0).contains("copy.zip"));
+        assertFalse(plan.blockers().get(0).contains("occupied-opaque-id"));
+    }
+
+    @Test public void excludedOnDiskRenameDestinationBlocksBeforeFingerprinting() {
+        var root = new FileEntry("root", "volume", null, "root", "/root", true,
+                null, null, NOW.toEpochMilli(), null, true, true);
+        var first = new FileEntry("first", "volume", "root", "copy(1).zip", "/root/copy(1).zip", false,
+                "application/zip", 5L, NOW.minusSeconds(10).toEpochMilli(), null, true, true);
+        var second = new FileEntry("second", "volume", "root", "copy(2).zip", "/root/copy(2).zip", false,
+                "application/zip", 5L, NOW.toEpochMilli(), null, true, true);
+        var occupied = new FileEntry("hidden-opaque-id", "volume", "root", "copy.zip", "/root/copy.zip", false,
+                "application/zip", 8L, NOW.toEpochMilli(), null, true, true);
+        var fingerprints = new ArrayList<String>();
+        var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
+                new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "get" -> root;
+                    case "list" -> new FilePage(List.of(first, second, occupied), null, 3, true);
+                    case "fingerprint", "identityFingerprint" -> {
+                        fingerprints.add((String) args[0]);
+                        yield "rev-" + args[0];
+                    }
+                    case "openRead" -> throw new AssertionError("Rename collision must not open content");
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        var adapter = new CleanerRepositoryAdapter(repository, null);
+        var options = new CleanerEngine.Options("root", true, Set.of(occupied.getId()), Set.of(), 100, 30, NOW);
+        var snapshot = adapter.snapshot("root", (Cancellation) () -> false, options.excludedIds(), options, null);
+        var analysis = adapter.analyze(snapshot, options, (Cancellation) () -> false);
+        assertFalse(analysis.entries().containsKey(occupied.getId()));
+        var plan = adapter.prepareReview(analysis, Map.of(), Set.of(analysis.groups().get(0).id()),
+                Set.of(), (Cancellation) () -> false);
+        assertFalse(plan.readyForReview());
+        assertEquals(CleanerEngine.ReviewIssueType.RENAME_COLLISION, plan.issues().get(0).type());
+        assertEquals(occupied.getId(), plan.issues().get(0).relatedId());
+        assertTrue(plan.issues().get(0).message().contains("copy.zip"));
+        assertFalse(plan.issues().get(0).message().contains(occupied.getId()));
+        assertTrue(fingerprints.isEmpty());
     }
 
     @Test public void pageHintsArriveBeforeLaterFoldersAndClosedGroupIdsMatchFinalAnalysis() {
@@ -142,7 +202,7 @@ public class CleanerEngineTest {
         var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
                 new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
                     case "get" -> root;
-                    case "fingerprint" -> {
+                    case "fingerprint", "identityFingerprint" -> {
                         fingerprintCalled.set(true);
                         yield "rev-" + args[0];
                     }
@@ -191,7 +251,7 @@ public class CleanerEngineTest {
         var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
                 new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
                     case "get" -> current.get(args[0]);
-                    case "fingerprint" -> {
+                    case "fingerprint", "identityFingerprint" -> {
                         fingerprinted.add((String) args[0]);
                         yield "rev-" + args[0];
                     }
@@ -210,6 +270,7 @@ public class CleanerEngineTest {
         assertFalse(CleanerEngine.plan(analysis, Map.of(), selected, Set.of()).readyForReview());
         var reviewed = adapter.prepareReview(analysis, Map.of(), selected, Set.of(), (Cancellation) () -> false);
         assertTrue(reviewed.blockers().toString(), reviewed.readyForReview());
+        assertTrue(reviewed.issues().isEmpty());
         assertEquals(Set.of("one", "two"), Set.copyOf(fingerprinted));
         assertFalse(fingerprinted.contains("unrelated"));
         current.put("one", new FileEntry("one", "volume", "root", "copy(1).zip", "/root/copy(1).zip", false,
@@ -242,8 +303,8 @@ public class CleanerEngineTest {
         var fingerprinted = new ArrayList<String>();
         var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
                 new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
-                    case "get" -> root;
-                    case "fingerprint" -> {
+                    case "get" -> Map.of("root", root, "one", one, "two", two, "unrelated", unrelated).get(args[0]);
+                    case "fingerprint", "identityFingerprint" -> {
                         fingerprinted.add((String) args[0]);
                         yield "after";
                     }
@@ -256,6 +317,72 @@ public class CleanerEngineTest {
         var result = new CleanerRepositoryAdapter(repository, null).executeReviewed(plan, (Cancellation) () -> false);
         assertFalse(result.getErrors().isEmpty());
         assertEquals(Set.of("one", "two"), Set.copyOf(fingerprinted));
+    }
+
+    @Test public void executionReusesVerifiedManifestWithoutRescanningUnrelatedTrees() {
+        var one = file("one", "root", "copy.zip", 5, NOW.minusSeconds(10));
+        var two = file("two", "root", "copy(1).zip", 5, NOW);
+        var analysis = analyze(List.of(directory("root", null, "root", NOW), one, two));
+        var group = analysis.groups().stream().filter(g -> g.category() == CleanerEngine.Category.NUMBERED_COPY).findFirst().orElseThrow();
+        var plan = CleanerEngine.plan(analysis, Map.of(group.id(), "one"), Set.of(group.id()), Set.of());
+        var moved = new ArrayList<io.github.alexanderwilhelmsenberg.modular.addon.files.storage.DeletionPlan>();
+        var lookedUp = new ArrayList<String>();
+        var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
+                new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "get" -> {
+                        String id = (String) args[0]; lookedUp.add(id);
+                        var e = Map.of("one", one, "two", two).get(id);
+                        yield new FileEntry(e.id(), e.volumeId(), e.parentId(), e.name(), e.path(), false,
+                                "application/zip", e.size(), e.modified().toEpochMilli(), null, true, true);
+                    }
+                    case "fingerprint", "identityFingerprint" -> "rev-" + args[0];
+                    case "moveToTrash" -> {
+                        var deletion = (io.github.alexanderwilhelmsenberg.modular.addon.files.storage.DeletionPlan) args[0];
+                        moved.add(deletion);
+                        yield new io.github.alexanderwilhelmsenberg.modular.addon.files.storage.OperationResult("done",
+                                List.of(new io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FileOutcome("two",
+                                        io.github.alexanderwilhelmsenberg.modular.addon.files.storage.FileOutcome.Status.SUCCESS,
+                                        null, "trash-two", List.of(), null)));
+                    }
+                    default -> throw new AssertionError("Unexpected extra traversal or verification: " + method.getName());
+                });
+        var result = new CleanerRepositoryAdapter(repository, null).executeReviewed(plan, (Cancellation) () -> false);
+        assertTrue(result.getErrors().toString(), result.getErrors().isEmpty());
+        assertEquals(Set.of("one", "two"), Set.copyOf(lookedUp));
+        assertEquals(1, moved.size());
+        assertEquals(List.of("two"), moved.get(0).getRoots().stream().map(FileEntry::getId).toList());
+        assertEquals(List.of("two"), moved.get(0).getDescendants().stream().map(FileEntry::getId).toList());
+    }
+
+    @Test public void folderExecutionStillRequiresTheRepositoryProviderSafetyGate() {
+        var original = directory("one", "root", "folder", NOW.minusSeconds(10));
+        var copy = directory("two", "root", "folder(1)", NOW);
+        var analysis = analyze(List.of(directory("root", null, "root", NOW), original, copy));
+        var group = analysis.groups().stream().filter(g -> g.category() == CleanerEngine.Category.NUMBERED_COPY).findFirst().orElseThrow();
+        var plan = CleanerEngine.plan(analysis, Map.of(group.id(), "one"), Set.of(group.id()), Set.of());
+        assertTrue(plan.blockers().toString(), plan.readyForReview());
+        var gated = new java.util.concurrent.atomic.AtomicInteger();
+        var repository = (FilesRepository) Proxy.newProxyInstance(FilesRepository.class.getClassLoader(),
+                new Class<?>[]{FilesRepository.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "get" -> {
+                        var e = Map.of("one", original, "two", copy).get(args[0]);
+                        yield new FileEntry(e.id(), e.volumeId(), e.parentId(), e.name(), e.path(), true,
+                                null, null, e.modified().toEpochMilli(), null, true, true);
+                    }
+                    case "fingerprint", "identityFingerprint" -> "rev-" + args[0];
+                    case "list" -> new FilePage(List.of(), null, 0, true);
+                    case "prepareDeletion" -> {
+                        gated.incrementAndGet();
+                        yield new io.github.alexanderwilhelmsenberg.modular.addon.files.storage.DeletionPlan("blocked",
+                                List.of(), List.of(), 0L, 0L, false,
+                                List.of("Provider cannot safely remove a folder"), Map.of(), Map.of());
+                    }
+                    default -> throw new AssertionError("Provider rejection must prevent mutation: " + method.getName());
+                });
+        var result = new CleanerRepositoryAdapter(repository, null).executeReviewed(plan, (Cancellation) () -> false);
+        assertEquals(1, gated.get());
+        assertTrue(result.getErrors().toString(), result.getErrors().contains("Provider cannot safely remove a folder"));
+        assertNull(result.getTrash());
     }
 
     @Test public void shallowScanExpandsOnlySelectedFolderGroupsForReview() {
@@ -286,7 +413,7 @@ public class CleanerEngineTest {
                                 : id.equals("old") ? List.of(oldChild)
                                 : id.equals("keeper") ? List.of(keptChild) : List.of(), null, null, true);
                     }
-                    case "fingerprint" -> {
+                    case "fingerprint", "identityFingerprint" -> {
                         fingerprinted.add((String) args[0]);
                         yield "rev-" + args[0];
                     }
@@ -359,13 +486,28 @@ public class CleanerEngineTest {
         assertEquals("backup.tar.gz", plan.renameSteps().get(0).newName());
     }
 
-    @Test public void missingOrTiedDatesNeverGuessKeeper() {
+    @Test public void missingDatesPreferHighestNumberWithoutAnUnnecessaryQuestion() {
         var analysis = analyze(List.of(directory("root", null, "root", NOW),
                 file("one", "root", "scan(1).pdf", 5, NOW),
                 file("two", "root", "scan(2).pdf", 5, null)));
         var group = analysis.groups().stream().filter(g -> g.category() == CleanerEngine.Category.NUMBERED_COPY).findFirst().orElseThrow();
-        assertTrue(group.requiresKeeperChoice());
-        assertNull(group.suggestedKeeperId());
+        assertFalse(group.requiresKeeperChoice());
+        assertEquals("two", group.suggestedKeeperId());
+    }
+
+    @Test public void tiedDatesPreferHighestNumberAndLiteralYearStaysInBaseName() {
+        var analysis = analyze(List.of(directory("root", null, "root", NOW),
+                file("original", "root", "study guide (2017).pdf", 5, NOW),
+                file("copy", "root", "study guide (2017)(3).pdf", 5, NOW)));
+        var groups = analysis.groups().stream().filter(g -> g.category() == CleanerEngine.Category.NUMBERED_COPY).toList();
+        assertEquals(1, groups.size());
+        var group = groups.get(0);
+        assertFalse(group.requiresKeeperChoice());
+        assertEquals("copy", group.suggestedKeeperId());
+        assertEquals(Set.of("original", "copy"), Set.copyOf(group.memberIds()));
+        var plan = CleanerEngine.plan(analysis, Map.of(), Set.of(group.id()), Set.of());
+        assertTrue(plan.blockers().toString(), plan.readyForReview());
+        assertEquals("study guide (2017).pdf", plan.renameSteps().get(0).newName());
     }
 
     @Test public void numericVersionsAndPrereleasesAreOrderedWithoutRenaming() {

@@ -10,8 +10,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - api: 35
+            image: '35'
+            args: ''
           - api: 37
             image: '37.0'
+            args: '--lifecycle-only'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -24,7 +28,7 @@ jobs:
         with:
           gradle-version: '9.6.0'
       - name: Build Files and its test APK only
-        run: gradle :addon-files:assembleDebug :addon-files:assembleDebugAndroidTest --stacktrace
+        run: gradle :module-sdk:testDebugUnitTest :addon-files:assembleDebug :addon-files:assembleDebugAndroidTest --stacktrace
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -43,7 +47,7 @@ jobs:
           script: |
             adb install -r addon-files/build/outputs/apk/debug/addon-files-debug.apk
             adb install -r addon-files/build/outputs/apk/androidTest/debug/addon-files-debug-androidTest.apk
-            python3 scripts/run-files-device-tests.py
+            python3 scripts/run-files-device-tests.py ${{ matrix.args }}
             python3 scripts/run-files-process-recovery.py
             test ! -d app/build/outputs/apk
       - name: Preserve crash diagnostics
@@ -51,7 +55,7 @@ jobs:
         run: |
           mkdir -p build/reports/device
           timeout 10s adb logcat -d -b crash -v threadtime -t 1500 > build/reports/device/crash-buffer.txt || true
-          timeout 10s adb shell run-as io.github.alexanderwilhelmsenberg.modular.addon.files.debug cat files/last-java-crash.json > build/reports/device/last-java-crash.json || true
+          timeout 10s adb shell run-as io.github.alexanderwilhelmsenberg.modular.addon.files.debug cat files/last-java-crash.json > build/reports/device/post-emulator-crash.json || true
       - name: Upload Files test reports
         if: always()
         uses: actions/upload-artifact@v4

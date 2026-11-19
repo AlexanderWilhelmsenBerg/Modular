@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "io.github.alexanderwilhelmsenberg.modular"
-version = "0.4.0"
+version = "0.4.1"
 
 android {
     namespace = "io.github.alexanderwilhelmsenberg.modular.modulesdk"
@@ -45,7 +45,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "io.github.alexanderwilhelmsenberg.modular"
                 artifactId = "module-sdk"
-                version = "0.4.0"
+                version = "0.4.1"
             }
         }
         repositories {

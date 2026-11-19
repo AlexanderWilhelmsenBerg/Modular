@@ -45,11 +45,13 @@ open class FilesActivity : ComponentActivity() {
 
     private val saveEventLog = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) {
+            (application as FilesApplication).logExporter.cancelDownload()
             if (launchedFromCoreHandoff) finish()
             return@registerForActivityResult
         }
         val app = application as FilesApplication
         app.logExporter.export(uri) { result ->
+            result.onSuccess { controller.recordLifecycleEvent("eventLog.export_completed", "Saved ${it.length()} bytes of event log JSON") }
             result.exceptionOrNull()?.let { controller.recordUiFailure("Download event log", it) }
             android.os.Handler(mainLooper).post {
                 Toast.makeText(app,
@@ -184,7 +186,22 @@ open class FilesActivity : ComponentActivity() {
                     }.onFailure { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
                 }
             }
-            "exportEventLog" -> saveEventLog.launch("modular-files-events-${java.time.LocalDate.now()}.json")
+            "exportEventLog" -> {
+                val app = application as FilesApplication
+                app.logExporter.prepareDownload { result ->
+                    android.os.Handler(mainLooper).post {
+                        if (isDestroyed) return@post
+                        result.onSuccess {
+                            controller.recordLifecycleEvent("eventLog.export_prepared", "Prepared ${it.length()} bytes before opening the save picker")
+                            saveEventLog.launch("modular-files-events-${java.time.LocalDate.now()}.json")
+                        }.onFailure {
+                            controller.recordUiFailure("Prepare event log download", it)
+                            Toast.makeText(app, it.message ?: "Could not prepare the event log", Toast.LENGTH_LONG).show()
+                            if (fromCore) finish()
+                        }
+                    }
+                }
+            }
             "notifications" -> {
                 if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
                     (!getSharedPreferences("files-page", MODE_PRIVATE).getBoolean("notificationsRequested", false) ||

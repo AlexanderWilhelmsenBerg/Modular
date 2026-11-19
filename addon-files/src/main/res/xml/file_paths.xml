@@ -3,4 +3,5 @@
     <external-path name="shared" path="." />
     <root-path name="mounted" path="storage/" />
     <cache-path name="eventLogs" path="event-log-exports/" />
+    <files-path name="savedEventLogs" path="event-log-exports/" />
 </paths>

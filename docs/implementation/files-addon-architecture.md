@@ -3,6 +3,35 @@
 Baseline: Core `f19a5c5cf45eaab868e3148828776390dabf02f7`.
 Scope: [accepted Files v1 specification](../product/file-manager-cleaner-v1.md).
 
+## Files 0.1.8 / SDK 0.4.1: detached surfaces and log downloads
+
+The 0.1.7 device report identified a main-thread NullPointerException in
+`SurfaceControlViewHost.release()` called by the SDK after Android had already
+released its ViewRoot. Core's existing detach notification can release the
+platform host before the session-close Binder call arrives. Root detachment now
+retires the provider session and records that Android owns host teardown.
+Explicit cleanup clears owned references before callbacks and contains/logs
+runtime teardown failures while still closing remaining resources. The public
+surface API and Core caller contract are unchanged; Files bundles the SDK fix.
+
+Log downloads capture and fsync JSON under private `files/event-log-exports`
+before launching the create-document picker. A pending filename survives
+Activity/process recreation; the result callback writes that prepared snapshot.
+Only successful writes clear the pending download; cancellation clears the
+pointer while keeping the recent private copies. The existing write/readback
+check still detects an empty destination. Share JSON can read these files via a
+specifically scoped FileProvider path. Export preparation, completion and errors
+are included in subsequent event logs.
+
+Regression coverage uses real SurfaceControlViewHost sessions and Android
+Activity-result dispatch without Espresso: detach followed by repeated close
+while a scan runs, a Files surface detaching during the event-log download
+handoff, and cleanup after failed view creation. SDK unit tests inject the
+reported release exception and verify that an earlier cleanup failure does not
+skip remaining resources. Android 37 uses the explicit lifecycle-only device
+suite because the existing Espresso UI harness calls a removed platform method;
+the full Files suite remains on Android 35.
+
 ## Ownership and module boundaries
 
 - `addon-files` owns the complete interface, user-granted storage access, scans,

@@ -4,11 +4,11 @@ Modular add-ons are separately installed Android APKs. They expose a service ove
 
 ## Obtain the API
 
-The version 0.4.0 Android libraries use Maven coordinates:
+The Android libraries use module-api 0.4.0 and module-sdk 0.4.1:
 
 ```kotlin
 implementation("io.github.alexanderwilhelmsenberg.modular:module-api:0.4.0")
-implementation("io.github.alexanderwilhelmsenberg.modular:module-sdk:0.4.0")
+implementation("io.github.alexanderwilhelmsenberg.modular:module-sdk:0.4.1")
 ```
 
 Android CI publishes the release API/SDK libraries as the Maven-layout `modular-addon-sdk` artifact. Download it from a successful Android CI run and extract it into a directory such as `sdk-repository`. Point a Maven repository in your add-on's Gradle settings at the extracted directory. The standalone example takes it through `-PmodularSdkRepository=/absolute/path/to/sdk-repository`. This is a local artifact source; no Core source checkout or `project(":module-api")` dependency is needed. Android Gradle Plugin 9.4.1, Gradle 9.6, Java 17, compile SDK 37, and min SDK 29 match this release.
@@ -88,7 +88,9 @@ Build the example with `gradle -p examples/standalone-sort-addon -PmodularSdkRep
 
 The APK install is handled by Android; Core does not silently sideload packages. The baseline Home and Settings work with no add-ons. Add-on Home screens use the independent native surface capability below. External themes, automation, scripting, MCP transport, and terminal capabilities remain separate future contracts.
 
-## Independent native workspace screens (SDK 0.4.0)
+## Independent native workspace screens (SDK 0.4.1)
+
+SDK 0.4.1 fixes surface teardown when Android has already released the embedded ViewRoot. Use it when rebuilding providers for Android 17; the public surface protocol and module-api 0.4.0 remain compatible with existing Core installations.
 
 Declare `modular.workspace.surface/v1` in `providedCapabilities` and return a
 `WorkspaceSurfaceEndpoint` from your `BaseModuleService.createCapability`.

@@ -19,19 +19,44 @@ internal class FilesLogExporter(
     private val output: (Uri) -> OutputStream? = { context.contentResolver.openOutputStream(it, "wt") },
     private val input: (Uri) -> InputStream? = { context.contentResolver.openInputStream(it) },
 ) {
+    private val preferences = context.getSharedPreferences("files-log-export", Context.MODE_PRIVATE)
+    private val directory get() = File(context.filesDir, "event-log-exports")
+
     fun stage(): File {
         val json = snapshot()
         require(JSONObject(json).has("entries")) { "The event log snapshot is invalid" }
-        val directory = File(context.cacheDir, "event-log-exports").apply { mkdirs() }
+        val directory = directory.apply { mkdirs() }
         val file = File.createTempFile("modular-files-events-", ".json", directory)
         FileOutputStream(file).use { stream -> stream.write(json.toByteArray(Charsets.UTF_8)); stream.fd.sync() }
         check(file.length() > 0) { "The event log snapshot is empty" }
-        directory.listFiles()?.filter { it != file && it.name.startsWith("modular-files-events-") }
+        val pending = preferences.getString("pending", null)
+        directory.listFiles()?.filter { it != file && it.name != pending && it.name.startsWith("modular-files-events-") }
             ?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
         return file
     }
 
     fun prepare(completed: (Result<File>) -> Unit) { executor.execute { completed(runCatching(::stage)) } }
+
+    /** Capture before opening DocumentsUI; the pending snapshot also survives process recreation. */
+    fun prepareDownload(completed: (Result<File>) -> Unit) {
+        executor.execute { completed(runCatching {
+            stage().also { check(preferences.edit().putString("pending", it.name).commit()) {
+                "Could not save the pending event log"
+            } }
+        }) }
+    }
+
+    fun cancelDownload() { preferences.edit().remove("pending").commit() }
+
+    private fun pendingDownload(): File? {
+        val name = preferences.getString("pending", null) ?: return null
+        require(name.startsWith("modular-files-events-") && name.endsWith(".json") &&
+            name == File(name).name) { "Invalid pending event log" }
+        return File(directory, name).also {
+            check(it.isFile && it.length() > 0) { "The saved event log is unavailable; start a new download" }
+            require(JSONObject(it.readText()).has("entries")) { "The saved event log is invalid" }
+        }
+    }
 
     fun export(uri: Uri, completed: (Result<File>) -> Unit) {
         val resolver = context.contentResolver
@@ -41,7 +66,7 @@ internal class FilesLogExporter(
         }.getOrDefault(false)
         executor.execute {
             val result = runCatching {
-                val file = stage() // Complete and durable before the destination can be truncated.
+                val file = pendingDownload() ?: stage()
                 requireNotNull(output(uri)) { "Could not open the log destination" }.use { destination ->
                     file.inputStream().use { it.copyTo(destination) }; destination.flush()
                 }
@@ -52,6 +77,7 @@ internal class FilesLogExporter(
                         "The destination did not retain the full log. The private copy is safe; use Share JSON or choose another location."
                     }
                 }
+                if (preferences.getString("pending", null) == file.name) cancelDownload()
                 file
             }
             if (acquired) runCatching { resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }

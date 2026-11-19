@@ -51,8 +51,27 @@ class FilesLogExportTest {
         try {
             assertTrue(done.await(10, TimeUnit.SECONDS))
             assertTrue(outcome.get().isFailure)
-            assertTrue(directory.listFiles().orEmpty().any { it.name.startsWith("modular-files-events-") &&
+            assertTrue(File(context.filesDir, "event-log-exports").listFiles().orEmpty().any { it.name.startsWith("modular-files-events-") &&
                 runCatching { it.readText().contains("retained private copy") }.getOrDefault(false) })
         } finally { destination.delete() }
+    }
+
+    @Test fun downloadPreparedBeforePickerSurvivesExporterRecreation() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val directory = File(context.cacheDir, "event-log-exports").apply { mkdirs() }
+        val destination = File(directory, "test-${UUID.randomUUID()}.json")
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", destination)
+        val immediate = Executor { it.run() }
+        val first = FilesLogExporter(context, snapshot = { """{"entries":[{"message":"before picker"}]}""" }, executor = immediate)
+        try {
+            first.cancelDownload()
+            first.prepareDownload { assertTrue(it.isSuccess) }
+            val restored = FilesLogExporter(context, snapshot = { error("Must use the durable pre-picker snapshot") }, executor = immediate)
+            restored.export(uri) { assertTrue(it.exceptionOrNull()?.stackTraceToString(), it.isSuccess) }
+            assertEquals("before picker", JSONObject(destination.readText()).getJSONArray("entries").getJSONObject(0).getString("message"))
+            val source = File(context.filesDir, "event-log-exports").listFiles()!!.first { it.readText().contains("before picker") }
+            val shareUri = FileProvider.getUriForFile(context, "${context.packageName}.files", source)
+            assertEquals(source.readText(), context.contentResolver.openInputStream(shareUri)!!.bufferedReader().use { it.readText() })
+        } finally { first.cancelDownload(); destination.delete() }
     }
 }

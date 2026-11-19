@@ -1,7 +1,7 @@
 # Standalone native page add-on
 
 This independent Android project consumes the published `module-api` and
-`module-sdk` 0.4.0 artifacts. It has no project dependency on Core or Files.
+`module-sdk` 0.4.1 artifacts. It has no project dependency on Core or Files.
 After publishing the SDK into `../../build/sdk-repository`, build both variants:
 
 ```sh

@@ -180,6 +180,7 @@ abstract class WorkspaceSurfaceEndpoint(
         private val sessionId = initialSpec.sessionId
         private val displayId = initialSpec.displayId
         private var surfaceHost: SurfaceControlViewHost? = null // Main thread only
+        private var platformDetached = false // Root detach means Android already owns host teardown.
         private var rootView: View? = null // Main thread only
         private var owner: SurfaceTreeOwner? = null // Main thread only
         private var spec: WorkspaceSurfaceHostSpec = initialSpec
@@ -212,6 +213,10 @@ abstract class WorkspaceSurfaceEndpoint(
                     }
                     override fun onViewDetachedFromWindow(view: View) {
                         surfaceScope.updateWindowToken(null)
+                        platformDetached = true
+                        // SurfacePackage.notifyDetachedFromWindow tears down SCVH itself. Retire
+                        // this session without releasing its already-destroyed ViewRoot again.
+                        dispose()
                     }
                 })
                 root.setViewTreeLifecycleOwner(treeOwner)
@@ -286,13 +291,21 @@ abstract class WorkspaceSurfaceEndpoint(
         }
 
         private fun destroyOnMain() {
-            scope?.close()
+            // Drop ownership before callbacks: creation failure, host detach, explicit close and
+            // revocation may all retire this session. Callbacks can also re-enter teardown.
+            val retiredScope = scope
+            val retiredOwner = owner
+            val retiredHost = surfaceHost
             scope = null
             rootView = null
-            owner?.destroy()
             owner = null
-            surfaceHost?.release()
             surfaceHost = null
+            cleanupWorkspaceSurface(
+                closeScope = { retiredScope?.close() },
+                destroyOwner = { retiredOwner?.destroy() },
+                releaseHost = { if (!platformDetached) retiredHost?.release() },
+                report = { stage, failure -> Log.w(LOG_TAG, "session=$sessionId cleanup=$stage", failure) },
+            )
         }
 
         /** Give provider-owned child windows the same Back event pair Android sends normally. */

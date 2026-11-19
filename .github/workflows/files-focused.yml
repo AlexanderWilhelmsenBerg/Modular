@@ -10,9 +10,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - api: 35
-            image: '35'
-            args: ''
           - api: 37
             image: '37.0'
             args: '--lifecycle-only'

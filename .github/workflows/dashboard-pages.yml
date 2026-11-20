@@ -52,11 +52,13 @@ jobs:
             adb install addon-files/build/outputs/apk/debug/addon-files-debug.apk
             adb install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell cmd package set-home-activity io.github.alexanderwilhelmsenberg.modular.debug/io.github.alexanderwilhelmsenberg.modular.MainActivity
-            python3 scripts/run-native-surface-tests.py --dashboard-pages
             adb install addon-files/build/outputs/apk/androidTest/debug/addon-files-debug-androidTest.apk
             adb shell appops set --uid io.github.alexanderwilhelmsenberg.modular.addon.files.debug MANAGE_EXTERNAL_STORAGE allow
             adb shell pm grant io.github.alexanderwilhelmsenberg.modular.addon.files.debug android.permission.POST_NOTIFICATIONS
+            mkdir -p build/reports/native-surface
             adb shell am instrument -w -e class io.github.alexanderwilhelmsenberg.modular.addon.files.FilesBackgroundScanTest#realOlderVersionsScanCompletesWithNotificationWhileHomeAndScreenAreOff io.github.alexanderwilhelmsenberg.modular.addon.files.debug.test/androidx.test.runner.AndroidJUnitRunner > build/reports/native-surface/CleanupFilenames.log
+            adb shell appops set --uid io.github.alexanderwilhelmsenberg.modular.addon.files.debug MANAGE_EXTERNAL_STORAGE default
+            python3 scripts/run-native-surface-tests.py --dashboard-pages
             grep -Eq '^OK \(1 test\)' build/reports/native-surface/CleanupFilenames.log
       - uses: actions/upload-artifact@v4
         if: always()

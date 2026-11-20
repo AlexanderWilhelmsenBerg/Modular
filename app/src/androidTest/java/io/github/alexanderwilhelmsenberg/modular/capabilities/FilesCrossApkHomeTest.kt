@@ -96,13 +96,6 @@ class FilesCrossApkHomeTest {
             assertNativeOverview()
             assertNativePopupOpensAndDismisses()
             if (InstrumentationRegistry.getArguments().getString("files_capture") == "true") captureOverview()
-            val statusBarBottom = rule.runOnIdle {
-                ViewCompat.getRootWindowInsets(rule.activity.window.decorView)
-                    ?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0
-            }
-            val titleTop = requireNotNull(device.findObject(By.text("Files"))).visibleBounds.top
-            assertTrue("Embedded Files title overlaps the status bar: title=$titleTop, bar=$statusBarBottom",
-                titleTop >= statusBarBottom)
             rule.onNodeWithTag("alphabet-rail").assertDoesNotExist()
             rule.onNodeWithTag("home-search-field").assertIsDisplayed()
             assertTrue(rule.onAllNodesWithTag("workspace-apps-action").fetchSemanticsNodes().isNotEmpty())
@@ -167,15 +160,13 @@ class FilesCrossApkHomeTest {
             ViewCompat.getRootWindowInsets(rule.activity.window.decorView)
                 ?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0
         }
-        rule.waitUntil(20_000) { device.hasObject(By.text("Files")) }
-        val title = device.findObject(By.text("Files"))
-        assertTrue("Remote header overlaps the system status bar",
-            title != null && title.visibleBounds.top >= statusTop)
-        assertTrue("Files title is missing from the remote native surface",
-            device.hasObject(By.text("Files")))
-        rule.waitUntil(10_000) { device.hasObject(By.text("Add folder")) }
-        assertTrue("Files setup control is missing from the remote native surface",
-            device.hasObject(By.text("Add folder")))
+        val filesPackage = "io.github.alexanderwilhelmsenberg.modular.addon.files.debug"
+        val title = By.pkg(filesPackage).text("Files")
+        val addFolder = By.pkg(filesPackage).text("Add folder")
+        rule.waitUntil(20_000) {
+            val bounds = device.findObject(title)?.visibleBounds
+            bounds != null && !bounds.isEmpty && bounds.top >= statusTop && device.hasObject(addFolder)
+        }
     }
 
     private fun assertNativePopupOpensAndDismisses() {

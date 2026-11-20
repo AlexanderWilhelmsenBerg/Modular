@@ -13,12 +13,10 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import io.github.alexanderwilhelmsenberg.modular.MainActivity
 import io.github.alexanderwilhelmsenberg.modular.organization.OrganizationStore
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
@@ -33,8 +31,9 @@ class DashboardPlacementTest {
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             val xml = java.io.ByteArrayOutputStream()
             device.dumpWindowHierarchy(xml)
-            val log = device.executeShellCommand("logcat -d -t 900 -s ModuleWorkspaceSurface:D WorkspaceSurfaceEndpoint:D WorkspacePagerState:D AndroidRuntime:E")
-            (xml.toString("UTF-8") + "\n" + log).chunked(2400).forEach { chunk ->
+            val log = device.executeShellCommand("logcat -d -s ModuleWorkspaceSurface:D WorkspaceSurfaceEndpoint:D WorkspacePagerState:D AndroidRuntime:E").takeLast(18000)
+            val lifecycleEvents = rule.activity.getSharedPreferences("module_management", 0).getString("lifecycle_events", "")
+            (xml.toString("UTF-8") + "\n" + lifecycleEvents + "\n" + log).chunked(2400).forEach { chunk ->
                 instrumentation.sendStatus(0, Bundle().apply { putString("stream", chunk) })
             }
             throw failure
@@ -75,13 +74,15 @@ class DashboardPlacementTest {
             rule.waitForIdle()
         }
         fun open(name: String) {
-            val button = requireNotNull(device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile(
-                "open dashboard", java.util.regex.Pattern.CASE_INSENSITIVE))), 20_000))
+            val open = By.text(java.util.regex.Pattern.compile("open dashboard", java.util.regex.Pattern.CASE_INSENSITIVE))
+            // Pump the Compose host while the independent service binds and its surface attaches.
+            rule.waitUntil(20_000) { device.hasObject(open) }
+            val button = requireNotNull(device.findObject(open))
             val input = device.findObjects(By.clazz("android.widget.EditText"))
                 .first { it.visibleBounds.centerY() < button.visibleBounds.centerY() }
             input.text = "http://127.0.0.1:8187/$name.html"
             button.click()
-            assertTrue("Missing $name dashboard", device.wait(Until.hasObject(By.text("Dashboard $name")), 25_000))
+            rule.waitUntil(25_000) { device.hasObject(By.text("Dashboard $name")) || device.hasObject(By.desc("Dashboard $name")) }
         }
         waitPage("home")
         swipe(true); waitPage("module:${pages[0].placementId}"); open("Kitchen")
@@ -91,6 +92,6 @@ class DashboardPlacementTest {
         swipe(true)
         waitPage("home")
         swipe(true)
-        assertTrue("Restored the wrong dashboard", device.wait(Until.hasObject(By.text("Dashboard Kitchen")), 20_000))
+        rule.waitUntil(25_000) { device.hasObject(By.text("Dashboard Kitchen")) || device.hasObject(By.desc("Dashboard Kitchen")) }
     }
 }

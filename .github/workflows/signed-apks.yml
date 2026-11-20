@@ -9,6 +9,10 @@ on:
         required: false
         default: core-and-files
         options:
+          - add-ons
+          - home-screens
+          - home-assistant-only
+          - proxmox-only
           - core-and-files
           - files-only
           - core-only
@@ -58,13 +62,17 @@ jobs:
         run: |
           python3 scripts/verify-keystore.py --expected-certificates docs/signing-certificates.json
           case "$BUILD_TARGET" in
+            home-assistant-only) gradle :addon-home-assistant:assembleDebug :addon-home-assistant:assembleRelease --no-configuration-cache ;;
+            proxmox-only) gradle :addon-proxmox:assembleDebug :addon-proxmox:assembleRelease --no-configuration-cache ;;
+            add-ons) gradle :addon-files:assembleDebug :addon-files:assembleRelease :addon-most-used:assembleDebug :addon-most-used:assembleRelease :addon-home-assistant:assembleDebug :addon-home-assistant:assembleRelease :addon-proxmox:assembleDebug :addon-proxmox:assembleRelease --no-configuration-cache ;;
+            home-screens) gradle :app:assembleDebug :app:assembleRelease :addon-files:assembleDebug :addon-files:assembleRelease :addon-home-assistant:assembleDebug :addon-home-assistant:assembleRelease :addon-proxmox:assembleDebug :addon-proxmox:assembleRelease --no-configuration-cache ;;
             core-and-files) gradle :app:assembleDebug :app:assembleRelease :addon-files:assembleDebug :addon-files:assembleRelease --no-configuration-cache ;;
             files-only) gradle :addon-files:assembleDebug :addon-files:assembleRelease --no-configuration-cache ;;
             core-only) gradle :app:assembleDebug :app:assembleRelease --no-configuration-cache ;;
             *) exit 2 ;;
           esac
       - name: Build legacy/reference add-on APKs for SDK testing
-        if: ${{ inputs.include_reference_addons && inputs.build_target != 'files-only' && inputs.build_target != 'core-only' }}
+        if: ${{ inputs.include_reference_addons && inputs.build_target == 'core-and-files' }}
         env:
           MODULAR_KEYSTORE_PATH: ${{ runner.temp }}/modular-signing.p12
           MODULAR_KEYSTORE_PASSWORD: ${{ secrets.MODULAR_KEYSTORE_PASSWORD }}
@@ -75,6 +83,9 @@ jobs:
           INCLUDE_REFERENCE: ${{ inputs.include_reference_addons }}
         run: |
           case "$BUILD_TARGET" in
+            home-assistant-only|proxmox-only) python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --dashboard-only "${BUILD_TARGET%-only}" ;;
+            add-ons) python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --add-ons-only ;;
+            home-screens) python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --core-only --include-files --include-home-addons ;;
             files-only) python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --files-only ;;
             core-only) python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --core-only ;;
             core-and-files)
@@ -96,7 +107,7 @@ jobs:
               raise SystemExit("Files-only build unexpectedly produced Core APKs")
           PYCODE
       - name: Upload signed Core APKs
-        if: ${{ inputs.build_target != 'files-only' }}
+        if: ${{ contains(fromJSON('["core-and-files","core-only","home-screens"]'), inputs.build_target) }}
         uses: actions/upload-artifact@v4
         with:
           name: modular-signed-apks
@@ -105,7 +116,7 @@ jobs:
             app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
       - name: Upload signed Files APKs
-        if: ${{ inputs.build_target != 'core-only' }}
+        if: ${{ contains(fromJSON('["core-and-files","files-only","home-screens"]'), inputs.build_target) }}
         uses: actions/upload-artifact@v4
         with:
           name: modular-files-signed-apks
@@ -114,7 +125,7 @@ jobs:
             addon-files/build/outputs/apk/release/addon-files-release.apk
           if-no-files-found: error
       - name: Upload legacy/reference add-on APKs
-        if: ${{ inputs.include_reference_addons && inputs.build_target != 'files-only' && inputs.build_target != 'core-only' }}
+        if: ${{ inputs.include_reference_addons && inputs.build_target == 'core-and-files' }}
         uses: actions/upload-artifact@v4
         with:
           name: modular-reference-addons
@@ -123,6 +134,26 @@ jobs:
             reference-sort-alphabetical/build/outputs/apk/release/reference-sort-alphabetical-release.apk
             addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
             addon-most-used/build/outputs/apk/release/addon-most-used-release.apk
+          if-no-files-found: error
+      - name: Upload all signed add-ons
+        if: ${{ inputs.build_target == 'add-ons' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: modular-signed-addons
+          path: |
+            addon-files/build/outputs/apk/*/*.apk
+            addon-most-used/build/outputs/apk/*/*.apk
+            addon-home-assistant/build/outputs/apk/*/*.apk
+            addon-proxmox/build/outputs/apk/*/*.apk
+          if-no-files-found: error
+      - name: Upload Home add-ons
+        if: ${{ contains(fromJSON('["home-screens","home-assistant-only","proxmox-only"]'), inputs.build_target) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: modular-dashboard-addons
+          path: |
+            addon-home-assistant/build/outputs/apk/*/*.apk
+            addon-proxmox/build/outputs/apk/*/*.apk
           if-no-files-found: error
       - name: Remove private signing material
         if: always()

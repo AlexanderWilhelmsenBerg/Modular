@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "moduleId": "io.github.alexanderwilhelmsenberg.modular.proxmox",
+  "moduleVersion": "0.1.1",
+  "displayName": "Proxmox",
+  "description": "Cluster nodes, LXC containers and interactive consoles.",
+  "coreProtocol": {
+    "min": 4,
+    "max": 4
+  },
+  "providedCapabilities": [
+    "modular.workspace.surface/v1"
+  ],
+  "requestedCoreCapabilities": [],
+  "workspaceSurfaceMinSdk": 33,
+  "instanceConfiguration": {
+    "schemaVersion": 1,
+    "fields": []
+  },
+  "managementActivity": ".ProxmoxActivity",
+  "workspaceActivity": ".ProxmoxActivity"
+}

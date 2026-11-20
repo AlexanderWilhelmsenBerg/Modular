@@ -1,0 +1,99 @@
+name: Embedded dashboard pages
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'addon-home-assistant/**'
+      - 'addon-proxmox/**'
+      - 'module-web-ui/**'
+      - 'app/src/**/DashboardPlacementTest.kt'
+      - '.github/workflows/dashboard-pages.yml'
+
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - name: Build launcher, add-ons and device tests
+        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest :addon-files:assembleDebug :addon-files:assembleDebugAndroidTest :addon-home-assistant:assembleDebug :addon-proxmox:assembleDebug :addon-proxmox:assembleDebugAndroidTest
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Serve two local dashboards
+        run: |
+          mkdir -p "$RUNNER_TEMP/dashboards"
+          cat > "$RUNNER_TEMP/dashboards/index.html" <<'HTML'
+          <!doctype html><html><body><script>
+          const session = 'fixture-home-assistant-session';
+          if (location.pathname.startsWith('/auth/')) {
+            const signIn = document.createElement('button');
+            signIn.textContent = 'Sign in to fixture';
+            signIn.onclick = () => { localStorage.setItem(session, '1'); location.replace('/'); };
+            document.body.append(signIn);
+          } else if (!localStorage.getItem(session)) {
+            location.replace('/auth/authorize/');
+          } else {
+            const root = document.createElement('home-assistant');
+            root.hass = {user:{is_admin:false}, connected:true, panels:{
+              kitchen:{component_name:'lovelace', title:'Kitchen', url_path:'kitchen'},
+              garage:{component_name:'lovelace', title:'Garage', url_path:'garage'},
+              admin:{component_name:'lovelace', title:'Restricted', url_path:'restricted', require_admin:true},
+            }};
+            const name = location.pathname.startsWith('/garage') ? 'Garage' : 'Kitchen';
+            const title = document.createElement('h1');
+            title.textContent = 'Dashboard ' + name;
+            const expire = document.createElement('button');
+            expire.textContent = 'Expire fixture session';
+            expire.onclick = () => { localStorage.removeItem(session); location.replace('/auth/authorize/'); };
+            root.append(title, expire);
+            document.body.append(root);
+          }
+          </script></body></html>
+          HTML
+          for page in kitchen garage auth/authorize; do
+            mkdir -p "$RUNNER_TEMP/dashboards/$page"
+            cp "$RUNNER_TEMP/dashboards/index.html" "$RUNNER_TEMP/dashboards/$page/index.html"
+          done
+          python3 -m http.server 8187 --bind 127.0.0.1 --directory "$RUNNER_TEMP/dashboards" > "$RUNNER_TEMP/dashboard-server.log" 2>&1 &
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            adb reverse tcp:8187 tcp:8187
+            adb install app/build/outputs/apk/debug/app-debug.apk
+            adb install addon-home-assistant/build/outputs/apk/debug/addon-home-assistant-debug.apk
+            adb install addon-proxmox/build/outputs/apk/debug/addon-proxmox-debug.apk
+            adb install addon-files/build/outputs/apk/debug/addon-files-debug.apk
+            adb install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell cmd package set-home-activity io.github.alexanderwilhelmsenberg.modular.debug/io.github.alexanderwilhelmsenberg.modular.MainActivity
+            adb install addon-files/build/outputs/apk/androidTest/debug/addon-files-debug-androidTest.apk
+            adb shell appops set --uid io.github.alexanderwilhelmsenberg.modular.addon.files.debug MANAGE_EXTERNAL_STORAGE allow
+            adb shell pm grant io.github.alexanderwilhelmsenberg.modular.addon.files.debug android.permission.POST_NOTIFICATIONS
+            mkdir -p build/reports/native-surface
+            adb shell am instrument -w -e class io.github.alexanderwilhelmsenberg.modular.addon.files.FilesBackgroundScanTest#realOlderVersionsScanCompletesWithNotificationWhileHomeAndScreenAreOff io.github.alexanderwilhelmsenberg.modular.addon.files.debug.test/androidx.test.runner.AndroidJUnitRunner > build/reports/native-surface/CleanupFilenames.log
+            adb shell appops set --uid io.github.alexanderwilhelmsenberg.modular.addon.files.debug MANAGE_EXTERNAL_STORAGE default
+            adb install addon-proxmox/build/outputs/apk/androidTest/debug/addon-proxmox-debug-androidTest.apk
+            adb shell am instrument -w -e class io.github.alexanderwilhelmsenberg.modular.addon.proxmox.ProxmoxCredentialsTest io.github.alexanderwilhelmsenberg.modular.addon.proxmox.debug.test/androidx.test.runner.AndroidJUnitRunner > build/reports/native-surface/ProxmoxCredentials.log
+            python3 scripts/run-native-surface-tests.py --dashboard-pages
+            grep -Eq '^OK \(2 tests\)' build/reports/native-surface/ProxmoxCredentials.log
+            grep -Eq '^OK \(1 test\)' build/reports/native-surface/CleanupFilenames.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard-device-results
+          path: build/reports/native-surface/

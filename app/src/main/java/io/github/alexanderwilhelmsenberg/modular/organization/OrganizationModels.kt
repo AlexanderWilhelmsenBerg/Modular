@@ -59,10 +59,10 @@ sealed interface HomePageId {
     data object Home : HomePageId
     data class Category(val id: String) : HomePageId
     data class Widget(val id: String) : HomePageId
-    data class Module(val component: String) : HomePageId
+    data class Module(val placementId: String) : HomePageId
 }
 
-/** One user-added native page per installed module service. */
+/** A placement keeps its identity when it is reordered or disabled. Legacy pages use their component as the key. */
 data class ModuleHomePage(
     val component: String,
     val providerId: String,
@@ -70,6 +70,7 @@ data class ModuleHomePage(
     val enabled: Boolean = true,
     /** Installed APK signer identity at the user's Add to Home decision. */
     val signerKey: String = "",
+    val placementId: String = component,
 ) {
     fun matchesInstalledProvider(component: String, providerId: String?, installedSignerKey: String?): Boolean =
         this.component == component && this.providerId == providerId &&
@@ -108,12 +109,12 @@ data class OrganizationSnapshot(
     fun visiblePageOrder(): List<HomePageId> {
         val enabled = categories.filter { it.enabled }.mapTo(HashSet()) { it.id }
         val enabledWidgets = workspacePages.filter { it.enabled }.mapTo(HashSet()) { it.id }
-        val enabledModules = modulePages.filter { it.enabled }.mapTo(HashSet()) { it.component }
+        val enabledModules = modulePages.filter { it.enabled }.mapTo(HashSet()) { it.placementId }
         return pageOrder.filter { page -> when (page) {
             HomePageId.Home -> true
             is HomePageId.Category -> categoriesEnabled && page.id in enabled
             is HomePageId.Widget -> page.id in enabledWidgets
-            is HomePageId.Module -> page.component in enabledModules
+            is HomePageId.Module -> page.placementId in enabledModules
         } }
     }
 }
@@ -141,8 +142,8 @@ sealed interface OrganizationEdit {
     data class UpdateWorkspacePage(val page: WorkspacePage) : OrganizationEdit
     data class DeleteWorkspacePage(val id: String) : OrganizationEdit
     data class AddModulePage(val page: ModuleHomePage, val position: Int? = null) : OrganizationEdit
-    data class SetModulePageEnabled(val component: String, val enabled: Boolean) : OrganizationEdit
-    data class RemoveModulePage(val component: String) : OrganizationEdit
+    data class SetModulePageEnabled(val placementId: String, val enabled: Boolean) : OrganizationEdit
+    data class RemoveModulePage(val placementId: String) : OrganizationEdit
     data class SetWorkspacePreferences(val preferences: WorkspacePreferences) : OrganizationEdit
     data class SetWidgets(val widgets: List<WorkspaceWidget>) : OrganizationEdit
     data class SetListeningPreferences(val preferences: ListeningPreferences) : OrganizationEdit

@@ -52,6 +52,9 @@ class FilesPageController internal constructor(context: Context,
     private val scrollCommands = LinkedHashMap<String, ScrollCommand>()
     private data class SizeProgressCommand(val revision: Long, val folderId: String)
     private val sizeProgressCommands = LinkedHashMap<String, SizeProgressCommand>()
+    // Only this live controller owns the action IDs in this snapshot. Never persist them.
+    @Volatile internal var lastDisplayPage: String? = null
+        private set
     private var lastBrowserJson: String? = null
     private var lastBrowserRevision = -1L
     private var lastBrowserFolderId: String? = null
@@ -434,6 +437,11 @@ class FilesPageController internal constructor(context: Context,
             if (scrollAnchor != safeAnchor || scrollOffset != safeOffset) {
                 scrollAnchor = safeAnchor
                 scrollOffset = safeOffset
+                lastDisplayPage?.let { raw ->
+                    val saved = JSONObject(raw)
+                    if (saved.optString("scrollKey") == key) lastDisplayPage = saved
+                        .put("scrollAnchor", safeAnchor).put("scrollOffset", safeOffset).toString()
+                }
                 persist()
             }
         }
@@ -710,6 +718,9 @@ class FilesPageController internal constructor(context: Context,
             lastBrowserJson = rendered
             lastBrowserRevision = revision
             lastBrowserFolderId = folderId
+        }
+        lastDisplayPage = rendered.takeIf {
+            view in setOf("browser", "overview", "search", "clean", "trash", "progress", "keeper") && !page.has("hostLaunch")
         }
         return rendered
         } finally { commands.endPage() }
@@ -1257,7 +1268,7 @@ class FilesPageController internal constructor(context: Context,
             }
         }
         page.put("sizesCalculating", grid && folder in pendingTotals)
-        return page.toString().also { lastBrowserJson = it }
+        return page.toString().also { lastBrowserJson = it; lastDisplayPage = it }
     }
 
     private fun renderClean(page: JSONObject, actions: JSONArray, items: JSONArray, offset: Int, limit: Int) {
@@ -1400,8 +1411,7 @@ class FilesPageController internal constructor(context: Context,
         val ranked = CleanerEngine.rankedFindings(entries, groups, suggestions)
         if (cleanSort == "priority" && !cleanSortDescending) return ranked
         val priorityIndex = ranked.mapIndexed { index, finding -> finding.id() to index }.toMap()
-        fun name(finding: CleanerEngine.Finding) = finding.group()?.baseName()
-            ?: finding.suggestion()?.let { entries[it.entryId()]?.name() }.orEmpty()
+        fun name(finding: CleanerEngine.Finding) = findingName(finding, entries)
         fun itemCount(finding: CleanerEngine.Finding) = finding.group()?.memberIds()?.size ?: 1
         val comparator = Comparator<CleanerEngine.Finding> { left, right ->
             val comparison = when (cleanSort) {
@@ -1421,14 +1431,26 @@ class FilesPageController internal constructor(context: Context,
         return ranked.sortedWith(comparator)
     }
 
+    private fun findingName(finding: CleanerEngine.Finding, entries: Map<String, CleanerEngine.Entry>): String {
+        val group = finding.group()
+        return group?.baseName() ?: group?.suggestedKeeperId()?.let { entries[it]?.name() }
+            ?: group?.memberIds()?.firstNotNullOfOrNull { entries[it]?.name() }
+            ?: finding.suggestion()?.let { entries[it.entryId()]?.name() }
+            ?: cleanCategoryLabel(finding.category())
+    }
+
     private fun cleanFindingItem(finding: CleanerEngine.Finding, entries: Map<String, CleanerEngine.Entry>,
         preliminary: Boolean): JSONObject {
         val group = finding.group()
         val suggestion = finding.suggestion()
         val entry = suggestion?.let { entries[it.entryId()] }
+        val displayName = findingName(finding, entries)
         val details = if (group != null) "${cleanCategoryLabel(group.category())} · ${group.evidence()} · ${group.memberIds().size} items"
             else suggestion?.reason().orEmpty()
-        return JSONObject().put("id", finding.id()).put("name", group?.baseName() ?: entry?.name() ?: cleanCategoryLabel(finding.category()))
+        return JSONObject().put("id", finding.id()).put("name", displayName)
+            .put("sampleNames", group?.takeIf { it.baseName() == null }?.memberIds()?.asSequence()
+                ?.mapNotNull { entries[it]?.name() }?.distinct()?.filter { it != displayName }
+                ?.take(2)?.toList()?.let(::JSONArray))
             .put("kind", if (group != null) "group" else "suggestion")
             .put("itemCount", group?.memberIds()?.size ?: 1)
             .put("keeperRequired", group?.requiresKeeperChoice() == true && group.suggestedKeeperId() == null)

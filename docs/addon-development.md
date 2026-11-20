@@ -163,3 +163,13 @@ checks that no Core APK was produced. Use `core-only` for a Core change and
 Changing add-on layout or adding provider-owned native controls is not a reason
 to rebuild or reinstall Core. Independent publishers use their own signing key
 and retain that identity across add-on updates.
+
+### Multiple Home placements
+
+A native surface provider can declare boolean service metadata named
+`io.github.alexanderwilhelmsenberg.modular.MULTIPLE_WORKSPACE_PAGES`. Core 0.1.1
+lets the user name, position, disable and remove each placement independently.
+Use the SDK's `ModuleInstanceContext.instanceId` as the key for placement settings.
+The ID is stable across swipes, reorderings and process restarts. Each new
+placement gets a fresh ID. Existing single-screen providers keep their original
+binding and storage keys. Core supports up to 16 add-on placements in total.

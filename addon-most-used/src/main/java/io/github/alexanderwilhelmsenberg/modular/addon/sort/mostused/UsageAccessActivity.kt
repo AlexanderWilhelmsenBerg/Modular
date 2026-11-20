@@ -40,26 +40,35 @@ class UsageAccessActivity : Activity() {
         }
         content.addView(TextView(this).apply {
             text = getString(R.string.settings_heading)
-            textSize = 28f
+            textSize = 30f
+            typeface = android.graphics.Typeface.create("sans-serif-medium", 0)
         })
         content.addView(TextView(this).apply {
             text = getString(R.string.settings_explanation)
             textSize = 16f
             setPadding(0, spacing, 0, spacing)
         })
+        val dark = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val accent = android.graphics.Color.parseColor(if (dark) "#A9DBFF" else "#135581")
+        val surface = android.graphics.Color.parseColor(if (dark) "#183041" else "#D8EBF7")
         status = TextView(this).apply {
             id = R.id.usage_access_status
-            textSize = 18f
-            setPadding(0, spacing, 0, spacing)
+            textSize = 16f
+            setTextColor(accent)
+            setBackgroundColor(surface)
+            setPadding(spacing, spacing, spacing, spacing)
             text = getString(R.string.settings_access_checking)
         }
-        content.addView(status)
+        content.addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = spacing })
         content.addView(Button(this).apply {
+            isAllCaps = false
             id = R.id.usage_access_button
             text = getString(R.string.settings_access_button)
             setOnClickListener { openUsageAccessSettings() }
         })
         content.addView(Button(this).apply {
+            isAllCaps = false
             id = R.id.core_settings_button
             text = getString(R.string.settings_core_button)
             setOnClickListener { openCoreSettings() }
@@ -73,6 +82,7 @@ class UsageAccessActivity : Activity() {
         }
         content.addView(restrictedGuidance)
         appInfoButton = Button(this).apply {
+            isAllCaps = false
             id = R.id.app_info_button
             text = getString(R.string.settings_app_info_button)
             visibility = View.GONE

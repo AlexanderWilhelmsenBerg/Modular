@@ -1,0 +1,20 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="Home Assistant" android:allowBackup="false" android:icon="@drawable/addon_icon"
+        android:networkSecurityConfig="@xml/network_security" android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity android:name=".DashboardActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service android:name=".DashboardService" android:exported="true">
+            <intent-filter>
+                <action android:name="io.github.alexanderwilhelmsenberg.modular.action.MODULE" />
+            </intent-filter>
+            <meta-data android:name="io.github.alexanderwilhelmsenberg.modular.MODULE_DESCRIPTOR"
+                android:resource="@raw/module_descriptor" />
+            <meta-data android:name="io.github.alexanderwilhelmsenberg.modular.MULTIPLE_WORKSPACE_PAGES"
+                android:value="true" />
+        </service>
+    </application>
+</manifest>

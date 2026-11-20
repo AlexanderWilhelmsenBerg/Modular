@@ -57,7 +57,7 @@ internal fun FilesNativeContent(
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     val ioMutex = remember { Mutex() }
-    var page by remember { mutableStateOf<String?>(null) }
+    var page by remember(controller) { mutableStateOf(controller.lastDisplayPage) }
     var error by remember { mutableStateOf<String?>(null) }
     var dismissMenu by remember { mutableStateOf<(() -> Boolean)?>(null) }
     var pendingActions by remember { androidx.compose.runtime.mutableIntStateOf(0) }
@@ -193,7 +193,7 @@ internal fun FilesNativeContent(
         if (currentPage == null) {
             Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(error ?: "Loading Files…")
-                Button(onClick = ::load) { Text("Retry") }
+                if (error != null) Button(onClick = ::load) { Text("Retry") }
             }
         } else {
             FilesPage(currentPage,

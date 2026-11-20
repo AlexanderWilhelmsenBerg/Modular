@@ -347,7 +347,7 @@ private fun FilesPageContent(
                     FilesFolderGlyph(FilesFolderAppearance.fromJson(currentFolder),
                         Modifier.size(40.dp).padding(end = 5.dp).testTag("files.folder.header"))
                 }
-                Text(page.optString("title", "Files"), style = MaterialTheme.typography.titleLarge,
+                Text(page.optString("title", "Files"), style = MaterialTheme.typography.headlineSmall,
                     modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 actions.firstOrNull { it.kind == "back" }?.let { back ->
                     TextButton(onClick = { send(back, null) }, modifier = Modifier.heightIn(min = 48.dp)) {
@@ -1096,7 +1096,7 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                         Column(Modifier.fillMaxWidth()
                             .testTag("files.clean.recommendation:${item.optString("id")}")
                             .background(if (!scanning && included) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.background)
+                                else MaterialTheme.colorScheme.surfaceContainerLow)
                             .then(if (!scanning && select != null) Modifier.semantics {
                                 role = Role.Checkbox
                                 stateDescription = if (included) "Selected" else "Not selected"
@@ -1104,11 +1104,11 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                             .then(if (!scanning && complete && select != null)
                                 Modifier.clickable(enabled = select.enabled) { send(select, null) }
                                 else Modifier)
-                            .padding(horizontal = 8.dp, vertical = 10.dp)) {
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(item.optString("name"), Modifier.weight(1f),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(item.optString("name"), Modifier.weight(1f).padding(end = 8.dp),
+                                    style = MaterialTheme.typography.titleMedium)
                                 if (!scanning && select != null) {
                                     val markColor = MaterialTheme.colorScheme.primary
                                     Box(Modifier.size(24.dp).semantics {
@@ -1130,6 +1130,12 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                                         }
                                     }
                                 }
+                            }
+                            item.optJSONArray("sampleNames")?.let { names ->
+                                for (i in 0 until names.length()) Text(names.getString(i),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (included) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             item.optString("subtitle").takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall,

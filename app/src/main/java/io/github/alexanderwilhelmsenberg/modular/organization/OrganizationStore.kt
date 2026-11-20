@@ -279,23 +279,23 @@ class OrganizationStore internal constructor(private val dataStore: DataStore<Pr
                 widgets = state.widgets.filterNot { it.pageId == WorkspacePageId.widget(edit.id) })
         }
         is OrganizationEdit.AddModulePage -> {
-            require(state.modulePages.none { it.component == edit.page.component }) { "Module page already exists" }
+            require(state.modulePages.none { it.placementId == edit.page.placementId }) { "Module page already exists" }
             val order = state.pageOrder.toMutableList()
             val position = edit.position ?: (order.indexOf(HomePageId.Home) + 1)
             require(position in 0..order.size) { "Invalid page position" }
-            order.add(position, HomePageId.Module(edit.page.component))
+            order.add(position, HomePageId.Module(edit.page.placementId))
             state.copy(modulePages = state.modulePages + edit.page, pageOrder = order)
         }
         is OrganizationEdit.SetModulePageEnabled -> {
-            require(state.modulePages.any { it.component == edit.component }) { "Module page no longer exists" }
+            require(state.modulePages.any { it.placementId == edit.placementId }) { "Module page no longer exists" }
             state.copy(modulePages = state.modulePages.map {
-                if (it.component == edit.component) it.copy(enabled = edit.enabled) else it
+                if (it.placementId == edit.placementId) it.copy(enabled = edit.enabled) else it
             })
         }
         is OrganizationEdit.RemoveModulePage -> {
-            require(state.modulePages.any { it.component == edit.component }) { "Module page no longer exists" }
-            state.copy(modulePages = state.modulePages.filterNot { it.component == edit.component },
-                pageOrder = state.pageOrder - HomePageId.Module(edit.component))
+            require(state.modulePages.any { it.placementId == edit.placementId }) { "Module page no longer exists" }
+            state.copy(modulePages = state.modulePages.filterNot { it.placementId == edit.placementId },
+                pageOrder = state.pageOrder - HomePageId.Module(edit.placementId))
         }
         is OrganizationEdit.SetWorkspacePreferences -> state.copy(workspacePreferences = edit.preferences)
         is OrganizationEdit.SetWidgets -> state.copy(widgets = edit.widgets)
@@ -357,11 +357,12 @@ private fun validate(snapshot: OrganizationSnapshot) {
         }
     }) { "Duplicate category name" }
     val workspaceIds = snapshot.workspacePages.map { it.id }
-    val moduleComponents = snapshot.modulePages.map { it.component }
-    require(moduleComponents.size <= OrganizationLimits.MAX_MODULE_PAGES &&
-        moduleComponents.distinct().size == moduleComponents.size &&
+    val modulePlacementIds = snapshot.modulePages.map { it.placementId }
+    require(modulePlacementIds.size <= OrganizationLimits.MAX_MODULE_PAGES &&
+        modulePlacementIds.distinct().size == modulePlacementIds.size &&
         snapshot.modulePages.all { page ->
-            page.component.length in 3..512 && page.component.contains('/') &&
+            (page.placementId == page.component || runCatching { java.util.UUID.fromString(page.placementId).toString() == page.placementId }.getOrDefault(false)) &&
+                page.component.length in 3..512 && page.component.contains('/') &&
                 page.providerId.length in 3..160 && page.name.isNotBlank() &&
                 page.name == page.name.trim() &&
                 page.name.codePointCount(0, page.name.length) <= 120 &&
@@ -381,11 +382,11 @@ private fun validate(snapshot: OrganizationSnapshot) {
             collator.compare(snapshot.workspacePages[index].name, snapshot.workspacePages[it].name) == 0
         }
     }) { "Duplicate workspace page name" }
-    require(snapshot.pageOrder.size == snapshot.categories.size + workspaceIds.size + moduleComponents.size + 1 &&
+    require(snapshot.pageOrder.size == snapshot.categories.size + workspaceIds.size + modulePlacementIds.size + 1 &&
         snapshot.pageOrder.count { it == HomePageId.Home } == 1 &&
         snapshot.pageOrder.toSet() == categoryIds.map(HomePageId::Category).toSet() +
             workspaceIds.map(HomePageId::Widget).toSet() +
-            moduleComponents.map(HomePageId::Module).toSet() + HomePageId.Home) {
+            modulePlacementIds.map(HomePageId::Module).toSet() + HomePageId.Home) {
         "Invalid page order"
     }
     require(snapshot.workspacePreferences.sectionOrder.size == WorkspaceSection.entries.size &&
@@ -502,12 +503,12 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
 }
 @Serializable private data class SavedModuleHomePage(
     val component: String, val providerId: String, val name: String, val enabled: Boolean,
-    val signerKey: String = "",
+    val signerKey: String = "", val placementId: String = component,
 ) {
-    fun public() = ModuleHomePage(component, providerId, name, enabled, signerKey)
+    fun public() = ModuleHomePage(component, providerId, name, enabled, signerKey, placementId)
     companion object {
         fun from(page: ModuleHomePage) = SavedModuleHomePage(
-            page.component, page.providerId, page.name, page.enabled, page.signerKey,
+            page.component, page.providerId, page.name, page.enabled, page.signerKey, page.placementId,
         )
     }
 }
@@ -570,7 +571,7 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
         require(pairs.distinct().size == pairs.size) { "Duplicate membership pair" }
         val categoryIds = categories.mapTo(HashSet()) { it.id }
         val widgetIds = workspacePages.mapTo(HashSet()) { WorkspacePageId.widget(it.id) }
-        val moduleIds = modulePages.mapTo(HashSet()) { "module:${it.component}" }
+        val moduleIds = modulePages.mapTo(HashSet()) { "module:${it.placementId}" }
         return OrganizationSnapshot(revision = revision, categoriesEnabled = categoriesEnabled,
             categories = categories.map { it.public() }, folders = folders.map { it.public() },
             pageOrder = pageOrder.map { key -> when {
@@ -600,7 +601,7 @@ private fun validAppKey(key: AppKey): Boolean = key.packageName.isNotBlank() &&
                     HomePageId.Home -> "home"
                     is HomePageId.Category -> it.id
                     is HomePageId.Widget -> WorkspacePageId.widget(it.id)
-                    is HomePageId.Module -> "module:${it.component}"
+                    is HomePageId.Module -> "module:${it.placementId}"
                 } },
                 memberships = pairs.map { pair -> SavedMembership(pair.categoryId,
                     SavedKey.from(pair.appKey), snapshot.overrides[pair] ?: MembershipOverride.AUTO,

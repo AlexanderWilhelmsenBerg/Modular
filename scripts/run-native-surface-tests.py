@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Device proof that an independently built UI updates without updating Core."""
 from pathlib import Path
+import argparse
 import re
 import subprocess
 
@@ -10,13 +11,18 @@ TESTS = (
     ('io.github.alexanderwilhelmsenberg.modular.capabilities.FilesCrossApkHomeTest', 1),
     ('io.github.alexanderwilhelmsenberg.modular.capabilities.NativeIndependentSurfaceTest', 1),
 )
+parser = argparse.ArgumentParser()
+parser.add_argument('--dashboard-pages', action='store_true')
+dashboard_pages = parser.parse_args().dashboard_pages
+if dashboard_pages:
+    TESTS = (TESTS[1], ('io.github.alexanderwilhelmsenberg.modular.capabilities.DashboardPlacementTest', 1))
 OUT = Path('build/reports/native-surface')
 OUT.mkdir(parents=True, exist_ok=True)
 failures = []
 for class_name, expected in TESTS:
     name = class_name.rsplit('.', 1)[-1]
     try:
-        result = subprocess.run(['adb', 'shell', 'am', 'instrument', '-w', '-e', 'class', class_name, RUNNER],
+        result = subprocess.run(['adb', 'shell', 'am', 'instrument', '-w', '-e', 'dashboardFixture', str(dashboard_pages).lower(), '-e', 'class', class_name, RUNNER],
                                 text=True, capture_output=True, timeout=360)
         output = result.stdout + '\n' + result.stderr
         passed = result.returncode == 0 and re.search(rf'^OK \({expected} tests?\)\s*$', result.stdout, re.MULTILINE)
@@ -37,4 +43,4 @@ subprocess.run(['adb', 'pull', '/sdcard/Pictures/ModularNativeSurfaces/.', str(O
                capture_output=True, timeout=60)
 if failures:
     raise SystemExit('Native surface tests failed: ' + ', '.join(failures))
-print('Native surface proof passed (4 device tests)', flush=True)
+print(f"Passed {sum(count for _, count in TESTS)} native surface tests", flush=True)

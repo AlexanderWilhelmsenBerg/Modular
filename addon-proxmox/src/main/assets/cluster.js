@@ -145,7 +145,12 @@ function metric(label, used, total, text) {
     }
     return row;
 }
-const gib = bytes => bytes == null ? '—' : (bytes / 1073741824).toFixed(1);
+function memoryUsage(used, total) {
+    if (used == null && total == null) return '—';
+    const unit = (total ?? used) >= 1073741824 ? 1073741824 : 1048576;
+    const format = value => value == null ? '—' : (value / unit).toFixed(1);
+    return format(used) + ' / ' + format(total) + (unit === 1073741824 ? ' GiB' : ' MiB');
+}
 function element(tag, text, className) {
     const el = document.createElement(tag);
     if (text != null) el.textContent = text;
@@ -170,7 +175,7 @@ function resourceRow(item, title, opened, id) {
     heading.append(element('strong', (opened.has(id) ? '▾  ' : '▸  ') + title), status);
     const metrics = element('span', null, 'metrics');
     metrics.append(metric('CPU', item.cpu, 1, item.cpu == null ? '—' : (item.cpu * 100).toFixed(1) + '%'),
-        metric('RAM', item.mem, item.maxmem, gib(item.mem) + ' / ' + gib(item.maxmem) + ' GiB'));
+        metric('RAM', item.mem, item.maxmem, memoryUsage(item.mem, item.maxmem)));
     button.append(heading, metrics);
     return button;
 }

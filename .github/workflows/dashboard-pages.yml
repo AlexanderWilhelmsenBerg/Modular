@@ -25,7 +25,7 @@ jobs:
         with:
           gradle-version: '9.6.0'
       - name: Build launcher, add-ons and device tests
-        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest :addon-files:assembleDebug :addon-files:assembleDebugAndroidTest :addon-home-assistant:assembleDebug :addon-proxmox:assembleDebug
+        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest :addon-files:assembleDebug :addon-files:assembleDebugAndroidTest :addon-home-assistant:assembleDebug :addon-proxmox:assembleDebug :addon-proxmox:assembleDebugAndroidTest
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -87,7 +87,10 @@ jobs:
             mkdir -p build/reports/native-surface
             adb shell am instrument -w -e class io.github.alexanderwilhelmsenberg.modular.addon.files.FilesBackgroundScanTest#realOlderVersionsScanCompletesWithNotificationWhileHomeAndScreenAreOff io.github.alexanderwilhelmsenberg.modular.addon.files.debug.test/androidx.test.runner.AndroidJUnitRunner > build/reports/native-surface/CleanupFilenames.log
             adb shell appops set --uid io.github.alexanderwilhelmsenberg.modular.addon.files.debug MANAGE_EXTERNAL_STORAGE default
+            adb install addon-proxmox/build/outputs/apk/androidTest/debug/addon-proxmox-debug-androidTest.apk
+            adb shell am instrument -w -e class io.github.alexanderwilhelmsenberg.modular.addon.proxmox.ProxmoxCredentialsTest io.github.alexanderwilhelmsenberg.modular.addon.proxmox.debug.test/androidx.test.runner.AndroidJUnitRunner > build/reports/native-surface/ProxmoxCredentials.log
             python3 scripts/run-native-surface-tests.py --dashboard-pages
+            grep -Eq '^OK \(2 tests\)' build/reports/native-surface/ProxmoxCredentials.log
             grep -Eq '^OK \(1 test\)' build/reports/native-surface/CleanupFilenames.log
       - uses: actions/upload-artifact@v4
         if: always()

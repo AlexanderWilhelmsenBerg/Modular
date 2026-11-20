@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:label="Home Assistant" android:allowBackup="false"
+    <application android:label="Home Assistant" android:allowBackup="false" android:icon="@drawable/addon_icon"
         android:networkSecurityConfig="@xml/network_security" android:theme="@android:style/Theme.Material.NoActionBar">
         <activity android:name=".DashboardActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
             <intent-filter>

@@ -26,13 +26,13 @@ class DashboardPlacementTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
     private val device by lazy { UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()) }
 
-    @Test fun accountHandoffAndIndependentDashboardsSurviveHomeSwipes() {
+    @Test fun accountHandoffAndIndependentDashboardsSurviveWorkspaceNavigation() {
         assumeTrue(Build.VERSION.SDK_INT >= 33 && InstrumentationRegistry.getArguments().getString("dashboardFixture") == "true")
         try { verifyPlacements() } catch (failure: Throwable) {
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             val xml = java.io.ByteArrayOutputStream()
             device.dumpWindowHierarchy(xml)
-            val log = device.executeShellCommand("logcat -d -s ModuleWorkspaceSurface:D WorkspaceSurfaceEndpoint:D WorkspacePagerState:D AndroidRuntime:E").takeLast(18000)
+            val log = device.executeShellCommand("logcat -d -s ModuleWorkspaceSurface:D WorkspaceSurfaceEndpoint:D WorkspacePagerState:D WorkspaceGestureGate:D AndroidRuntime:E").takeLast(18000)
             val lifecycleEvents = rule.activity.getSharedPreferences("module_management", 0).getString("lifecycle_events", "")
             (xml.toString("UTF-8") + "\n" + lifecycleEvents + "\n" + log).chunked(2400).forEach { chunk ->
                 instrumentation.sendStatus(0, Bundle().apply { putString("stream", chunk) })
@@ -108,10 +108,10 @@ class DashboardPlacementTest {
         swipe(true); waitPage("module:${pages[0].placementId}")
         signIn(first = true)
         open("Kitchen")
-        swipe(false)
+        device.pressBack()
         waitPage("home")
         swipe(false); waitPage("module:${pages[1].placementId}"); open("Garage")
-        swipe(true)
+        device.pressBack()
         waitPage("home")
         swipe(true)
         waitPage("module:${pages[0].placementId}")

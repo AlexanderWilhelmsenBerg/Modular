@@ -9,6 +9,7 @@ on:
         required: false
         default: core-and-files
         options:
+          - home-screens
           - core-and-files
           - files-only
           - core-only
@@ -58,6 +59,7 @@ jobs:
         run: |
           python3 scripts/verify-keystore.py --expected-certificates docs/signing-certificates.json
           case "$BUILD_TARGET" in
+            home-screens) gradle :app:assembleDebug :app:assembleRelease :addon-files:assembleDebug :addon-files:assembleRelease :addon-home-assistant:assembleDebug :addon-home-assistant:assembleRelease :addon-proxmox:assembleDebug :addon-proxmox:assembleRelease --no-configuration-cache ;;
             core-and-files) gradle :app:assembleDebug :app:assembleRelease :addon-files:assembleDebug :addon-files:assembleRelease --no-configuration-cache ;;
             files-only) gradle :addon-files:assembleDebug :addon-files:assembleRelease --no-configuration-cache ;;
             core-only) gradle :app:assembleDebug :app:assembleRelease --no-configuration-cache ;;
@@ -75,6 +77,7 @@ jobs:
           INCLUDE_REFERENCE: ${{ inputs.include_reference_addons }}
         run: |
           case "$BUILD_TARGET" in
+            home-screens) python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --core-only --include-files --include-home-addons ;;
             files-only) python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --files-only ;;
             core-only) python3 scripts/verify-signed-apks.py --expected-certificates docs/signing-certificates.json --core-only ;;
             core-and-files)
@@ -123,6 +126,15 @@ jobs:
             reference-sort-alphabetical/build/outputs/apk/release/reference-sort-alphabetical-release.apk
             addon-most-used/build/outputs/apk/debug/addon-most-used-debug.apk
             addon-most-used/build/outputs/apk/release/addon-most-used-release.apk
+          if-no-files-found: error
+      - name: Upload Home add-ons
+        if: ${{ inputs.build_target == 'home-screens' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: modular-dashboard-addons
+          path: |
+            addon-home-assistant/build/outputs/apk/*/*.apk
+            addon-proxmox/build/outputs/apk/*/*.apk
           if-no-files-found: error
       - name: Remove private signing material
         if: always()

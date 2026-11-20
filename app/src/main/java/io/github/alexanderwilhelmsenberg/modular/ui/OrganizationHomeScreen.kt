@@ -378,7 +378,7 @@ fun OrganizationHomeScreen(
                 HomePageId.Home -> "home"
                 is HomePageId.Category -> "category:${it.id}"
                 is HomePageId.Widget -> "widget:${it.id}"
-                is HomePageId.Module -> "module:${it.component}"
+                is HomePageId.Module -> "module:${it.placementId}"
                 }
                 if (pageName != nextPageName) {
                     if (pageName.startsWith("module:") && nextPageName == "home") homeFocusRequest++
@@ -405,16 +405,16 @@ fun OrganizationHomeScreen(
                 DisposableEffect(page) { onDispose { scrollingPages.remove(page) } }
                 val featured = if (category == null && sorter == null) featuredApps?.let(projection::filterDirectStarred) else null
                 if (workspaceMode && page is HomePageId.Module && sorter == null) {
-                    if (pageName == "module:${page.component}") SideEffect { activeWorkspaceList = null }
+                    if (pageName == "module:${page.placementId}") SideEffect { activeWorkspaceList = null }
                     Box(Modifier.fillMaxSize().padding(bottom = 72.dp)) {
-                        modulePageContent(page.component, pageName == "module:${page.component}" && vertical.progress == 0f,
+                        modulePageContent(page.placementId, pageName == "module:${page.placementId}" && vertical.progress == 0f,
                             { interacting ->
-                                if (pageName == "module:${page.component}") {
+                                if (pageName == "module:${page.placementId}") {
                                     moduleInteractionActive = interacting && vertical.progress == 0f
                                 }
                             },
                             { destination ->
-                                if (pageName == "module:${page.component}") when (destination) {
+                                if (pageName == "module:${page.placementId}") when (destination) {
                                     "home" -> {
                                         settle(false)
                                         requestedPage = HomePageId.Home

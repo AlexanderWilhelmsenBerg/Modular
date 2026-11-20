@@ -1,0 +1,14 @@
+:root { color-scheme:light dark; font:16px/1.4 Roboto,system-ui,sans-serif; --line:#80808055; --accent:#2678be }
+* { box-sizing:border-box } body { margin:0; padding:0 12px 12px } [hidden] { display:none!important }
+header,.actions { display:flex; align-items:center; gap:8px } header { min-height:54px; border-bottom:1px solid var(--line) }
+h1 { font-size:1.25rem; font-weight:600; flex:1; margin:.5em 0 } button,input,textarea { font:inherit }
+button { min-height:42px; border:0; border-radius:4px; padding:6px 12px; color:inherit; background:transparent }
+button:active,button:focus-visible { background:#8883 } button:disabled { opacity:.45 }
+input,textarea { width:100%; padding:10px; border:1px solid var(--line); border-radius:4px; background:transparent; color:inherit }
+label { display:block; margin:10px 0 4px } #login button,#send { background:var(--accent); color:white }
+#status:not(:empty) { padding:8px 0; font-size:.9rem } .node,.guest { border-bottom:1px solid var(--line) }
+.row { width:100%; text-align:start; padding:10px 2px; display:grid; gap:3px }
+.row strong { font-weight:600 } .row small { opacity:.76 } .guest { margin-left:16px } .actions { flex-wrap:wrap; margin-bottom:4px }
+.actions button { border:1px solid var(--line) } #shell { height:calc(100dvh - 12px); min-height:235px; display:flex; flex-direction:column }
+#terminal { background:#141517; min-height:54px; flex:1; overflow:hidden; padding:4px } #input { font-family:monospace }
+#command label { font-size:.82rem } #command .actions { justify-content:end } .xterm { height:100% }

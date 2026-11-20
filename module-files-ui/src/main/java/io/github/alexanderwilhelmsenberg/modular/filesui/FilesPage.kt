@@ -1107,8 +1107,7 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                             .padding(horizontal = 8.dp, vertical = 10.dp)) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Text(item.optString("name"), Modifier.weight(1f),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    style = MaterialTheme.typography.titleSmall)
                                 if (!scanning && select != null) {
                                     val markColor = MaterialTheme.colorScheme.primary
                                     Box(Modifier.size(24.dp).semantics {
@@ -1130,6 +1129,10 @@ private fun FilesCleanPage(page: JSONObject, items: List<JSONObject>,
                                         }
                                     }
                                 }
+                            }
+                            item.optJSONArray("sampleNames")?.let { names ->
+                                for (i in 0 until names.length()) Text(names.getString(i),
+                                    style = MaterialTheme.typography.bodySmall)
                             }
                             item.optString("subtitle").takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall,

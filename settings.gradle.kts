@@ -21,6 +21,7 @@ include(":module-sdk")
 include(":reference-sort-alphabetical")
 include(":addon-most-used")
 include(":addon-files")
+include(":module-web-ui", ":addon-home-assistant", ":addon-proxmox")
 include(":module-files-ui")
 
 // Independent APK used only by catalog visibility instrumentation tests.

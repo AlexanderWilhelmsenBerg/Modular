@@ -44,6 +44,7 @@ jobs:
           :app:testDebugUnitTest
           :reference-sort-alphabetical:testDebugUnitTest
           :addon-files:testDebugUnitTest
+          :module-web-ui:testDebugUnitTest
           :module-files-ui:testDebugUnitTest
           :addon-most-used:testDebugUnitTest
           --stacktrace
@@ -57,6 +58,9 @@ jobs:
           :app:lintDebug
           :reference-sort-alphabetical:lintDebug
           :addon-files:lintDebug
+          :addon-home-assistant:lintDebug
+          :addon-proxmox:lintDebug
+          :module-web-ui:lintDebug
           :module-files-ui:lintDebug
           :addon-most-used:lintDebug
           --stacktrace
@@ -67,6 +71,8 @@ jobs:
           :app:assembleDebug
           :app:assembleDebugAndroidTest
           :reference-sort-alphabetical:assembleDebug
+          :addon-home-assistant:assembleDebug
+          :addon-proxmox:assembleDebug
           :addon-files:assembleDebug
           :addon-files:assembleDebugAndroidTest
           :addon-most-used:assembleDebug

@@ -207,6 +207,7 @@ fun ModuleWorkspacePage(
     unavailableReason: String? = null,
     expectedSignerKey: String? = null,
     placementComponent: String? = module?.component?.flattenToString(),
+    placementInstance: String = "workspace-surface",
     active: Boolean,
     onInteractionActiveChange: (Boolean) -> Unit,
     onNavigate: (String) -> Unit,
@@ -297,7 +298,7 @@ fun ModuleWorkspacePage(
 
     val routeIdentity = route?.let { Triple(it.component, it.sessionId, it.capability) }
     LaunchedEffect(canShow, routeIdentity, surfaceView, surfaceGeneration,
-        retryGeneration, expectedSignerKey, placementComponent) {
+        retryGeneration, expectedSignerKey, placementComponent, placementInstance) {
         withContext(SurfaceUiThread.dispatcher) {
         val now = SurfaceEffectSnapshot(canShow, active, resumed, route, module?.status,
             surfaceView, surfaceGeneration, retryGeneration, expectedSignerKey, placementComponent)
@@ -395,7 +396,7 @@ fun ModuleWorkspacePage(
         var pendingPackage: SurfaceControlViewHost.SurfacePackage? = null
         try {
             val binder = SurfaceBinderCalls.run(10_000) {
-                runBlocking { router.acquireModuleBinder(selectedRoute, "workspace-surface", "{}").getOrThrow() }
+                runBlocking { router.acquireModuleBinder(selectedRoute, placementInstance, "{}").getOrThrow() }
             }
             Log.d(SURFACE_LOG, "capability acquired")
             val remote = IWorkspaceSurfaceCapability.Stub.asInterface(binder)
@@ -490,6 +491,17 @@ fun ModuleWorkspacePage(
         }
     }
 
+    val connecting = active && module != null && unavailableReason == null && Build.VERSION.SDK_INT >= surfaceMinSdk &&
+        module.status in setOf(ModuleConnectionStatus.DISCOVERED, ModuleConnectionStatus.CONNECTING,
+            ModuleConnectionStatus.DISCONNECTED)
+    var showConnectionStatus by remember(placementComponent, placementInstance) { mutableStateOf(false) }
+    LaunchedEffect(active, lease, connecting, loading) {
+        showConnectionStatus = false
+        if (active && lease == null && (connecting || loading)) {
+            delay(350)
+            showConnectionStatus = true
+        }
+    }
     if (Build.VERSION.SDK_INT >= 30 && canShow) {
         Box(viewportModifier) {
         AndroidView(factory = { ctx ->
@@ -522,7 +534,7 @@ fun ModuleWorkspacePage(
         }, modifier = Modifier.fillMaxSize(), onRelease = { view ->
             if (surfaceView === view) { surfaceView = null; width = 0; height = 0 }
         })
-        if (lease == null && (loading || message != null)) {
+        if (lease == null && (showConnectionStatus || message != null)) {
             Column(Modifier.align(Alignment.Center).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (loading) CircularProgressIndicator()
@@ -534,6 +546,8 @@ fun ModuleWorkspacePage(
             }
         }
         }
+    } else if (connecting && !showConnectionStatus || !active) {
+        Box(viewportModifier)
     } else {
         Column(viewportModifier.padding(24.dp), verticalArrangement = Arrangement.Center) {
             Text(module?.label ?: "Add-on screen unavailable", style = MaterialTheme.typography.titleLarge)

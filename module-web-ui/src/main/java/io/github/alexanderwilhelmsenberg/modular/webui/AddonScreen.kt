@@ -96,13 +96,20 @@ class AddonScreen(val context: Context, val dark: Boolean, background: Int? = nu
             parent.addView(this, LinearLayout.LayoutParams(-1, -2))
         }
 
-    fun bar(parent: LinearLayout, title: String): LinearLayout = LinearLayout(context).apply {
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(16), 0, dp(10), 0)
-        minimumHeight = dp(56)
-        addView(text(title, 20f), LinearLayout.LayoutParams(0, -2, 1f))
-        parent.addView(this, LinearLayout.LayoutParams(-1, -2))
-    }
+    fun bar(parent: LinearLayout, title: String, workspace: WorkspaceSurfaceScope? = null): LinearLayout =
+        LinearLayout(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), 0, dp(10), 0)
+            minimumHeight = dp(56)
+            workspace?.let { scope ->
+                addView(button("←") { scope.requestNavigation("home") }.apply {
+                    contentDescription = "Back to Modular Home"
+                    textSize = 20f
+                }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(8) })
+            }
+            addView(text(title, 20f), LinearLayout.LayoutParams(0, -2, 1f))
+            parent.addView(this, LinearLayout.LayoutParams(-1, -2))
+        }
 
     fun button(label: String, primary: Boolean = false, click: (() -> Unit)? = null) = Button(context).apply {
         text = label

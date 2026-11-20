@@ -24,7 +24,7 @@ class DashboardService : WebWorkspaceService() {
         val ui = AddonScreen(context, dark, scope.hostState.value.colors["background"])
         val catalog = DashboardCatalog(this)
         val root = ui.column(workspace = scope)
-        val bar = ui.bar(root, pageTitle)
+        val bar = ui.bar(root, pageTitle, scope)
         val chooser = ScrollView(context)
         val choices = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         chooser.addView(choices)

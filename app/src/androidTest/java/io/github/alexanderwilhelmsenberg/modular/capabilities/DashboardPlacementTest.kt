@@ -117,7 +117,9 @@ class DashboardPlacementTest {
         swipe(false)
         waitPage("module:${pages[1].placementId}")
         open("Garage")
-        device.pressHome()
+        val home = By.desc("Back to Modular Home")
+        rule.waitUntil(10_000) { device.hasObject(home) }
+        requireNotNull(device.findObject(home)).click()
         waitPage("home")
         swipe(true)
         waitPage("module:${pages[0].placementId}")

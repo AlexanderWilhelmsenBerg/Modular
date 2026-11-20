@@ -71,7 +71,7 @@ class DashboardPlacementTest {
         fun swipe(right: Boolean) {
             val w = device.displayWidth
             val y = device.displayHeight * 2 / 5
-            val edge = w / 8
+            val edge = w / 5
             device.swipe(if (right) edge else w - edge, y, if (right) w - edge else edge, y, 38)
             rule.waitForIdle()
         }

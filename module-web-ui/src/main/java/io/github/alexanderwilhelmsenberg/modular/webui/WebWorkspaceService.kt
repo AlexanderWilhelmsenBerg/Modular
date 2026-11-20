@@ -53,7 +53,7 @@ abstract class WebWorkspaceService : BaseModuleService() {
         val prefs = getSharedPreferences("workspace-addresses", Context.MODE_PRIVATE)
         fun dp(size: Int) = (size * context.resources.displayMetrics.density + .5f).toInt()
         val ui = AddonScreen(context, scope.hostState.value.theme != "light", scope.hostState.value.colors["background"])
-        val root = ui.column(workspace = true)
+        val root = ui.column(workspace = scope)
         val header = ui.bar(root, pageTitle)
         val change = ui.button("").apply {
             text = if (managedAddress) "Connection" else if (workspaceAsset == null) "Dashboard" else "Server"

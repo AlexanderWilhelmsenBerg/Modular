@@ -14,6 +14,8 @@ import android.view.WindowInsets
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import io.github.alexanderwilhelmsenberg.modular.modulesdk.WorkspaceSurfaceScope
+import kotlin.math.abs
 
 /** Shared control treatment for the module-owned setup and status screens. */
 class AddonScreen(val context: Context, val dark: Boolean, background: Int? = null) {
@@ -25,24 +27,51 @@ class AddonScreen(val context: Context, val dark: Boolean, background: Int? = nu
 
     fun dp(size: Int) = (size * context.resources.displayMetrics.density + .5f).toInt()
 
-    fun column(workspace: Boolean = false): LinearLayout {
-        val layout = if (workspace) object : LinearLayout(context) {
-            private var workspaceEdge = false
+    fun column(workspace: WorkspaceSurfaceScope? = null): LinearLayout {
+        val layout = if (workspace == null) LinearLayout(context) else object : LinearLayout(context) {
+            private var edge = false
+            private var startX = 0f
+            private var startY = 0f
+            private var navigating = false
 
             override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                    val edge = minOf(width * .22f, dp(72).toFloat())
-                    workspaceEdge = event.x <= edge || event.x >= width - edge
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        val border = minOf(width * .23f, dp(76).toFloat())
+                        startX = event.x
+                        startY = event.y
+                        edge = startX <= border || startX >= width - border
+                        navigating = false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = abs(event.x - startX)
+                        val dy = abs(event.y - startY)
+                        if (edge && dy > dp(16) && dy > dx) edge = false
+                        if (edge && !navigating && dx >= dp(56) && dx > dy * 1.5f) {
+                            // WebView keeps control of ordinary taps and scrolling. Cancel its
+                            // stream only when this side gesture becomes a workspace swipe.
+                            val cancel = MotionEvent.obtain(event).apply { action = MotionEvent.ACTION_CANCEL }
+                            super.dispatchTouchEvent(cancel)
+                            cancel.recycle()
+                            navigating = true
+                        }
+                    }
+                    MotionEvent.ACTION_POINTER_DOWN -> edge = false
+                    MotionEvent.ACTION_UP -> if (navigating) {
+                        if (edge && abs(event.x - startX) >= dp(56)) {
+                            workspace.requestNavigation(if (event.x > startX) "previous" else "next")
+                        }
+                        navigating = false
+                        return true
+                    }
+                    MotionEvent.ACTION_CANCEL -> if (navigating) {
+                        navigating = false
+                        return true
+                    }
                 }
-                return super.dispatchTouchEvent(event)
+                return navigating || super.dispatchTouchEvent(event)
             }
-
-            override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
-                // WebView claims its own touch streams. Leave side swipes available to the
-                // existing SDK gesture router and preserve the dashboard's center controls.
-                super.requestDisallowInterceptTouchEvent(disallowIntercept && !workspaceEdge)
-            }
-        } else LinearLayout(context)
+        }
         return layout.apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(paper)

@@ -23,7 +23,7 @@ class DashboardService : WebWorkspaceService() {
             android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar)
         val ui = AddonScreen(context, dark, scope.hostState.value.colors["background"])
         val catalog = DashboardCatalog(this)
-        val root = ui.column(workspace = true)
+        val root = ui.column(workspace = scope)
         val bar = ui.bar(root, pageTitle)
         val chooser = ScrollView(context)
         val choices = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }

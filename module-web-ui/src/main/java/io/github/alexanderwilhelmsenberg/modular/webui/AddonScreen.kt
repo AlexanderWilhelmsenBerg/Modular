@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.Button
@@ -24,9 +25,28 @@ class AddonScreen(val context: Context, val dark: Boolean, background: Int? = nu
 
     fun dp(size: Int) = (size * context.resources.displayMetrics.density + .5f).toInt()
 
-    fun column() = LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        setBackgroundColor(paper)
+    fun column(workspace: Boolean = false): LinearLayout {
+        val layout = if (workspace) object : LinearLayout(context) {
+            private var workspaceEdge = false
+
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    val edge = minOf(width * .22f, dp(72).toFloat())
+                    workspaceEdge = event.x <= edge || event.x >= width - edge
+                }
+                return super.dispatchTouchEvent(event)
+            }
+
+            override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
+                // WebView claims its own touch streams. Leave side swipes available to the
+                // existing SDK gesture router and preserve the dashboard's center controls.
+                super.requestDisallowInterceptTouchEvent(disallowIntercept && !workspaceEdge)
+            }
+        } else LinearLayout(context)
+        return layout.apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(paper)
+        }
     }
 
     fun text(value: String, size: Float = 15f, secondary: Boolean = false) = TextView(context).apply {

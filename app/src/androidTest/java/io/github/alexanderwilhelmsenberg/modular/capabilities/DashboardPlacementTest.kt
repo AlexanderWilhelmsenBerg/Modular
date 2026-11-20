@@ -71,7 +71,8 @@ class DashboardPlacementTest {
         fun swipe(right: Boolean) {
             val w = device.displayWidth
             val y = device.displayHeight * 2 / 5
-            device.swipe(if (right) w / 5 else w * 4 / 5, y, if (right) w * 4 / 5 else w / 5, y, 38)
+            val edge = w / 8
+            device.swipe(if (right) edge else w - edge, y, if (right) w - edge else edge, y, 38)
             rule.waitForIdle()
         }
         fun text(value: String) = By.text(value)

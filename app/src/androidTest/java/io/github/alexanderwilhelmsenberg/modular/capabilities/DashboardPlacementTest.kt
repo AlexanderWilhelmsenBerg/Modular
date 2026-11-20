@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.test.uiautomator.Until
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -25,7 +26,7 @@ class DashboardPlacementTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
     private val device by lazy { UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()) }
 
-    @Test fun twoDashboardUrlsRemainIndependentAcrossHomeSwipes() {
+    @Test fun accountHandoffAndIndependentDashboardsSurviveHomeSwipes() {
         assumeTrue(Build.VERSION.SDK_INT >= 33 && InstrumentationRegistry.getArguments().getString("dashboardFixture") == "true")
         try { verifyPlacements() } catch (failure: Throwable) {
             val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -73,25 +74,49 @@ class DashboardPlacementTest {
             device.swipe(if (right) w / 5 else w * 4 / 5, y, if (right) w * 4 / 5 else w / 5, y, 38)
             rule.waitForIdle()
         }
+        fun text(value: String) = By.text(value)
+        fun tap(value: String) {
+            rule.waitUntil(25_000) { device.hasObject(text(value)) }
+            requireNotNull(device.findObject(text(value))).click()
+        }
+        fun waitDashboard(name: String) {
+            rule.waitUntil(25_000) {
+                device.hasObject(text("Dashboard $name")) || device.hasObject(By.desc("Dashboard $name"))
+            }
+        }
+        fun signIn(first: Boolean) {
+            tap(if (first) "Open Home Assistant" else "Sign in")
+            val packageName = "io.github.alexanderwilhelmsenberg.modular.addon.homeassistant.debug"
+            check(device.wait(Until.hasObject(By.pkg(packageName).depth(0)), 15_000))
+            if (first) {
+                val field = requireNotNull(device.wait(
+                    Until.findObject(By.desc("Server address")), 10_000))
+                field.text = "http://127.0.0.1:8187"
+                device.findObject(text("Continue")).click()
+            }
+            check(device.wait(Until.hasObject(text("Sign in to fixture")), 20_000))
+            device.findObject(text("Sign in to fixture")).click()
+            check(device.wait(Until.hasObject(text("2 dashboards ready · choose one on each Home screen")), 25_000))
+            device.pressBack()
+        }
         fun open(name: String) {
-            val open = By.text(java.util.regex.Pattern.compile("open dashboard", java.util.regex.Pattern.CASE_INSENSITIVE))
-            // Pump the Compose host while the independent service binds and its surface attaches.
-            rule.waitUntil(20_000) { device.hasObject(open) }
-            val button = requireNotNull(device.findObject(open))
-            val input = device.findObjects(By.clazz("android.widget.EditText"))
-                .first { it.visibleBounds.centerY() < button.visibleBounds.centerY() }
-            input.text = "http://127.0.0.1:8187/$name.html"
-            button.click()
-            rule.waitUntil(25_000) { device.hasObject(By.text("Dashboard $name")) || device.hasObject(By.desc("Dashboard $name")) }
+            tap(name)
+            waitDashboard(name)
         }
         waitPage("home")
-        swipe(true); waitPage("module:${pages[0].placementId}"); open("Kitchen")
+        swipe(true); waitPage("module:${pages[0].placementId}")
+        signIn(first = true)
+        open("Kitchen")
         swipe(false)
         waitPage("home")
         swipe(false); waitPage("module:${pages[1].placementId}"); open("Garage")
         swipe(true)
         waitPage("home")
         swipe(true)
-        rule.waitUntil(25_000) { device.hasObject(By.text("Dashboard Kitchen")) || device.hasObject(By.desc("Dashboard Kitchen")) }
+        waitPage("module:${pages[0].placementId}")
+        waitDashboard("Kitchen")
+        tap("Expire fixture session")
+        signIn(first = false)
+        waitDashboard("Kitchen")
     }
 }

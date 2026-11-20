@@ -12,8 +12,36 @@ const tasks = new Map();
 let readSerial = 0;
 let consoleSession = null;
 let confirming = false;
+const native = window.ModularProxmox;
+const tokenMode = native?.hasToken() === true;
+const callbacks = new Map();
+let requestId = 0;
+let pendingShell = null;
+let openingShell = false;
+window.modularResult = (id, status, body) => callbacks.get(id)?.(status, body);
 
-async function api(path, data, signal) {
+function nativeResult(send, timeout = 25000) {
+    return new Promise((resolve, reject) => {
+        const id = String(++requestId);
+        const timer = setTimeout(() => {
+            callbacks.delete(id);
+            reject(Error('Request timed out.'));
+        }, timeout);
+        callbacks.set(id, (status, body) => {
+            clearTimeout(timer);
+            callbacks.delete(id);
+            if (status >= 200 && status < 300) resolve(body);
+            else reject(Object.assign(Error(body), {status}));
+        });
+        send(id);
+    });
+}
+
+async function api(path, data, signal, consoleRequest = false) {
+    if (tokenMode && !consoleRequest && path !== '/access/ticket') {
+        const body = await nativeResult(id => native.request(id, data ? 'POST' : 'GET', path));
+        return JSON.parse(body).data;
+    }
     const options = { credentials: 'same-origin', redirect: 'error', cache: 'no-store', signal };
     if (data) {
         options.method = 'POST';
@@ -29,15 +57,23 @@ async function api(path, data, signal) {
     return (await response.json()).data;
 }
 
-function showLogin(message) {
+function setLogoutVisibility() { byId('logout').hidden = tokenMode && !csrf; }
+
+function showLogin(message, forShell = false) {
     ++readSerial;
     endShell();
-    csrf = ''; challenge = ''; tasks.clear(); resources = [];
-    openNodes.clear(); openGuests.clear();
+    csrf = ''; challenge = '';
+    if (!forShell) {
+        tasks.clear(); resources = [];
+        openNodes.clear(); openGuests.clear();
+        byId('resources').replaceChildren();
+    }
+    byId('loginTitle').textContent = forShell ? 'Sign in for shell access' : 'Sign in to Proxmox';
+    byId('cancelLogin').hidden = !forShell;
     localStorage.removeItem('modular.csrf');
     byId('login').hidden = false;
     byId('cluster').hidden = true;
-    byId('resources').replaceChildren();
+    setLogoutVisibility();
     byId('account').value = user;
     byId('account').readOnly = false;
     byId('password').required = true;
@@ -48,7 +84,7 @@ function showLogin(message) {
 
 byId('login').onsubmit = async event => {
     event.preventDefault();
-    const button = event.target.querySelector('button');
+    const button = byId('signIn');
     button.disabled = true;
     try {
         const name = byId('account').value.trim();
@@ -66,23 +102,50 @@ byId('login').onsubmit = async event => {
         }
         if (!ticket.ticket || !ticket.CSRFPreventionToken) throw Error('No session ticket returned.');
         csrf = ticket.CSRFPreventionToken; user = ticket.username;
-        document.cookie = 'PVEAuthCookie=' + encode(ticket.ticket) + '; Path=/; Secure; SameSite=Strict';
+        setLogoutVisibility();
+        document.cookie = 'PVEAuthCookie=' + encode(ticket.ticket) + '; Max-Age=7200; Path=/; Secure; SameSite=Strict';
         localStorage.setItem('modular.csrf', csrf); localStorage.setItem('modular.account', user);
         byId('otp').value = ''; challenge = ''; byId('login').hidden = true;
-        await refresh();
+        if (pendingShell) {
+            const item = pendingShell;
+            pendingShell = null;
+            await startShell(item);
+        } else await refresh();
     } catch (error) { statusLine('Sign-in failed. ' + error.message); }
     finally { button.disabled = false; }
 };
 byId('logout').onclick = () => {
     document.cookie = 'PVEAuthCookie=; Max-Age=0; Path=/; Secure; SameSite=Strict';
-    showLogin('');
+    pendingShell = null;
+    if (tokenMode) {
+        csrf = ''; challenge = '';
+        localStorage.removeItem('modular.csrf');
+        setLogoutVisibility();
+        byId('login').hidden = true;
+        statusLine('Console session signed out. API token is still connected.');
+        refresh();
+    } else showLogin('');
+};
+byId('cancelLogin').onclick = () => {
+    pendingShell = null;
+    byId('login').hidden = true;
+    statusLine('');
+    refresh();
 };
 
-const metrics = item => {
-    const cpu = item.cpu == null ? '—' : (item.cpu * 100).toFixed(1) + '%';
-    const memory = bytes => bytes == null ? '—' : (bytes / 1073741824).toFixed(1) + ' GiB';
-    return (item.status || 'unknown') + ' · CPU ' + cpu + ' · RAM ' + memory(item.mem) + ' / ' + memory(item.maxmem);
-};
+function metric(label, used, total, text) {
+    const row = element('span', null, 'metric');
+    row.append(element('span', label), element('b', text));
+    if (Number.isFinite(used) && Number.isFinite(total) && total > 0) {
+        const meter = element('meter');
+        meter.max = total;
+        meter.value = Math.max(0, Math.min(used, total));
+        meter.setAttribute('aria-label', label);
+        row.append(meter);
+    }
+    return row;
+}
+const gib = bytes => bytes == null ? '—' : (bytes / 1073741824).toFixed(1);
 function element(tag, text, className) {
     const el = document.createElement(tag);
     if (text != null) el.textContent = text;
@@ -101,7 +164,14 @@ function resourceRow(item, title, opened, id) {
     });
     button.className = 'row';
     button.setAttribute('aria-expanded', String(opened.has(id)));
-    button.append(element('strong', (opened.has(id) ? '▾  ' : '▸  ') + title), element('small', metrics(item)));
+    const heading = element('span', null, 'resource-heading');
+    const status = element('small', item.status || 'Unknown', 'resource-status');
+    status.dataset.active = String(['online', 'running'].includes(item.status));
+    heading.append(element('strong', (opened.has(id) ? '▾  ' : '▸  ') + title), status);
+    const metrics = element('span', null, 'metrics');
+    metrics.append(metric('CPU', item.cpu, 1, item.cpu == null ? '—' : (item.cpu * 100).toFixed(1) + '%'),
+        metric('RAM', item.mem, item.maxmem, gib(item.mem) + ' / ' + gib(item.maxmem) + ' GiB'));
+    button.append(heading, metrics);
     return button;
 }
 function base(item) {
@@ -145,15 +215,20 @@ async function refresh(manual = false) {
     try {
         if (manual) statusLine('Updating nodes…');
         const items = await api('/cluster/resources');
-        if (serial !== readSerial) return;
+        if (serial !== readSerial || pendingShell) return;
         resources = items;
         byId('login').hidden = true; byId('cluster').hidden = !!consoleSession;
         if (!confirming || manual) draw();
         if (manual) statusLine('Updated.');
     } catch (error) {
         if (serial !== readSerial) return;
-        if (error.status === 401) showLogin('Sign in to Proxmox VE.');
-        else { byId('cluster').hidden = false; statusLine('Could not load nodes. ' + error.message); }
+        if (error.status === 401 && !tokenMode) showLogin('Sign in to Proxmox VE.');
+        else {
+            byId('cluster').hidden = false;
+            statusLine(tokenMode && [401, 403].includes(error.status)
+                ? 'Proxmox rejected the API token. Check it and its permissions in Connection.'
+                : 'Could not load nodes. ' + error.message);
+        }
     }
 }
 byId('refresh').onclick = () => refresh(true);
@@ -211,7 +286,18 @@ function sendInput(data) {
         s.socket.send('0:' + new TextEncoder().encode(data).length + ':' + data);
 }
 async function startShell(item) {
-    endShell();
+    if (openingShell || consoleSession) return;
+    if (!csrf && tokenMode) {
+        pendingShell = item;
+        showLogin('Use a Proxmox account with console access.', true);
+        return;
+    }
+    if (item.type === 'node' && native) {
+        openingShell = true;
+        try { await nativeResult(id => native.unlockNode(id, item.node), 120000); }
+        catch (error) { statusLine(error.message); return; }
+        finally { openingShell = false; }
+    }
     const s = { ready:false, abort:new AbortController() };
     consoleSession = s;
     if (!history.state?.shell) history.pushState({shell:true}, '');
@@ -224,7 +310,7 @@ async function startShell(item) {
         const term = s.term = new Terminal({scrollback:4000, fontSize:13, cursorBlink:true});
         term.open(byId('terminal'));
         term.onData(sendInput);
-        const proxy = await api(base(item) + '/termproxy', {}, s.abort.signal);
+        const proxy = await api(base(item) + '/termproxy', {}, s.abort.signal, true);
         if (s !== consoleSession) return;
         const ws = s.socket = new WebSocket('wss://' + location.host + '/api2/json' + base(item) +
             '/vncwebsocket?' + new URLSearchParams({port:proxy.port, vncticket:proxy.ticket}), 'binary');
@@ -255,7 +341,14 @@ async function startShell(item) {
             statusLine('Shell closed. You can still copy its output.');
         };
         ws.onerror = () => { if (s === consoleSession) statusLine('Console connection failed.'); };
-    } catch (error) { if (s === consoleSession) statusLine('Could not open shell. ' + error.message); }
+    } catch (error) {
+        if (s !== consoleSession) return;
+        if (error.status === 401) {
+            endShell();
+            pendingShell = item;
+            showLogin('The console session expired. Sign in again.', true);
+        } else statusLine('Could not open shell. ' + error.message);
+    }
 }
 byId('command').onsubmit = event => {
     event.preventDefault();
@@ -288,7 +381,10 @@ function leaveShell() { endShell(); byId('cluster').hidden = false; statusLine('
 window.addEventListener('popstate', () => { if (consoleSession) leaveShell(); });
 byId('closeShell').onclick = () => { if (history.state?.shell) history.back(); else leaveShell(); };
 setInterval(() => {
-    if (!document.hidden && csrf && !consoleSession && !confirming && tasks.size === 0) refresh();
+    if (!document.hidden && (tokenMode || csrf) && !pendingShell && !openingShell && !consoleSession &&
+        !confirming && tasks.size === 0) refresh();
 }, 15000);
 window.addEventListener('pagehide', endShell);
-if (csrf) refresh(); else showLogin('');
+byId('logout').textContent = tokenMode ? 'Sign out shell' : 'Sign out';
+setLogoutVisibility();
+if (tokenMode || csrf) refresh(); else showLogin('');

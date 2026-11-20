@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' wss:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' wss:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="cluster.css">
 <link rel="stylesheet" href="/xtermjs/xterm.css">
 <title>Proxmox</title>
@@ -11,14 +11,14 @@
 <body>
 <div id="status" role="status" aria-live="polite"></div>
 <form id="login" hidden>
-<h1>Sign in</h1>
+<h1 id="loginTitle">Sign in to Proxmox</h1>
 <label>Account with realm<input id="account" placeholder="user@pam" autocomplete="username" required></label>
 <label id="passwordLabel">Password<input id="password" type="password" autocomplete="current-password" required></label>
 <label id="otpLabel" hidden>Authenticator code<input id="otp" inputmode="numeric" autocomplete="one-time-code"></label>
-<button>Sign in</button>
+<div class="actions"><button id="signIn">Sign in</button><button id="cancelLogin" type="button" hidden>Cancel</button></div>
 </form>
 <section id="cluster" hidden>
-<header><h1>Nodes</h1><button id="refresh">Refresh</button><button id="logout">Sign out</button></header>
+<header><h1>Nodes</h1><button id="refresh" aria-label="Refresh nodes">Refresh</button><button id="logout">Sign out</button></header>
 <div id="resources"></div>
 </section>
 <section id="shell" hidden>

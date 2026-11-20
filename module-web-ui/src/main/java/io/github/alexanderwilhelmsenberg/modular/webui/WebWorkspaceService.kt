@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.IBinder
 import android.view.ContextThemeWrapper
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebResourceError
@@ -13,7 +12,6 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -32,6 +30,11 @@ abstract class WebWorkspaceService : BaseModuleService() {
     protected open val allowLocalHttp = false
     protected open val workspaceAsset: String? = null
 
+    protected open fun defaultAddress(): String? = null
+    protected open fun manageAddress(scope: WorkspaceSurfaceScope): Boolean = false
+    protected open fun configureBrowser(web: WebView, address: PageAddress, scope: WorkspaceSurfaceScope): WebViewClient? = null
+    protected open val managedAddress: Boolean = false
+
     override val descriptorJson by lazy {
         resources.openRawResource(descriptorResource).bufferedReader().use { it.readText() }
     }
@@ -44,23 +47,16 @@ abstract class WebWorkspaceService : BaseModuleService() {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun page(scope: WorkspaceSurfaceScope, placement: String): View {
+    protected open fun page(scope: WorkspaceSurfaceScope, placement: String): View {
         val context = ContextThemeWrapper(scope.context, if (scope.hostState.value.theme == "light")
             android.R.style.Theme_Material_Light_NoActionBar else android.R.style.Theme_Material_NoActionBar)
         val prefs = getSharedPreferences("workspace-addresses", Context.MODE_PRIVATE)
         fun dp(size: Int) = (size * context.resources.displayMetrics.density + .5f).toInt()
-        val root = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(scope.hostState.value.colors["background"] ?: android.graphics.Color.DKGRAY)
-        }
-        val header = LinearLayout(context).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), 0, dp(4), 0)
-        }
-        val title = TextView(context).apply { text = pageTitle; textSize = 17f }
-        header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
-        val change = Button(context, null, android.R.attr.borderlessButtonStyle).apply {
-            text = if (workspaceAsset == null) "Dashboard" else "Server"
+        val ui = AddonScreen(context, scope.hostState.value.theme != "light", scope.hostState.value.colors["background"])
+        val root = ui.column()
+        val header = ui.bar(root, pageTitle)
+        val change = ui.button("").apply {
+            text = if (managedAddress) "Connection" else if (workspaceAsset == null) "Dashboard" else "Server"
             contentDescription = "Change ${addressLabel.lowercase()}"
         }
         header.addView(change)
@@ -73,14 +69,19 @@ abstract class WebWorkspaceService : BaseModuleService() {
             contentDescription = addressLabel
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine(true)
-            setText(prefs.getString(placement, ""))
+            setText(defaultAddress() ?: prefs.getString(placement, ""))
         }
-        panel.addView(TextView(context).apply { text = addressLabel })
-        panel.addView(addressInput)
-        val open = Button(context).apply { text = if (workspaceAsset == null) "Open dashboard" else "Connect" }
+        if (managedAddress) {
+            panel.addView(ui.text("Server connection", 24f))
+            panel.addView(ui.text("Set the server address and save an API token in Proxmox.", secondary = true))
+        } else {
+            panel.addView(TextView(context).apply { text = addressLabel })
+            panel.addView(addressInput)
+        }
+        val open = ui.button(if (managedAddress) "Open Proxmox" else if (workspaceAsset == null) "Open dashboard" else "Connect", primary = true)
         panel.addView(open)
         val status = TextView(context).apply { visibility = View.GONE; setPadding(dp(12), dp(6), dp(12), dp(6)) }
-        root.addView(header); root.addView(panel); root.addView(status)
+        root.addView(panel); root.addView(status)
         var browser: WebView? = null
         fun disposeBrowser() {
             browser?.let { view ->
@@ -105,9 +106,14 @@ abstract class WebWorkspaceService : BaseModuleService() {
                 allowContentAccess = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             }
+            val extension = configureBrowser(web, address, scope)
             web.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                    val allowed = runCatching { address.sameOrigin(URI(request.url.toString())) }.getOrDefault(false)
+                    val allowed = runCatching {
+                        val uri = URI(request.url.toString())
+                        address.sameOrigin(uri) && (bundle == null || !request.isForMainFrame ||
+                            uri.rawPath == "/.modular/$bundle")
+                    }.getOrDefault(false)
                     if (!allowed && request.isForMainFrame) {
                         status.text = "This link opens outside the configured server."
                         status.visibility = View.VISIBLE
@@ -116,6 +122,7 @@ abstract class WebWorkspaceService : BaseModuleService() {
                 }
 
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                    extension?.shouldInterceptRequest(view, request)?.let { return it }
                     val uri = runCatching { URI(request.url.toString()) }.getOrNull() ?: return null
                     if (bundle != null && address.sameOrigin(uri) && uri.rawPath.startsWith("/.modular/")) {
                         val file = uri.rawPath.removePrefix("/.modular/")
@@ -128,7 +135,8 @@ abstract class WebWorkspaceService : BaseModuleService() {
                             return WebResourceResponse(type, "utf-8", assets.open(file))
                         }
                     }
-                    if ((request.isForMainFrame || uri.scheme == "http") && !address.sameOrigin(uri))
+                    if ((bundle != null || request.isForMainFrame || uri.scheme == "http") && !address.sameOrigin(uri) ||
+                        (bundle != null && request.isForMainFrame))
                         return WebResourceResponse("text/plain", "utf-8", 403, "Forbidden", emptyMap(), null)
                     return null
                 }
@@ -155,6 +163,7 @@ abstract class WebWorkspaceService : BaseModuleService() {
             web.loadUrl(url)
         }
         open.setOnClickListener {
+            if (manageAddress(scope)) return@setOnClickListener
             val address = PageAddress.parse(addressInput.text.toString(), allowLocalHttp)
             if (address == null) {
                 addressInput.error = if (allowLocalHttp) "Enter an HTTPS URL or a local HTTP dashboard URL."
@@ -168,6 +177,7 @@ abstract class WebWorkspaceService : BaseModuleService() {
             }
         }
         change.setOnClickListener {
+            if (manageAddress(scope)) return@setOnClickListener
             panel.visibility = if (panel.visibility == View.VISIBLE && browser != null) View.GONE else View.VISIBLE
         }
         scope.updateState(canGoBack = false, exclusiveGestures = false)

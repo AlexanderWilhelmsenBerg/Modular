@@ -2,7 +2,7 @@ package io.github.alexanderwilhelmsenberg.modular.webui
 
 import java.net.URI
 
-internal data class PageAddress(val uri: URI) {
+data class PageAddress(val uri: URI) {
     val origin: String get() = "${uri.scheme}://${uri.rawAuthority}"
 
     fun sameOrigin(other: URI): Boolean =

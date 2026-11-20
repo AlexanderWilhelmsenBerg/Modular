@@ -34,8 +34,37 @@ jobs:
       - name: Serve two local dashboards
         run: |
           mkdir -p "$RUNNER_TEMP/dashboards"
-          for page in Kitchen Garage; do
-            echo "<html><body><h1>Dashboard $page</h1></body></html>" > "$RUNNER_TEMP/dashboards/$page.html"
+          cat > "$RUNNER_TEMP/dashboards/index.html" <<'HTML'
+          <!doctype html><html><body><script>
+          const session = 'fixture-home-assistant-session';
+          if (location.pathname.startsWith('/auth/')) {
+            const signIn = document.createElement('button');
+            signIn.textContent = 'Sign in to fixture';
+            signIn.onclick = () => { localStorage.setItem(session, '1'); location.replace('/'); };
+            document.body.append(signIn);
+          } else if (!localStorage.getItem(session)) {
+            location.replace('/auth/authorize/');
+          } else {
+            const root = document.createElement('home-assistant');
+            root.hass = {user:{is_admin:false}, connected:true, panels:{
+              kitchen:{component_name:'lovelace', title:'Kitchen', url_path:'kitchen'},
+              garage:{component_name:'lovelace', title:'Garage', url_path:'garage'},
+              admin:{component_name:'lovelace', title:'Restricted', url_path:'restricted', require_admin:true},
+            }};
+            const name = location.pathname.startsWith('/garage') ? 'Garage' : 'Kitchen';
+            const title = document.createElement('h1');
+            title.textContent = 'Dashboard ' + name;
+            const expire = document.createElement('button');
+            expire.textContent = 'Expire fixture session';
+            expire.onclick = () => { localStorage.removeItem(session); location.replace('/auth/authorize/'); };
+            root.append(title, expire);
+            document.body.append(root);
+          }
+          </script></body></html>
+          HTML
+          for page in kitchen garage auth/authorize; do
+            mkdir -p "$RUNNER_TEMP/dashboards/$page"
+            cp "$RUNNER_TEMP/dashboards/index.html" "$RUNNER_TEMP/dashboards/$page/index.html"
           done
           python3 -m http.server 8187 --bind 127.0.0.1 --directory "$RUNNER_TEMP/dashboards" > "$RUNNER_TEMP/dashboard-server.log" 2>&1 &
       - uses: reactivecircus/android-emulator-runner@v2

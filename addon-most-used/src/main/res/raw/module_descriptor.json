@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "moduleId": "modular.addon.sort.mostused",
-  "moduleVersion": "0.2.0",
+  "moduleVersion": "0.2.1",
   "displayName": "Most Used",
   "description": "Shows saved pins and recent foreground-time suggestions in a starred app drawer section.",
   "coreProtocol": { "min": 4, "max": 4 },

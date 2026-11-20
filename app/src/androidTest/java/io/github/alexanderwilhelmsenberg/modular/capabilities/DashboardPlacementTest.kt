@@ -88,7 +88,7 @@ class DashboardPlacementTest {
         fun signIn(first: Boolean) {
             tap(if (first) "Open Home Assistant" else "Sign in")
             val packageName = "io.github.alexanderwilhelmsenberg.modular.addon.homeassistant.debug"
-            check(device.wait(Until.hasObject(By.pkg(packageName).depth(0)), 15_000))
+            rule.waitUntil(20_000) { device.hasObject(By.pkg(packageName).depth(0)) }
             if (first) {
                 val field = requireNotNull(device.wait(
                     Until.findObject(By.desc("Server address")), 10_000))

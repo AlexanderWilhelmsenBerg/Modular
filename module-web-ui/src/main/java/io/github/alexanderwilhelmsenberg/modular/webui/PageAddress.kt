@@ -24,7 +24,10 @@ internal data class PageAddress(val uri: URI) {
                 val prefix = host.substring(1).substringBefore(':').toIntOrNull(16) ?: return false
                 return prefix in 0xfc00..0xfdff || prefix in 0xfe80..0xfebf
             }
-            val bytes = host.split('.').map { it.toIntOrNull()?.takeIf { value -> value in 0..255 } }
+            val parts = host.split('.')
+            // WebView interprets zero-prefixed IPv4 components as octal.
+            if (parts.any { it.length > 1 && it.startsWith('0') }) return false
+            val bytes = parts.map { it.toIntOrNull()?.takeIf { value -> value in 0..255 } }
             if (bytes.size != 4 || bytes.any { it == null }) return false
             return bytes[0] == 10 || bytes[0] == 127 || (bytes[0] == 192 && bytes[1] == 168) ||
                 (bytes[0] == 172 && bytes[1] in 16..31)

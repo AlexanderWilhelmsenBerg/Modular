@@ -133,6 +133,16 @@ abstract class WebWorkspaceService : BaseModuleService() {
                     return null
                 }
 
+                override fun onReceivedSslError(view: WebView, handler: android.webkit.SslErrorHandler,
+                    error: android.net.http.SslError) {
+                    handler.cancel()
+                    if (browser === view) {
+                        status.text = "Android could not verify the server certificate. Check the hostname and trusted CA."
+                        status.visibility = View.VISIBLE
+                        panel.visibility = View.VISIBLE
+                    }
+                }
+
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                     if (request.isForMainFrame && browser === view) {
                         status.text = error.description

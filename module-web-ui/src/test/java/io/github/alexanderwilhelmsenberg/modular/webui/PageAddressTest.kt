@@ -18,7 +18,7 @@ class PageAddressTest {
             assertNotNull(PageAddress.parse("http://$host:8123", true))
             assertNull(PageAddress.parse("http://$host:8123", false))
         }
-        for (url in listOf("http://public.example", "http://172.32.0.1", "file:///etc",
+        for (url in listOf("http://010.0.0.1", "http://172.017.0.1", "http://public.example", "http://172.32.0.1", "file:///etc",
             "https://user:password@server", "javascript:alert(1)", "https://example.org:70000"))
             assertNull(PageAddress.parse(url, true))
     }

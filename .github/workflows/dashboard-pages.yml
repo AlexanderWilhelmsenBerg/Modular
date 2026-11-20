@@ -25,7 +25,7 @@ jobs:
         with:
           gradle-version: '9.6.0'
       - name: Build launcher, add-ons and device tests
-        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest :addon-files:assembleDebug :addon-home-assistant:assembleDebug :addon-proxmox:assembleDebug
+        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest :addon-files:assembleDebug :addon-files:assembleDebugAndroidTest :addon-home-assistant:assembleDebug :addon-proxmox:assembleDebug
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -53,6 +53,11 @@ jobs:
             adb install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             adb shell cmd package set-home-activity io.github.alexanderwilhelmsenberg.modular.debug/io.github.alexanderwilhelmsenberg.modular.MainActivity
             python3 scripts/run-native-surface-tests.py --dashboard-pages
+            adb install addon-files/build/outputs/apk/androidTest/debug/addon-files-debug-androidTest.apk
+            adb shell appops set --uid io.github.alexanderwilhelmsenberg.modular.addon.files.debug MANAGE_EXTERNAL_STORAGE allow
+            adb shell pm grant io.github.alexanderwilhelmsenberg.modular.addon.files.debug android.permission.POST_NOTIFICATIONS
+            adb shell am instrument -w -e class io.github.alexanderwilhelmsenberg.modular.addon.files.FilesBackgroundScanTest#realOlderVersionsScanCompletesWithNotificationWhileHomeAndScreenAreOff io.github.alexanderwilhelmsenberg.modular.addon.files.debug.test/androidx.test.runner.AndroidJUnitRunner > build/reports/native-surface/CleanupFilenames.log
+            grep -Eq '^OK \(1 test\)' build/reports/native-surface/CleanupFilenames.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

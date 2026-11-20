@@ -27,17 +27,22 @@ def signing_identity(output):
     return next(iter(certificates)).lower(), next(iter(public_keys)).lower()
 
 
-def artifact_modules(core_only=False, include_files=False, files_only=False, include_home_addons=False):
+DASHBOARD_MODULES = {
+    "home-assistant": ("addon-home-assistant", "io.github.alexanderwilhelmsenberg.modular.addon.homeassistant"),
+    "proxmox": ("addon-proxmox", "io.github.alexanderwilhelmsenberg.modular.addon.proxmox"),
+}
+
+
+def artifact_modules(core_only=False, include_files=False, files_only=False, include_home_addons=False, dashboard_only=None):
+    if dashboard_only:
+        return [DASHBOARD_MODULES[dashboard_only]]
     if files_only:
         return [("addon-files", "io.github.alexanderwilhelmsenberg.modular.addon.files")]
     modules = [("app", "io.github.alexanderwilhelmsenberg.modular")]
     if include_files:
         modules.append(("addon-files", "io.github.alexanderwilhelmsenberg.modular.addon.files"))
     if include_home_addons:
-        modules.extend((
-            ("addon-home-assistant", "io.github.alexanderwilhelmsenberg.modular.addon.homeassistant"),
-            ("addon-proxmox", "io.github.alexanderwilhelmsenberg.modular.addon.proxmox"),
-        ))
+        modules.extend(DASHBOARD_MODULES.values())
     if not core_only:
         modules.extend((
             ("reference-sort-alphabetical", "io.github.alexanderwilhelmsenberg.modular.reference.sort.alphabetical"),
@@ -53,12 +58,15 @@ def main():
     parser.add_argument("--include-files", action="store_true", help="Also verify Modular Files debug and release APKs")
     parser.add_argument("--files-only", action="store_true", help="Verify only Files; Core need not be built or installed")
     parser.add_argument("--include-home-addons", action="store_true")
+    parser.add_argument("--dashboard-only", choices=DASHBOARD_MODULES)
     args = parser.parse_args()
+    if args.dashboard_only and (args.core_only or args.include_files or args.files_only or args.include_home_addons):
+        parser.error("--dashboard-only must be used alone")
     if args.files_only and (args.core_only or args.include_files):
         parser.error("--files-only cannot be combined with Core build options")
     expected = json.loads(args.expected_certificates.read_text()) if args.expected_certificates else None
     signers = {}
-    for module, base_id in artifact_modules(args.core_only, args.include_files, args.files_only, args.include_home_addons):
+    for module, base_id in artifact_modules(args.core_only, args.include_files, args.files_only, args.include_home_addons, args.dashboard_only):
         for variant in ("debug", "release"):
             apk = Path(module) / f"build/outputs/apk/{variant}/{module}-{variant}.apk"
             output = subprocess.check_output([android_tool("apksigner"), "verify", "--verbose", "--print-certs", apk], text=True)

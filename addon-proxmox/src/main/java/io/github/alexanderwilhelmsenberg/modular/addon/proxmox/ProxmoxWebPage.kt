@@ -21,7 +21,9 @@ internal fun openProxmoxPage(
     onError: (String) -> Unit,
 ) {
     val assetPath = "/.modular/cluster.html"
-    val url = address.origin + assetPath + if (accountOnly) "?account=1" else ""
+    val query = if (accountOnly) "account=1" else null
+    val url = address.origin + assetPath + (query?.let { "?$it" } ?: "")
+    fun isPage(uri: URI) = address.sameOrigin(uri) && uri.rawPath == assetPath && uri.rawQuery == query
     web.settings.apply {
         javaScriptEnabled = true
         domStorageEnabled = true
@@ -31,7 +33,7 @@ internal fun openProxmoxPage(
     }
     web.webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-            request.isForMainFrame && request.url.toString() != url
+            request.isForMainFrame && !runCatching { isPage(URI(request.url.toString())) }.getOrDefault(false)
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             val uri = runCatching { URI(request.url.toString()) }.getOrNull()
@@ -42,7 +44,7 @@ internal fun openProxmoxPage(
                     "/.modular/cluster.js" -> "application/javascript"
                     else -> null
                 }
-                if (type != null && (!request.isForMainFrame || uri.toString() == url)) {
+                if (type != null && (!request.isForMainFrame || isPage(uri))) {
                     val asset = uri.rawPath.substringAfterLast('/')
                     return WebResourceResponse(type, "utf-8", web.context.assets.open(asset))
                 }

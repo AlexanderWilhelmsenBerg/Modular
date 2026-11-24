@@ -8,6 +8,7 @@ import android.text.InputType
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebView
+import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -41,6 +42,8 @@ class DashboardActivity : Activity() {
     private var shownCatalog: List<Dashboard>? = null
     private lateinit var assignments: LinearLayout
     private lateinit var assignmentScroll: ScrollView
+    private lateinit var account: Button
+    private var showingAccount = false
     private var placement: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,7 +52,10 @@ class DashboardActivity : Activity() {
         ui = AddonScreen(this, resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
             Configuration.UI_MODE_NIGHT_YES)
         root = ui.column()
-        ui.bar(root, "Home Assistant").addView(ui.button("Server") {
+        val bar = ui.bar(root, "Home Assistant")
+        account = ui.button("Account") { toggleAccount() }.apply { visibility = View.GONE }
+        bar.addView(account)
+        bar.addView(ui.button("Server") {
             prompt.visibility = if (prompt.visibility == View.VISIBLE && web != null) View.GONE else View.VISIBLE
         })
         prompt = ui.section(root, "Connect to your home", "Sign in with your Home Assistant account to find your dashboards.")
@@ -102,19 +108,28 @@ class DashboardActivity : Activity() {
         web?.let(root::removeView)
         browser?.close()
         shownCatalog = null
+        showingAccount = false
+        account.visibility = View.GONE
+        account.text = "Account"
         assignmentScroll.visibility = View.GONE
         val view = WebView(this)
         web = view
         root.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
         browser = DashboardBrowser(view, address, catalog, onSignedIn = { dashboards ->
+            account.visibility = View.VISIBLE
             if (dashboards != shownCatalog) {
                 shownCatalog = dashboards
-                notice(if (dashboards.isEmpty()) "Signed in · no dashboards available" else "")
-                view.visibility = View.GONE
-                showAssignments(address, dashboards)
+                notice(if (dashboards.isEmpty() && !showingAccount) "Signed in · no dashboards available" else "")
+                if (!showingAccount) {
+                    view.visibility = View.GONE
+                    showAssignments(address, dashboards)
+                }
             }
         }, onLogin = {
             shownCatalog = null
+            showingAccount = false
+            account.visibility = View.GONE
+            account.text = "Account"
             view.visibility = View.VISIBLE
             assignmentScroll.visibility = View.GONE
             notice("Sign in below to connect your dashboards.")
@@ -122,6 +137,21 @@ class DashboardActivity : Activity() {
             notice(it)
             prompt.visibility = View.VISIBLE
         }).also { it.open() }
+    }
+
+    private fun toggleAccount() {
+        val view = web ?: return
+        val address = catalog.server ?: return
+        showingAccount = !showingAccount
+        account.text = if (showingAccount) "Dashboards" else "Account"
+        view.visibility = if (showingAccount) View.VISIBLE else View.GONE
+        if (showingAccount) {
+            assignmentScroll.visibility = View.GONE
+            notice("")
+            view.loadUrl(address.origin + "/profile")
+        } else {
+            showAssignments(address, shownCatalog.orEmpty())
+        }
     }
 
     private fun showAssignments(address: PageAddress, dashboards: List<Dashboard>) {

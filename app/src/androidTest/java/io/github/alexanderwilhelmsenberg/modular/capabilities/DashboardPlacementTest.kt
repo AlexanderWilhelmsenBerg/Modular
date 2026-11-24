@@ -6,6 +6,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.test.uiautomator.Until
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -71,7 +73,12 @@ class DashboardPlacementTest {
         fun swipe(right: Boolean) {
             val w = device.displayWidth
             val y = device.displayHeight * 2 / 5
-            val edge = (28 * rule.activity.resources.displayMetrics.density).toInt()
+            val activity = rule.activity
+            val density = activity.resources.displayMetrics.density
+            val gestures = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                ?.getInsets(WindowInsetsCompat.Type.systemGestures())
+            val edge = maxOf((30 * density).toInt(), maxOf(gestures?.left ?: 0, gestures?.right ?: 0) +
+                (6 * density).toInt())
             device.swipe(if (right) edge else w - edge, y, if (right) w - edge else edge, y, 38)
             rule.waitForIdle()
         }

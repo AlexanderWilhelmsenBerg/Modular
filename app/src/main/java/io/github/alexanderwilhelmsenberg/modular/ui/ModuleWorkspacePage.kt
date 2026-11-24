@@ -14,15 +14,20 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +45,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.LayoutDirection
+import kotlin.math.abs
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.luminance
@@ -504,6 +513,14 @@ fun ModuleWorkspacePage(
         }
     }
     if (Build.VERSION.SDK_INT >= 30 && canShow) {
+        val density = LocalDensity.current
+        val systemGestures = WindowInsets.systemGestures
+        val edgeWidth = with(density) {
+            maxOf(36.dp, maxOf(
+                systemGestures.getLeft(this, LayoutDirection.Ltr),
+                systemGestures.getRight(this, LayoutDirection.Ltr),
+            ).toDp() + 12.dp)
+        }
         Box(viewportModifier.background(colorScheme.background)) {
         AndroidView(factory = { ctx ->
             SurfaceView(ctx).also { view ->
@@ -532,11 +549,25 @@ fun ModuleWorkspacePage(
                 })
                 surfaceView = view
             }
-        // The child surface owns a separate input window. Leave space on both sides
-        // where the launcher's pager can receive the entire horizontal gesture.
-        }, modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp), onRelease = { view ->
+        }, modifier = Modifier.fillMaxSize().padding(horizontal = edgeWidth), onRelease = { view ->
             if (surfaceView === view) { surfaceView = null; width = 0; height = 0 }
         })
+        // The embedded input window can own gestures even when WebView is scrolling.
+        // The launcher receives swipes in these areas, inside Android's Back inset.
+        for (side in listOf(Alignment.CenterStart, Alignment.CenterEnd)) {
+            Box(Modifier.align(side).fillMaxHeight().width(edgeWidth).pointerInput(Unit) {
+                var travel = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { travel = 0f },
+                    onDragEnd = {
+                        if (abs(travel) >= 48.dp.toPx()) {
+                            currentNavigate(if (travel > 0) "previous" else "next")
+                        }
+                    },
+                    onHorizontalDrag = { _, delta -> travel += delta },
+                )
+            })
+        }
         if (lease == null && (showConnectionStatus || message != null)) {
             Column(Modifier.align(Alignment.Center).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {

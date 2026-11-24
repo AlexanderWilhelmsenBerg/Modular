@@ -191,7 +191,12 @@ class FilesCrossApkHomeTest {
     private fun swipePage(left: Boolean) {
         val width = device.displayWidth
         val y = (device.displayHeight * .42f).toInt()
-        val edge = (28 * rule.activity.resources.displayMetrics.density).toInt()
+        val activity = rule.activity
+        val density = activity.resources.displayMetrics.density
+        val gestures = ViewCompat.getRootWindowInsets(activity.window.decorView)
+            ?.getInsets(WindowInsetsCompat.Type.systemGestures())
+        val edge = maxOf((30 * density).toInt(), maxOf(gestures?.left ?: 0, gestures?.right ?: 0) +
+            (6 * density).toInt())
         assertTrue("Could not inject an OS page swipe", device.swipe(
             if (left) width - edge else edge, y,
             if (left) edge else width - edge, y, 40))

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' wss:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="cluster.css">
+<link rel="stylesheet" href="/xtermjs/xterm.css">
+<title>Proxmox</title>
+</head>
+<body>
+<div id="status" role="status" aria-live="polite"></div>
+<form id="login" hidden>
+<h1 id="loginTitle">Sign in to Proxmox</h1>
+<label>Account with realm<input id="account" placeholder="user@pam" autocomplete="username" required></label>
+<label id="passwordLabel">Password<input id="password" type="password" autocomplete="current-password" required></label>
+<label id="otpLabel" hidden>Authenticator code<input id="otp" inputmode="numeric" autocomplete="one-time-code"></label>
+<div class="actions"><button id="signIn">Sign in</button></div>
+</form>
+<section id="accountSession" hidden>
+<p id="signedInAs"></p><button id="logout" type="button">Sign out</button>
+</section>
+<button id="openSettings" type="button" hidden>Open Proxmox</button>
+<section id="cluster" aria-label="Proxmox nodes" hidden>
+<div id="resources"></div>
+</section>
+<section id="shell" hidden>
+<div id="terminal" aria-label="Terminal output"></div>
+<form id="command"><label id="target" for="input"></label>
+<textarea id="input" rows="2" placeholder="Type or paste a command" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+<div class="actions"><button type="button" id="interrupt">Ctrl+C</button><button id="send">Send ↵</button></div>
+<div class="actions"><button type="button" id="closeShell">Nodes</button><button type="button" id="copy">Copy output</button></div>
+</form>
+</section>
+<script src="/xtermjs/xterm.js"></script>
+<script src="cluster.js"></script>
+</body></html>

@@ -70,7 +70,13 @@ class FilesBackgroundScanTest {
                 assertEquals(608, analysis.entries().values.count { it.kind() == CleanerEngine.Kind.FILE })
                 assertEquals("Scan must not mutate any source", 608, fixture.listFiles()!!.size)
                 assertTrue(manager.activeNotifications.any { it.id == FilesNotifications.RESULT && !it.isOngoing })
-                assertEquals("clean", page(controller).getString("view"))
+                val clean = page(controller)
+                assertEquals("clean", clean.getString("view"))
+                val row = clean.getJSONArray("items").getJSONObject(0)
+                assertTrue(row.getString("name").endsWith(".apk"))
+                assertTrue(row.getJSONArray("sampleNames").length() >= 1)
+                assertEquals(row.getString("name"), JSONObject(requireNotNull(controller.lastDisplayPage))
+                    .getJSONArray("items").getJSONObject(0).getString("name"))
             }
         } finally {
             release.countDown()

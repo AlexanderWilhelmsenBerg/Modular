@@ -372,11 +372,11 @@ class MainActivity : ComponentActivity() {
                         grantStore.loadError.collectAsState()
 
                     val managementEvents by moduleRegistry.managementStore.events.collectAsState()
-                    var activeWorkspaceModuleComponent by remember { mutableStateOf<String?>(null) }
+                    var lastWorkspacePlacement by remember { mutableStateOf<String?>(null) }
                     // Settings requests inspection sessions. Home needs only providers selected
                     // by its persisted context; the built-in launcher requires no module.
                     LaunchedEffect(settingsVisible, modules, activeContext.context, instances,
-                        organizationSnapshot.modulePages, activeWorkspaceModuleComponent,
+                        organizationSnapshot.modulePages, lastWorkspacePlacement,
                         identityRevision) {
                         val providerIds = activeContext.context?.bindings.orEmpty().mapNotNull { binding ->
                             instances.firstOrNull { it.id == binding.instanceId }?.providerId
@@ -384,9 +384,8 @@ class MainActivity : ComponentActivity() {
                         moduleRegistry.setConnectionDemand(
                             if (settingsVisible) null else modules.filter { module ->
                                 (module.moduleId ?: moduleRegistry.managementStore.knownProviderId(module.component)) in providerIds
-                                    || (module.component.flattenToString() == activeWorkspaceModuleComponent &&
-                                        organizationSnapshot.modulePages.any { page ->
-                                            page.enabled && page.component == activeWorkspaceModuleComponent &&
+                                    || (organizationSnapshot.modulePages.any { page ->
+                                            page.enabled && page.placementId == lastWorkspacePlacement &&
                                                 page.matchesInstalledProvider(
                                                     module.component.flattenToString(),
                                                     module.moduleId ?: moduleRegistry.managementStore.knownProviderId(module.component),
@@ -416,9 +415,9 @@ class MainActivity : ComponentActivity() {
                             OrganizationHomeScreen(
                                 workspaceMode = true,
                                 onWidgetSurfaceVisible = { widgetSurfaceVisible = it },
-                                modulePageContent = { component, active, onInteractionActiveChange, onNavigate ->
-                                    val module = modules.firstOrNull { it.component.flattenToString() == component }
-                                    val page = organizationSnapshot.modulePages.firstOrNull { it.component == component }
+                                modulePageContent = { placement, active, onInteractionActiveChange, onNavigate ->
+                                    val page = organizationSnapshot.modulePages.firstOrNull { it.placementId == placement }
+                                    val module = modules.firstOrNull { it.component.flattenToString() == page?.component }
                                     val installedSignerKey = remember(module, identityRevision) {
                                         module?.let {
                                             modulePageIdentityResolver.resolve(it.component.packageName).getOrNull()?.key
@@ -434,7 +433,8 @@ class MainActivity : ComponentActivity() {
                                     io.github.alexanderwilhelmsenberg.modular.ui.ModuleWorkspacePage(
                                         module = verifiedModule, router = capabilityRouter,
                                         expectedSignerKey = page?.signerKey,
-                                        placementComponent = component,
+                                        placementComponent = page?.component,
+                                        placementInstance = page?.placementId?.takeUnless { it == page.component } ?: "workspace-surface",
                                         unavailableReason = if (module != null && verifiedModule == null)
                                             "Module signing identity changed. Remove this screen and add it again to trust the installed module."
                                         else null,
@@ -450,7 +450,7 @@ class MainActivity : ComponentActivity() {
                                         onRetry = { verifiedModule?.let { moduleRegistry.retry(it.component) } },
                                     )
                                 },
-                                onActiveModuleChanged = { activeWorkspaceModuleComponent = it },
+                                onActiveModuleChanged = { if (it != null) lastWorkspacePlacement = it },
                                 listeningApps = listening.visibleApps,
                                 widgetContent = { widget, onLongPress ->
                                     WorkspaceWidgetTile(widgetController, widget, editMode = false, onLongPress = onLongPress)

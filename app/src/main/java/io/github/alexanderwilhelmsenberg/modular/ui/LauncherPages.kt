@@ -41,7 +41,7 @@ private fun HomePageId.savedKey(): String = when (this) {
     HomePageId.Home -> "home"
     is HomePageId.Category -> "category:$id"
     is HomePageId.Widget -> "widget:$id"
-    is HomePageId.Module -> "module:$component"
+    is HomePageId.Module -> "module:$placementId"
 }
 
 /** Keep the persisted relative order while giving each vertical surface its own pages. */

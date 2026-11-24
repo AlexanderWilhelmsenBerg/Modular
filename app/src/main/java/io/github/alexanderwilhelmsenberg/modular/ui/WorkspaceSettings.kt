@@ -173,7 +173,8 @@ fun WorkspaceSettingsUi(
                 pageModules.filter { module ->
                     StandardCapabilities.WorkspaceSurface.wireValue in
                         (module.descriptor?.providedCapabilities ?: module.capabilities) &&
-                        snapshot.modulePages.none { it.component == module.component.flattenToString() }
+                        (snapshot.modulePages.none { it.component == module.component.flattenToString() } ||
+                            remember(module) { supportsMultiplePages(context, module) })
                 }.forEach { module ->
                     OutlinedButton(onClick = { addModule = module }, enabled = !busy && module.enabled,
                         modifier = Modifier.fillMaxWidth().testTag("workspace-add-module:${module.component.flattenToString()}")) {
@@ -202,16 +203,16 @@ fun WorkspaceSettingsUi(
                             )
                         }
                         is HomePageId.Module -> {
-                            val modulePage = snapshot.modulePages.firstOrNull { it.component == page.component }
+                            val modulePage = snapshot.modulePages.firstOrNull { it.placementId == page.placementId }
                             if (modulePage != null) WorkspaceScreenRow(
                                 modulePage.name,
                                 if (modulePage.enabled) "Module screen" else "Module screen · off",
                                 !busy, modulePage.enabled,
-                                onToggle = { save(OrganizationEdit.SetModulePageEnabled(page.component, it)) },
-                                onDelete = { save(OrganizationEdit.RemoveModulePage(page.component)) },
+                                onToggle = { save(OrganizationEdit.SetModulePageEnabled(page.placementId, it)) },
+                                onDelete = { save(OrganizationEdit.RemoveModulePage(page.placementId)) },
                                 deleteLabel = "Remove screen",
                             )
-                            pageModules.firstOrNull { it.component.flattenToString() == page.component }?.let { module ->
+                            pageModules.firstOrNull { it.component.flattenToString() == modulePage?.component }?.let { module ->
                                 TextButton(onClick = { onOpenModuleSettings(module) }) { Text("${module.label} settings") }
                             }
                         }
@@ -366,6 +367,8 @@ fun WorkspaceSettingsUi(
         },
     )
     addModule?.let { module ->
+        val repeatable = remember(module) { supportsMultiplePages(context, module) }
+        var name by rememberSaveable(module.component.flattenToString()) { mutableStateOf(module.label) }
         fun addModuleScreen(left: Boolean) {
             val signerKey = identityResolver.resolve(module.component.packageName).getOrElse {
                 error = "Could not verify the installed module. Refresh modules and try again."
@@ -374,17 +377,22 @@ fun WorkspaceSettingsUi(
             val home = snapshot.pageOrder.indexOf(HomePageId.Home).coerceAtLeast(0)
             save(OrganizationEdit.AddModulePage(ModuleHomePage(
                 module.component.flattenToString(), module.moduleId ?: module.component.flattenToString(),
-                module.label, signerKey = signerKey,
+                name.trim(), signerKey = signerKey,
+                placementId = if (repeatable) UUID.randomUUID().toString() else module.component.flattenToString(),
             ), if (left) home else home + 1), afterSuccess = { addModule = null })
         }
         AlertDialog(onDismissRequest = { addModule = null },
             title = { Text("Add ${module.label}") },
-            text = { Text("Choose which side of Home to place this screen. You can move it later.") },
+            text = { Column {
+                if (repeatable) OutlinedTextField(name, { name = it.take(120) }, singleLine = true,
+                    label = { Text("Screen name") })
+                Text("Choose which side of Home to place this screen. You can move it later.")
+            } },
             confirmButton = {
-                TextButton(onClick = { addModuleScreen(false) }) { Text("Right of Home") }
+                TextButton(enabled = name.isNotBlank() && !busy, onClick = { addModuleScreen(false) }) { Text("Right of Home") }
             },
             dismissButton = {
-                TextButton(onClick = { addModuleScreen(true) }) { Text("Left of Home") }
+                TextButton(enabled = name.isNotBlank() && !busy, onClick = { addModuleScreen(true) }) { Text("Left of Home") }
             })
     }
     snapshot.workspacePages.firstOrNull { it.id == renameId }?.let { page ->
@@ -498,13 +506,13 @@ private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, order: List<HomeP
                     HomePageId.Home -> "Home"
                     is HomePageId.Category -> snapshot.categories.firstOrNull { it.id == page.id }?.name ?: "Removed"
                     is HomePageId.Widget -> snapshot.workspacePages.firstOrNull { it.id == page.id }?.name ?: "Removed"
-                    is HomePageId.Module -> snapshot.modulePages.firstOrNull { it.component == page.component }?.name ?: "Removed"
+                    is HomePageId.Module -> snapshot.modulePages.firstOrNull { it.placementId == page.placementId }?.name ?: "Removed"
                 }
                 val active = when (page) {
                     HomePageId.Home -> true
                     is HomePageId.Category -> snapshot.categoriesEnabled && snapshot.categories.any { it.id == page.id && it.enabled }
                     is HomePageId.Widget -> snapshot.workspacePages.any { it.id == page.id && it.enabled }
-                    is HomePageId.Module -> snapshot.modulePages.any { it.component == page.component && it.enabled }
+                    is HomePageId.Module -> snapshot.modulePages.any { it.placementId == page.placementId && it.enabled }
                 }
                 var drag by remember(page) { mutableFloatStateOf(0f) }
                 val dragModifier = if (enabled && page != HomePageId.Home) Modifier.pointerInput(order, page) {
@@ -524,7 +532,7 @@ private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, order: List<HomeP
                         HomePageId.Home -> "home"
                         is HomePageId.Category -> "category:${page.id}"
                         is HomePageId.Widget -> "widget:${page.id}"
-                        is HomePageId.Module -> "module:${page.component}"
+                        is HomePageId.Module -> "module:${page.placementId}"
                     }}"),
                     colors = CardDefaults.outlinedCardColors(containerColor =
                         if (drag != 0f || page == HomePageId.Home) MaterialTheme.colorScheme.primaryContainer
@@ -547,7 +555,7 @@ private fun WorkspacePageTiles(snapshot: OrganizationSnapshot, order: List<HomeP
         val name = when (page) {
             is HomePageId.Category -> snapshot.categories.firstOrNull { it.id == page.id }?.name
             is HomePageId.Widget -> snapshot.workspacePages.firstOrNull { it.id == page.id }?.name
-            is HomePageId.Module -> snapshot.modulePages.firstOrNull { it.component == page.component }?.name
+            is HomePageId.Module -> snapshot.modulePages.firstOrNull { it.placementId == page.placementId }?.name
             HomePageId.Home -> null
         } ?: return@forEachIndexed
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -644,3 +652,9 @@ private fun WorkspacePageEditor(
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
+private fun supportsMultiplePages(context: android.content.Context, module: ModuleRecord): Boolean =
+    runCatching {
+        context.packageManager.getServiceInfo(module.component, android.content.pm.PackageManager.GET_META_DATA)
+            .metaData?.getBoolean("io.github.alexanderwilhelmsenberg.modular.MULTIPLE_WORKSPACE_PAGES") == true
+    }.getOrDefault(false)

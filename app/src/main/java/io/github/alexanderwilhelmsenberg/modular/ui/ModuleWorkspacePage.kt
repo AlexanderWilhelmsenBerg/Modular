@@ -13,15 +13,21 @@ import android.view.SurfaceControlViewHost
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +45,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.LayoutDirection
+import kotlin.math.abs
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.luminance
@@ -207,6 +217,7 @@ fun ModuleWorkspacePage(
     unavailableReason: String? = null,
     expectedSignerKey: String? = null,
     placementComponent: String? = module?.component?.flattenToString(),
+    placementInstance: String = "workspace-surface",
     active: Boolean,
     onInteractionActiveChange: (Boolean) -> Unit,
     onNavigate: (String) -> Unit,
@@ -297,7 +308,7 @@ fun ModuleWorkspacePage(
 
     val routeIdentity = route?.let { Triple(it.component, it.sessionId, it.capability) }
     LaunchedEffect(canShow, routeIdentity, surfaceView, surfaceGeneration,
-        retryGeneration, expectedSignerKey, placementComponent) {
+        retryGeneration, expectedSignerKey, placementComponent, placementInstance) {
         withContext(SurfaceUiThread.dispatcher) {
         val now = SurfaceEffectSnapshot(canShow, active, resumed, route, module?.status,
             surfaceView, surfaceGeneration, retryGeneration, expectedSignerKey, placementComponent)
@@ -395,7 +406,7 @@ fun ModuleWorkspacePage(
         var pendingPackage: SurfaceControlViewHost.SurfacePackage? = null
         try {
             val binder = SurfaceBinderCalls.run(10_000) {
-                runBlocking { router.acquireModuleBinder(selectedRoute, "workspace-surface", "{}").getOrThrow() }
+                runBlocking { router.acquireModuleBinder(selectedRoute, placementInstance, "{}").getOrThrow() }
             }
             Log.d(SURFACE_LOG, "capability acquired")
             val remote = IWorkspaceSurfaceCapability.Stub.asInterface(binder)
@@ -490,8 +501,27 @@ fun ModuleWorkspacePage(
         }
     }
 
+    val connecting = active && module != null && unavailableReason == null && Build.VERSION.SDK_INT >= surfaceMinSdk &&
+        module.status in setOf(ModuleConnectionStatus.DISCOVERED, ModuleConnectionStatus.CONNECTING,
+            ModuleConnectionStatus.DISCONNECTED)
+    var showConnectionStatus by remember(placementComponent, placementInstance) { mutableStateOf(false) }
+    LaunchedEffect(active, lease, connecting, loading) {
+        showConnectionStatus = false
+        if (active && lease == null && (connecting || loading)) {
+            delay(350)
+            showConnectionStatus = true
+        }
+    }
     if (Build.VERSION.SDK_INT >= 30 && canShow) {
-        Box(viewportModifier) {
+        val density = LocalDensity.current
+        val systemGestures = WindowInsets.systemGestures
+        val edgeWidth = with(density) {
+            maxOf(36.dp, maxOf(
+                systemGestures.getLeft(this, LayoutDirection.Ltr),
+                systemGestures.getRight(this, LayoutDirection.Ltr),
+            ).toDp() + 12.dp)
+        }
+        Box(viewportModifier.background(colorScheme.background)) {
         AndroidView(factory = { ctx ->
             SurfaceView(ctx).also { view ->
                 // The embedded hierarchy has its own input window. Keep its
@@ -519,10 +549,26 @@ fun ModuleWorkspacePage(
                 })
                 surfaceView = view
             }
-        }, modifier = Modifier.fillMaxSize(), onRelease = { view ->
+        }, modifier = Modifier.fillMaxSize().padding(horizontal = edgeWidth), onRelease = { view ->
             if (surfaceView === view) { surfaceView = null; width = 0; height = 0 }
         })
-        if (lease == null && (loading || message != null)) {
+        // The embedded input window can own gestures even when WebView is scrolling.
+        // The launcher receives swipes in these areas, inside Android's Back inset.
+        for (side in listOf(Alignment.CenterStart, Alignment.CenterEnd)) {
+            Box(Modifier.align(side).fillMaxHeight().width(edgeWidth).pointerInput(Unit) {
+                var travel = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { travel = 0f },
+                    onDragEnd = {
+                        if (abs(travel) >= 48.dp.toPx()) {
+                            currentNavigate(if (travel > 0) "previous" else "next")
+                        }
+                    },
+                    onHorizontalDrag = { _, delta -> travel += delta },
+                )
+            })
+        }
+        if (lease == null && (showConnectionStatus || message != null)) {
             Column(Modifier.align(Alignment.Center).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (loading) CircularProgressIndicator()
@@ -534,6 +580,8 @@ fun ModuleWorkspacePage(
             }
         }
         }
+    } else if (connecting && !showConnectionStatus || !active) {
+        Box(viewportModifier)
     } else {
         Column(viewportModifier.padding(24.dp), verticalArrangement = Arrangement.Center) {
             Text(module?.label ?: "Add-on screen unavailable", style = MaterialTheme.typography.titleLarge)

@@ -30,6 +30,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OrganizationStoreTest {
+    @Test fun placementsOfOneProviderRestoreAndCanBeRemovedIndividually() = runBlocking {
+        val memory = MemoryPreferences()
+        val store = OrganizationStore(memory)
+        val first = ModuleHomePage("test.dashboard/.Service", "test.dashboard", "Kitchen",
+            placementId = java.util.UUID.randomUUID().toString())
+        val second = first.copy(name = "Garage", placementId = java.util.UUID.randomUUID().toString())
+        store.update(OrganizationBatch(listOf(OrganizationEdit.AddModulePage(first),
+            OrganizationEdit.AddModulePage(second)))).getOrThrow()
+        val restored = OrganizationStore(memory)
+        assertEquals(listOf(second.placementId, first.placementId), restored.currentSnapshot()
+            .visiblePageOrder().filterIsInstance<HomePageId.Module>().map { it.placementId })
+        restored.update(OrganizationBatch(listOf(OrganizationEdit.RemoveModulePage(first.placementId)))).getOrThrow()
+        assertEquals(listOf(second), restored.currentSnapshot().modulePages)
+    }
+
     @Test fun moduleScreenPlacementPersistsWithoutChangingWidgetOrCategoryState() = runBlocking {
         val memory = MemoryPreferences()
         val store = OrganizationStore(memory)

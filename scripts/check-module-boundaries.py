@@ -8,7 +8,10 @@ from zipfile import ZipFile
 def check(root: Path, apk: Path | None = None) -> list[str]:
     failures = []
     private_names = ("io.github.alexanderwilhelmsenberg.modular.filesui",
-                     "io.github.alexanderwilhelmsenberg.modular.addon.files")
+                     "io.github.alexanderwilhelmsenberg.modular.addon.files",
+                     "io.github.alexanderwilhelmsenberg.modular.webui",
+                     "io.github.alexanderwilhelmsenberg.modular.addon.homeassistant",
+                     "io.github.alexanderwilhelmsenberg.modular.addon.proxmox")
     for module in ("app", "module-api", "module-sdk"):
         source = root / module / "src/main"
         for file in source.rglob("*"):
@@ -17,7 +20,7 @@ def check(root: Path, apk: Path | None = None) -> list[str]:
             if any(name in file.read_text() for name in private_names):
                 failures.append(f"Feature-specific code reference in {file.relative_to(root)}")
         gradle = (root / module / "build.gradle.kts").read_text()
-        for private_module in ("module-files-ui", "addon-files"):
+        for private_module in ("module-files-ui", "addon-files", "module-web-ui", "addon-home-assistant", "addon-proxmox"):
             if f'project(":{private_module}")' in gradle:
                 failures.append(f"{module} depends on private add-on module {private_module}")
     host = (root / "app/src/main/java/io/github/alexanderwilhelmsenberg/modular/ui/ModuleWorkspacePage.kt").read_text()

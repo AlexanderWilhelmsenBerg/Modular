@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "moduleId": "io.github.alexanderwilhelmsenberg.modular.homeassistant",
+  "moduleVersion": "0.1.2",
+  "displayName": "Home Assistant",
+  "description": "A chosen dashboard on each Home screen.",
+  "coreProtocol": {
+    "min": 4,
+    "max": 4
+  },
+  "providedCapabilities": [
+    "modular.workspace.surface/v1"
+  ],
+  "requestedCoreCapabilities": [],
+  "workspaceSurfaceMinSdk": 33,
+  "instanceConfiguration": {
+    "schemaVersion": 1,
+    "fields": []
+  },
+  "managementActivity": ".DashboardActivity",
+  "workspaceActivity": ".DashboardActivity"
+}

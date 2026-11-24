@@ -14,6 +14,17 @@ internal class DashboardCatalog(context: Context) {
         get() = prefs.getString("server", null)?.let { PageAddress.parse(it, true) }
         set(value) { prefs.edit().putString("server", value?.origin).apply() }
 
+    private val placementOrder = context.getSharedPreferences("dashboard-placements", Context.MODE_PRIVATE)
+
+    fun visit(placement: String) {
+        if (!placementOrder.contains(placement)) {
+            placementOrder.edit().putLong(placement, System.currentTimeMillis()).apply()
+        }
+    }
+
+    fun placements() = (placementOrder.all.keys + addresses.all.keys)
+        .sortedWith(compareBy<String> { placementOrder.getLong(it, 0L) }.thenBy { it })
+
     fun selected(placement: String) = addresses.getString(placement, null)?.let { PageAddress.parse(it, true) }
 
     fun select(placement: String, address: PageAddress, dashboard: Dashboard) {

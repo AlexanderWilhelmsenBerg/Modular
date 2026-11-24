@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "moduleId": "io.github.alexanderwilhelmsenberg.modular.proxmox",
-  "moduleVersion": "0.1.1",
+  "moduleVersion": "0.1.2",
   "displayName": "Proxmox",
   "description": "Cluster nodes, LXC containers and interactive consoles.",
   "coreProtocol": {

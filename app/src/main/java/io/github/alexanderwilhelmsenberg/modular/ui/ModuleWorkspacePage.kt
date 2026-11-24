@@ -13,6 +13,7 @@ import android.view.SurfaceControlViewHost
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -503,7 +504,7 @@ fun ModuleWorkspacePage(
         }
     }
     if (Build.VERSION.SDK_INT >= 30 && canShow) {
-        Box(viewportModifier) {
+        Box(viewportModifier.background(colorScheme.background)) {
         AndroidView(factory = { ctx ->
             SurfaceView(ctx).also { view ->
                 // The embedded hierarchy has its own input window. Keep its
@@ -531,7 +532,9 @@ fun ModuleWorkspacePage(
                 })
                 surfaceView = view
             }
-        }, modifier = Modifier.fillMaxSize(), onRelease = { view ->
+        // The child surface owns a separate input window. Leave space on both sides
+        // where the launcher's pager can receive the entire horizontal gesture.
+        }, modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp), onRelease = { view ->
             if (surfaceView === view) { surfaceView = null; width = 0; height = 0 }
         })
         if (lease == null && (showConnectionStatus || message != null)) {

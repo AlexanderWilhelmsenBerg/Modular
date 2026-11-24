@@ -25,6 +25,7 @@ internal class ProxmoxBrowser(
     private val address: PageAddress,
     private val vault: ProxmoxCredentials,
     private val scope: WorkspaceSurfaceScope,
+    private val onOpenSettings: (Boolean) -> Unit,
 ) : WebViewClient() {
     private val worker = ThreadPoolExecutor(2, 2, 15, TimeUnit.SECONDS, ArrayBlockingQueue(8))
         .apply { allowCoreThreadTimeOut(true) }
@@ -43,6 +44,11 @@ internal class ProxmoxBrowser(
     }
 
     @JavascriptInterface
+    fun openSettings(account: Boolean) {
+        web.post { if (!closed) onOpenSettings(account) }
+    }
+
+    @JavascriptInterface
     fun hasToken() = vault.tokenId(address.origin) != null
 
     /** The page supplies a request ID. Only the native transport has access to the token secret. */
@@ -56,7 +62,7 @@ internal class ProxmoxBrowser(
         runCatching { worker.execute {
             try {
                 val token = vault.token(address.origin)
-                if (token == null) reply(id, 401, "Add an API token in Connection.")
+                if (token == null) reply(id, 401, "Add an API token in the Proxmox app.")
                 else {
                     val connection = URI.create(address.origin + "/api2/json" + path).toURL()
                         .openConnection() as HttpsURLConnection

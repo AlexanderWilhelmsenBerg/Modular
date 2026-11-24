@@ -20,6 +20,7 @@ internal class DashboardBrowser(
     private val web: WebView,
     private val address: PageAddress,
     private val catalog: DashboardCatalog,
+    private val embedded: Boolean = false,
     private val onSignedIn: (List<Dashboard>) -> Unit,
     private val onLogin: () -> Unit,
     private val onError: (String) -> Unit,
@@ -99,7 +100,7 @@ internal class DashboardBrowser(
 
     private fun probe() {
         if (closed || failed || !sameOrigin(web.url.orEmpty())) return
-        web.evaluateJavascript(PROBE) { reply ->
+        web.evaluateJavascript(PROBE.replace("EMBEDDED_MODE", embedded.toString())) { reply ->
             if (closed || failed || !sameOrigin(web.url.orEmpty())) return@evaluateJavascript
             val result = runCatching { JSONObject(reply) }.getOrNull()
             when (result?.optString("state")) {
@@ -136,6 +137,28 @@ internal class DashboardBrowser(
               const hass = root?.hass;
               if (!hass?.user || !hass.panels) return {state:'waiting'};
               if (hass.auth?.expired && !hass.connected) return {state:'waiting'};
+              if (EMBEDDED_MODE) {
+                const main = root.shadowRoot?.querySelector('home-assistant-main')?.shadowRoot;
+                const drawer = main?.querySelector('ha-drawer, app-drawer-layout') ?? null;
+                const resolver = main?.querySelector('partial-panel-resolver');
+                const panel = resolver?.querySelector('ha-panel-lovelace') ??
+                  resolver?.shadowRoot?.querySelector('ha-panel-lovelace');
+                const dashboard = panel?.shadowRoot?.querySelector('hui-root')?.shadowRoot;
+                if (!dashboard) return {state:'waiting'};
+                const style = (target, rules) => {
+                  if (!target || target.querySelector('style[data-modular-dashboard]')) return;
+                  const sheet = document.createElement('style');
+                  sheet.setAttribute('data-modular-dashboard', '');
+                  sheet.textContent = rules;
+                  target.append(sheet);
+                };
+                style(main, 'ha-sidebar, app-drawer { display:none !important; } ' +
+                  'ha-drawer { --ha-sidebar-width:0px !important; --ha-top-app-bar-width:100% !important; }');
+                style(drawer?.shadowRoot, '.sidebar-shell, wa-drawer { display:none !important; }');
+                style(dashboard, '.header, app-header, ha-top-app-bar { display:none !important; } ' +
+                  ':host { --header-height:0px !important; } ' +
+                  'hui-view-container { padding-top:var(--view-container-padding-top, 0px) !important; }');
+              }
               const panels = Object.values(hass.panels)
                 .filter(panel => panel.component_name === 'lovelace' && (!panel.require_admin || hass.user.is_admin))
                 .slice(0, 200).map(panel => ({

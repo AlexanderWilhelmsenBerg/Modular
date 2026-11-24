@@ -10,6 +10,7 @@ import android.webkit.CookieManager
 import android.webkit.WebView
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
 import io.github.alexanderwilhelmsenberg.modular.webui.AddonScreen
 import io.github.alexanderwilhelmsenberg.modular.webui.PageAddress
@@ -17,9 +18,11 @@ import java.util.UUID
 
 /** Only a live embedded page can select which known server the Activity opens. */
 internal object DashboardSignIn {
-    private var pending: Triple<String, PageAddress, Long>? = null
-    fun offer(address: PageAddress?): String = UUID.randomUUID().toString().also { nonce ->
-        pending = address?.let { Triple(nonce, it, SystemClock.elapsedRealtime() + 30_000) }
+    data class Target(val placement: String, val address: PageAddress?)
+
+    private var pending: Triple<String, Target, Long>? = null
+    fun offer(placement: String, address: PageAddress?): String = UUID.randomUUID().toString().also { nonce ->
+        pending = Triple(nonce, Target(placement, address), SystemClock.elapsedRealtime() + 30_000)
     }
     fun take(nonce: String?) = pending?.takeIf {
         it.first == nonce && it.third > SystemClock.elapsedRealtime()
@@ -36,6 +39,9 @@ class DashboardActivity : Activity() {
     private var browser: DashboardBrowser? = null
     private var web: WebView? = null
     private var shownCatalog: List<Dashboard>? = null
+    private lateinit var assignments: LinearLayout
+    private lateinit var assignmentScroll: ScrollView
+    private var placement: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,9 +74,16 @@ class DashboardActivity : Activity() {
             setPadding(ui.dp(20), ui.dp(8), ui.dp(20), ui.dp(8))
         }
         root.addView(status)
+        assignments = ui.column()
+        assignmentScroll = ScrollView(this).apply {
+            visibility = View.GONE
+            addView(assignments)
+        }
+        root.addView(assignmentScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         ui.install(this, root)
         val incoming = DashboardSignIn.take(intent.getStringExtra(ModuleContract.EXTRA_HOST_HANDOFF_NONCE))
-        (incoming ?: catalog.server)?.let { open(it) }
+        placement = incoming?.placement ?: savedInstanceState?.getString("placement")
+        (incoming?.address ?: catalog.server)?.let { open(it) }
     }
 
     private fun notice(message: String) {
@@ -89,22 +102,59 @@ class DashboardActivity : Activity() {
         web?.let(root::removeView)
         browser?.close()
         shownCatalog = null
+        assignmentScroll.visibility = View.GONE
         val view = WebView(this)
         web = view
         root.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
         browser = DashboardBrowser(view, address, catalog, onSignedIn = { dashboards ->
             if (dashboards != shownCatalog) {
                 shownCatalog = dashboards
-                notice(if (dashboards.isEmpty()) "Signed in · no dashboards available" else
-                    "${dashboards.size} dashboards ready · choose one on each Home screen")
+                notice(if (dashboards.isEmpty()) "Signed in · no dashboards available" else "")
+                view.visibility = View.GONE
+                showAssignments(address, dashboards)
             }
         }, onLogin = {
             shownCatalog = null
+            view.visibility = View.VISIBLE
+            assignmentScroll.visibility = View.GONE
             notice("Sign in below to connect your dashboards.")
         }, onError = {
             notice(it)
             prompt.visibility = View.VISIBLE
         }).also { it.open() }
+    }
+
+    private fun showAssignments(address: PageAddress, dashboards: List<Dashboard>) {
+        assignments.removeAllViews()
+        assignmentScroll.visibility = View.VISIBLE
+        val placements = catalog.placements()
+        val target = placement
+        if (target == null) {
+            val panel = ui.section(assignments, "Home dashboards", if (placements.isEmpty())
+                "Add a Home Assistant screen in Modular and swipe to it to assign a dashboard." else null)
+            placements.forEachIndexed { index, id ->
+                val path = catalog.selected(id)?.uri?.path?.trimEnd('/')
+                val current = dashboards.firstOrNull { it.path == path }?.title ?: path?.substringAfterLast('/')
+                panel.addView(ui.button("Home screen ${index + 1}" + (current?.let { " · $it" } ?: "")) {
+                    placement = id
+                    showAssignments(address, dashboards)
+                })
+            }
+        } else {
+            val panel = ui.section(assignments, "Choose a dashboard")
+            dashboards.forEach { dashboard ->
+                panel.addView(ui.button(dashboard.title) {
+                    catalog.select(target, address, dashboard)
+                    finish()
+                }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ui.dp(4) })
+            }
+            if (catalog.selected(target) != null) panel.addView(ui.button("Done") { finish() })
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("placement", placement)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onPause() {

@@ -6,10 +6,30 @@ import android.os.Bundle
 import android.text.InputType
 import android.widget.EditText
 import android.widget.ScrollView
+import android.widget.LinearLayout
+import android.webkit.WebView
+import android.webkit.CookieManager
+import io.github.alexanderwilhelmsenberg.modular.moduleapi.ModuleContract
 import io.github.alexanderwilhelmsenberg.modular.webui.AddonScreen
 import io.github.alexanderwilhelmsenberg.modular.webui.PageAddress
 
+internal object ProxmoxAccountLaunch {
+    private var request: Pair<String, Long>? = null
+
+    fun offer(nonce: String) {
+        request = nonce to (android.os.SystemClock.elapsedRealtime() + 30_000)
+    }
+
+    fun consume(nonce: String?): Boolean {
+        val pending = request ?: return false
+        if (pending.first != nonce || pending.second < android.os.SystemClock.elapsedRealtime()) return false
+        request = null
+        return true
+    }
+}
+
 class ProxmoxActivity : Activity() {
+    private var accountWeb: WebView? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val vault = ProxmoxCredentials(this)
@@ -18,7 +38,8 @@ class ProxmoxActivity : Activity() {
         val root = ui.column()
         ui.bar(root, "Proxmox").addView(ui.button("Done") { finish() })
         val content = ui.column()
-        root.addView(ScrollView(this).apply { addView(content) }, android.widget.LinearLayout.LayoutParams(-1, 0, 1f))
+        val scroller = ScrollView(this).apply { addView(content) }
+        root.addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
         val connection = ui.section(content, "Server connection", "Use an API token to keep nodes, metrics and container controls signed in.")
         val server = field("HTTPS server address", InputType.TYPE_TEXT_VARIATION_URI).apply { setText(vault.server) }
         val tokenId = field("Token ID (user@realm!name)").apply {
@@ -58,6 +79,29 @@ class ProxmoxActivity : Activity() {
                 }.getOrDefault("Could not remove the saved token.")
             }
         })
+        val account = ui.section(content, "Proxmox account", "Sign in to use the console or to connect without an API token.")
+        fun openAccount() {
+            val address = PageAddress.parse(vault.server.orEmpty(), false)
+            if (address == null) { feedback.text = "Save the server address first."; return }
+            val pane = ui.column()
+            val error = ui.text("", secondary = true)
+            val browser = WebView(this)
+            accountWeb = browser
+            scroller.visibility = android.view.View.GONE
+            ui.bar(pane, "Proxmox account").addView(ui.button("Settings") {
+                CookieManager.getInstance().flush()
+                root.removeView(pane)
+                pane.removeView(browser)
+                browser.destroy()
+                accountWeb = null
+                scroller.visibility = android.view.View.VISIBLE
+            })
+            pane.addView(error)
+            pane.addView(browser, LinearLayout.LayoutParams(-1, 0, 1f))
+            root.addView(pane, LinearLayout.LayoutParams(-1, 0, 1f))
+            openProxmoxPage(browser, address, accountOnly = true) { error.text = it }
+        }
+        account.addView(ui.button("Manage account", click = ::openAccount))
         val shell = ui.section(content, "Node shell PIN", "Add a local PIN before opening a node console. Proxmox still checks the console account.")
         val current = pinField("Current PIN (when set)")
         val next = pinField("New PIN (4–12 digits)")
@@ -87,6 +131,34 @@ class ProxmoxActivity : Activity() {
         shell.addView(ui.button("Save PIN", primary = true) { updatePin(false) })
         shell.addView(ui.button("Remove PIN") { updatePin(true) })
         ui.install(this, root)
+        if (vault.server != null && (savedInstanceState?.getBoolean("accountOpen") == true ||
+                ProxmoxAccountLaunch.consume(intent.getStringExtra(ModuleContract.EXTRA_HOST_HANDOFF_NONCE)))) {
+            openAccount()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("accountOpen", accountWeb != null)
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onPause() {
+        accountWeb?.onPause()
+        if (accountWeb != null) CookieManager.getInstance().flush()
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        accountWeb?.onResume()
+    }
+
+    override fun onDestroy() {
+        accountWeb?.let { web ->
+            (web.parent as? android.view.ViewGroup)?.removeView(web)
+            web.destroy()
+        }
+        super.onDestroy()
     }
 
     private fun field(label: String, variation: Int = InputType.TYPE_TEXT_VARIATION_NORMAL) = EditText(this).apply {

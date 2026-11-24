@@ -191,9 +191,10 @@ class FilesCrossApkHomeTest {
     private fun swipePage(left: Boolean) {
         val width = device.displayWidth
         val y = (device.displayHeight * .42f).toInt()
+        val edge = (28 * rule.activity.resources.displayMetrics.density).toInt()
         assertTrue("Could not inject an OS page swipe", device.swipe(
-            (width * (if (left) .82f else .18f)).toInt(), y,
-            (width * (if (left) .18f else .82f)).toInt(), y, 40))
+            if (left) width - edge else edge, y,
+            if (left) edge else width - edge, y, 40))
         rule.waitForIdle()
     }
 

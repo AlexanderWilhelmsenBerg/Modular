@@ -71,7 +71,7 @@ class DashboardPlacementTest {
         fun swipe(right: Boolean) {
             val w = device.displayWidth
             val y = device.displayHeight * 2 / 5
-            val edge = w / 5
+            val edge = (28 * rule.activity.resources.displayMetrics.density).toInt()
             device.swipe(if (right) edge else w - edge, y, if (right) w - edge else edge, y, 38)
             rule.waitForIdle()
         }
@@ -95,31 +95,32 @@ class DashboardPlacementTest {
                 field.text = "http://127.0.0.1:8187"
                 device.findObject(text("Continue")).click()
             }
-            check(device.wait(Until.hasObject(text("Sign in to fixture")), 20_000))
-            device.findObject(text("Sign in to fixture")).click()
-            check(device.wait(Until.hasObject(text("2 dashboards ready · choose one on each Home screen")), 25_000))
-            device.pressBack()
+            tap("Sign in to fixture")
         }
-        fun open(name: String) {
+        fun pick(name: String) {
             tap(name)
             waitDashboard(name)
+            check(!device.hasObject(text("Fixture sidebar")))
+            check(!device.hasObject(text("Fixture navigation")))
+            check(!device.hasObject(By.desc("Back to Modular Home")))
         }
         waitPage("home")
-        swipe(true); waitPage("module:${pages[0].placementId}")
+        swipe(true)
+        waitPage("module:${pages[0].placementId}")
         signIn(first = true)
-        open("Kitchen")
+        pick("Kitchen")
         tap("Expire fixture session")
         signIn(first = false)
+        tap("Done")
         waitDashboard("Kitchen")
 
-        device.pressHome()
+        swipe(false)
         waitPage("home")
         swipe(false)
         waitPage("module:${pages[1].placementId}")
-        open("Garage")
-        val home = By.desc("Back to Modular Home")
-        rule.waitUntil(10_000) { device.hasObject(home) }
-        requireNotNull(device.findObject(home)).click()
+        tap("Open Home Assistant")
+        pick("Garage")
+        swipe(true)
         waitPage("home")
         swipe(true)
         waitPage("module:${pages[0].placementId}")

@@ -30,8 +30,7 @@
 html, body { overflow-x: clip }
 body { margin: 0 auto; padding: 0 12px 12px; color: var(--ink); background: var(--paper); max-width: 1040px }
 [hidden] { display: none !important }
-header, .actions { display: flex; align-items: center; gap: 6px }
-header { min-height: 60px; border-bottom: 1px solid var(--rule) }
+.actions { display: flex; align-items: center; gap: 6px }
 h1 { font-size: 1.38rem; font-weight: 650; flex: 1; margin: .45em 0; min-width: 0; overflow-wrap: anywhere }
 button, input, textarea { font: inherit }
 button { min-height: 44px; border: 1px solid var(--rule); border-radius: 4px; padding: 6px 9px; color: var(--accent); background: var(--panel); white-space: nowrap }
@@ -41,8 +40,9 @@ button:disabled { opacity: .45 }
 input, textarea { width: 100%; padding: 9px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink) }
 label { display: block; margin: 12px 0 6px; color: var(--muted) }
 #signIn, #send { background: var(--accent); color: var(--accent-ink); font-weight: 650 }
-#login { max-width: 440px; margin: 16px auto; padding: 16px; border: 1px solid var(--rule); background: var(--panel) }
+#login, #accountSession { max-width: 440px; margin: 16px auto; padding: 16px; border: 1px solid var(--rule); background: var(--panel) }
 #login .actions { margin-top: 14px }
+#command .actions { margin-top: 6px }
 #status:not(:empty) { padding: 8px 0; font-size: .88rem; color: var(--muted) }
 .node { margin-top: 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--panel) }
 .guest { margin-left: 12px; border-top: 1px solid var(--rule) }

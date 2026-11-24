@@ -2,7 +2,9 @@
 const byId = id => document.getElementById(id);
 const statusLine = text => { byId('status').textContent = text; };
 const encode = encodeURIComponent;
-let csrf = localStorage.getItem('modular.csrf') || '';
+const accountOnly = new URL(location.href).searchParams.get('account') === '1';
+const hasSession = document.cookie.split(';').some(cookie => cookie.trim().startsWith('PVEAuthCookie='));
+let csrf = hasSession ? localStorage.getItem('modular.csrf') || '' : '';
 let user = localStorage.getItem('modular.account') || '';
 let challenge = '';
 let resources = [];
@@ -16,7 +18,6 @@ const native = window.ModularProxmox;
 const tokenMode = native?.hasToken() === true;
 const callbacks = new Map();
 let requestId = 0;
-let pendingShell = null;
 let openingShell = false;
 window.modularResult = (id, status, body) => callbacks.get(id)?.(status, body);
 
@@ -57,28 +58,31 @@ async function api(path, data, signal, consoleRequest = false) {
     return (await response.json()).data;
 }
 
-function setLogoutVisibility() { byId('logout').hidden = tokenMode && !csrf; }
-
-function showLogin(message, forShell = false) {
-    ++readSerial;
-    endShell();
+function showLogin(message) {
     csrf = ''; challenge = '';
-    if (!forShell) {
-        tasks.clear(); resources = [];
-        openNodes.clear(); openGuests.clear();
-        byId('resources').replaceChildren();
-    }
-    byId('loginTitle').textContent = forShell ? 'Sign in for shell access' : 'Sign in to Proxmox';
-    byId('cancelLogin').hidden = !forShell;
     localStorage.removeItem('modular.csrf');
+    byId('accountSession').hidden = true;
     byId('login').hidden = false;
-    byId('cluster').hidden = true;
-    setLogoutVisibility();
     byId('account').value = user;
     byId('account').readOnly = false;
     byId('password').required = true;
     byId('password').value = ''; byId('otp').value = '';
     byId('otpLabel').hidden = true; byId('passwordLabel').hidden = false;
+    statusLine(message);
+}
+
+function showAccount() {
+    byId('login').hidden = true;
+    byId('accountSession').hidden = false;
+    byId('signedInAs').textContent = 'Signed in as ' + user;
+    statusLine('');
+}
+
+function openSettings(message, forAccount, keepNodes = false) {
+    byId('openSettings').hidden = false;
+    byId('openSettings').textContent = forAccount ? 'Open Proxmox to sign in' : 'Open Proxmox';
+    byId('openSettings').onclick = () => native?.openSettings(forAccount);
+    byId('cluster').hidden = !keepNodes;
     statusLine(message);
 }
 
@@ -102,35 +106,16 @@ byId('login').onsubmit = async event => {
         }
         if (!ticket.ticket || !ticket.CSRFPreventionToken) throw Error('No session ticket returned.');
         csrf = ticket.CSRFPreventionToken; user = ticket.username;
-        setLogoutVisibility();
         document.cookie = 'PVEAuthCookie=' + encode(ticket.ticket) + '; Max-Age=7200; Path=/; Secure; SameSite=Strict';
         localStorage.setItem('modular.csrf', csrf); localStorage.setItem('modular.account', user);
-        byId('otp').value = ''; challenge = ''; byId('login').hidden = true;
-        if (pendingShell) {
-            const item = pendingShell;
-            pendingShell = null;
-            await startShell(item);
-        } else await refresh();
+        byId('otp').value = ''; challenge = '';
+        showAccount();
     } catch (error) { statusLine('Sign-in failed. ' + error.message); }
     finally { button.disabled = false; }
 };
 byId('logout').onclick = () => {
     document.cookie = 'PVEAuthCookie=; Max-Age=0; Path=/; Secure; SameSite=Strict';
-    pendingShell = null;
-    if (tokenMode) {
-        csrf = ''; challenge = '';
-        localStorage.removeItem('modular.csrf');
-        setLogoutVisibility();
-        byId('login').hidden = true;
-        statusLine('Console session signed out. API token is still connected.');
-        refresh();
-    } else showLogin('');
-};
-byId('cancelLogin').onclick = () => {
-    pendingShell = null;
-    byId('login').hidden = true;
-    statusLine('');
-    refresh();
+    showLogin('');
 };
 
 function metric(label, used, total, text) {
@@ -215,28 +200,26 @@ function draw() {
     byId('resources').replaceChildren(fragment);
 }
 
-async function refresh(manual = false) {
+async function refresh() {
     const serial = ++readSerial;
     try {
-        if (manual) statusLine('Updating nodes…');
         const items = await api('/cluster/resources');
-        if (serial !== readSerial || pendingShell) return;
+        if (serial !== readSerial) return;
         resources = items;
         byId('login').hidden = true; byId('cluster').hidden = !!consoleSession;
-        if (!confirming || manual) draw();
-        if (manual) statusLine('Updated.');
+        if (!confirming) draw();
     } catch (error) {
         if (serial !== readSerial) return;
-        if (error.status === 401 && !tokenMode) showLogin('Sign in to Proxmox VE.');
-        else {
-            byId('cluster').hidden = false;
-            statusLine(tokenMode && [401, 403].includes(error.status)
-                ? 'Proxmox rejected the API token. Check it and its permissions in Connection.'
-                : 'Could not load nodes. ' + error.message);
+        if (error.status === 401 && !tokenMode) {
+            csrf = '';
+            openSettings('Sign in to see your Proxmox nodes.', true);
+        } else if (tokenMode && [401, 403].includes(error.status)) {
+            openSettings('Check your API token and its permissions in Proxmox.', false);
+        } else {
+            openSettings('Could not load nodes. ' + error.message, false, resources.length > 0);
         }
     }
 }
-byId('refresh').onclick = () => refresh(true);
 
 // WebView has no default JavaScript dialog UI. Confirm inline on the target row.
 function power(guest, label, action) {
@@ -292,9 +275,8 @@ function sendInput(data) {
 }
 async function startShell(item) {
     if (openingShell || consoleSession) return;
-    if (!csrf && tokenMode) {
-        pendingShell = item;
-        showLogin('Use a Proxmox account with console access.', true);
+    if (!csrf) {
+        openSettings('Sign in with a Proxmox account to open a shell.', true, resources.length > 0);
         return;
     }
     if (item.type === 'node' && native) {
@@ -350,8 +332,8 @@ async function startShell(item) {
         if (s !== consoleSession) return;
         if (error.status === 401) {
             endShell();
-            pendingShell = item;
-            showLogin('The console session expired. Sign in again.', true);
+            csrf = '';
+            openSettings('The console session expired. Sign in again in Proxmox.', true, resources.length > 0);
         } else statusLine('Could not open shell. ' + error.message);
     }
 }
@@ -386,10 +368,15 @@ function leaveShell() { endShell(); byId('cluster').hidden = false; statusLine('
 window.addEventListener('popstate', () => { if (consoleSession) leaveShell(); });
 byId('closeShell').onclick = () => { if (history.state?.shell) history.back(); else leaveShell(); };
 setInterval(() => {
-    if (!document.hidden && (tokenMode || csrf) && !pendingShell && !openingShell && !consoleSession &&
+    if (!accountOnly && !document.hidden && (tokenMode || csrf) && !openingShell && !consoleSession &&
         !confirming && tasks.size === 0) refresh();
 }, 15000);
 window.addEventListener('pagehide', endShell);
-byId('logout').textContent = tokenMode ? 'Sign out shell' : 'Sign out';
-setLogoutVisibility();
-if (tokenMode || csrf) refresh(); else showLogin('');
+if (accountOnly) {
+    if (!csrf) showLogin('');
+    else api('/access/permissions').then(showAccount).catch(() => showLogin('Sign in to renew your session.'));
+} else if (tokenMode || csrf) {
+    refresh();
+} else {
+    openSettings('Sign in or add an API token in the Proxmox app.', true);
+}

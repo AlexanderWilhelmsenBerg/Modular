@@ -314,7 +314,7 @@ fun OrganizationHomeScreen(
     val pagerGesturesEnabled = !editingSearch && searchQuery.isBlank() && sorter == null &&
         openFolderId == null && organizeApp == null && folderAction == null &&
         categoryMembers == null && editingFolderId == null && !setupSorter && !editingWidgetGrid &&
-        !moduleInteractionActive && vertical.progress == 0f
+        vertical.progress == 0f
     val pageKind = when {
         pageName == "home" -> "home"
         pageName.startsWith("module:") -> "module"

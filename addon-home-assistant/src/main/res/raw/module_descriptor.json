@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "moduleId": "io.github.alexanderwilhelmsenberg.modular.homeassistant",
-  "moduleVersion": "0.1.1",
+  "moduleVersion": "0.1.2",
   "displayName": "Home Assistant",
   "description": "A chosen dashboard on each Home screen.",
   "coreProtocol": {

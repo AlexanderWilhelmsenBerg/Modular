@@ -6,6 +6,9 @@ on:
       - 'addon-home-assistant/**'
       - 'addon-proxmox/**'
       - 'module-web-ui/**'
+      - 'app/src/**/ModuleWorkspacePage.kt'
+      - 'app/src/**/OrganizationHomeScreen.kt'
+      - 'app/src/**/FilesCrossApkHomeTest.kt'
       - 'app/src/**/DashboardPlacementTest.kt'
       - '.github/workflows/dashboard-pages.yml'
 
@@ -57,7 +60,25 @@ jobs:
             const expire = document.createElement('button');
             expire.textContent = 'Expire fixture session';
             expire.onclick = () => { localStorage.removeItem(session); location.replace('/auth/authorize/'); };
-            root.append(title, expire);
+            const rootTree = root.attachShadow({mode:'open'});
+            const main = document.createElement('home-assistant-main');
+            const mainTree = main.attachShadow({mode:'open'});
+            const drawer = document.createElement('ha-drawer');
+            const sidebar = document.createElement('ha-sidebar');
+            sidebar.textContent = 'Fixture sidebar';
+            const resolver = document.createElement('partial-panel-resolver');
+            const panel = document.createElement('ha-panel-lovelace');
+            const dashboard = document.createElement('hui-root');
+            const dashboardTree = dashboard.attachShadow({mode:'open'});
+            const header = document.createElement('div');
+            header.className = 'header';
+            header.textContent = 'Fixture navigation';
+            dashboardTree.append(header, title, expire);
+            panel.attachShadow({mode:'open'}).append(dashboard);
+            resolver.append(panel);
+            drawer.append(sidebar, resolver);
+            mainTree.append(drawer);
+            rootTree.append(main);
             document.body.append(root);
           }
           </script></body></html>
